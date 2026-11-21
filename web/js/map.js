@@ -7,6 +7,8 @@ import { feed } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { offlineActive, offlineStyle } from './offline.js';
 import { sdb, TYPES } from './stopsdb.js';
+import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
+import * as rough from './rough.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -61,9 +63,21 @@ async function fetchToCache(url) {                    // для завантаж
 }
 
 /* ---------- створення карти ---------- */
-let previewCoords = null;
+let previewCoords = null, previewR = null;
 const lineOf = coords => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } });
-let puck = null, puckEl = null, wps = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
+// Маршрут шматками за категорією доріг: М/Н — синій, Р/Т — бірюзовий, місцеві дороги й вулиці — фіолетовий.
+function routeData(coords, route) {
+  const rc = S.routeCats !== false && route ? routeCats(route) : null;
+  if (!rc) return lineOf(coords);
+  const f = [];
+  for (const s of rc.segs) {
+    const cs = coords.slice(s.i0, s.i1 + 1);
+    if (cs.length >= 2) f.push({ type: 'Feature', properties: { c: s.c }, geometry: { type: 'LineString', coordinates: cs.map(c => [c[1], c[0]]) } });
+  }
+  return f.length ? { type: 'FeatureCollection', features: f } : lineOf(coords);
+}
+export const ROUTE_COLORS = { a: '#2f6bff', b: '#0f9f9a', c: '#8b5cf6' };
+let puck = null, puckEl = null, wps = [], hzMarks = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
 const evMarks = new Map();
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
@@ -93,6 +107,10 @@ export function initMap() {
   puck = new maplibregl.Marker({ element: puckEl, rotationAlignment: 'map', pitchAlignment: 'map' });
   bus.on('pos', onPos);
   bus.on('route', drawRoute);
+  bus.on('hazards', drawHazards);
+  bus.on('rough', drawRough);
+  bus.on('settings', k => { if (k === 'roughMap') drawRough(); });
+  bus.on('settings', k => { if (k === 'routeCats') drawRoute(); if (k === 'truck') drawHazards(); });
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
@@ -117,8 +135,16 @@ function addLayers() {
   map.addSource('poi', { type: 'geojson', data: EMPTY });
   map.addSource('stops', { type: 'geojson', data: EMPTY });
   map.addSource('acc', { type: 'geojson', data: EMPTY });
+  map.addSource('route-bad', { type: 'geojson', data: EMPTY });
+  map.addSource('rough', { type: 'geojson', data: EMPTY });
+  // Лабораторія: якість покриття за власними замірами — маленькі кольорові крапки на дорозі
+  map.addLayer({ id: 'rough-dot', type: 'circle', source: 'rough', minzoom: 10.5, paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
+    'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } });
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
-  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2f6bff', 'line-width': w(3, 6, 12) } });
+  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) } });
+  // ґрунт і погане покриття на маршруті — червоний пунктир поверх
+  map.addLayer({ id: 'route-bad', type: 'line', source: 'route-bad', layout: { 'line-join': 'round' }, paint: { 'line-color': '#e5484d', 'line-width': w(3, 5, 9), 'line-dasharray': [1.2, 1.2] } });
   // пройдене — світло-сіро-блакитне поверх синього
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
   // похибка позиції — лише тонкий пунктирний контур, без заливки
@@ -144,7 +170,7 @@ function addLayers() {
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
-  doneD = -1; drawRoute(); drawPoi(); drawStops();
+  doneD = -1; drawRoute(); drawPoi(); drawStops(); drawRough();
 }
 
 /* ---------- день / ніч ---------- */
@@ -200,8 +226,9 @@ function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
   doneD = -1; setDone(EMPTY);
-  if (!g.route) { src.setData(previewCoords ? lineOf(previewCoords) : EMPTY); return; }
-  src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: g.route.coords.map(c => [c[1], c[0]]) } });
+  if (!g.route) { src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); return; }
+  src.setData(routeData(g.route.coords, g.route));
+  drawHazards();
   const tr = g.trip; if (!tr) return;
   const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
   add(tr.a, 'wp-a', 'A'); add(tr.v, 'wp-v', '•'); add(tr.b, 'wp-b', 'Б');
@@ -268,10 +295,11 @@ export function showRoute(coords) {
   map.fitBounds(b, { padding: { top: Math.round(h * 0.22), bottom: Math.round(h * 0.42), left: 40, right: 40 }, bearing: 0, pitch: 0, duration: 700, maxZoom: 15 });
 }
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
-export function previewRoute(coords) {
+export function previewRoute(coords, route = null) {
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
-  previewCoords = coords || null;
-  src.setData(coords ? lineOf(coords) : EMPTY);
+  previewCoords = coords || null; previewR = coords ? route : null;
+  src.setData(coords ? routeData(coords, route) : EMPTY);
+  drawHazards();
   doneD = -1; setDone(EMPTY);
   if (coords) showRoute(coords);
 }
@@ -285,6 +313,34 @@ export function setMapStyle(url) {
   try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
 export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
+
+function drawRough() {
+  const src = map && map.getSource && map.getSource('rough'); if (!src) return;
+  src.setData(S.roughMap ? rough.geojson() : EMPTY);
+}
+
+/* ---------- проблемні для фури місця на маршруті ---------- */
+const NO_ENTRY = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#e5484d"/><rect x="6" y="10.5" width="12" height="3" rx="1" fill="#fff"/></svg>';
+function drawHazards() {
+  for (const m of hzMarks) m.remove(); hzMarks = [];
+  const bad = map && map.getSource && map.getSource('route-bad'); if (!bad) return;
+  const route = g.route || previewR;
+  if (!route) { bad.setData(EMPTY); return; }
+  const list = hazardsAlong(route), idx = indexOf(route), f = [];
+  for (const x of list) {
+    if (x.kind === 'u' || x.kind === 's') {
+      const c = idx.slice(x.d0, Math.max(x.d1, x.d0 + 60));
+      if (c.length >= 2) f.push({ type: 'Feature', properties: { k: x.kind }, geometry: { type: 'LineString', coordinates: c } });
+      continue;
+    }
+    const tx = hazardText(x), el = document.createElement('div');
+    el.className = 'hzm ' + x.level;
+    if (x.kind === 'g' && x.value === 0) el.innerHTML = NO_ENTRY; else el.textContent = tx.tag;
+    el.title = tx.title;
+    hzMarks.push(new maplibregl.Marker({ element: el }).setLngLat([x.lon, x.lat]).addTo(map));
+  }
+  bad.setData({ type: 'FeatureCollection', features: f });
+}
 
 function drawPoi() {
   const src = map && map.getSource && map.getSource('poi'); if (!src) return;

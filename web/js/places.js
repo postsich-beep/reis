@@ -46,6 +46,21 @@ export function search(q, limit = 8) {
   return hits.slice(0, limit).map(h => toPlace(pl.rows[h[1]]));
 }
 
+// Найближчий помітний населений пункт: місто чи селище в межах 25 км, інакше будь-який у межах 8 км.
+export function nearest(lat, lon) {
+  if (!pl.ready) return '';
+  let best = null, bs = Infinity;
+  const kx = 111 * Math.cos(lat * Math.PI / 180);
+  for (const r of pl.rows) {
+    const dy = (r[0] - lat) * 111; if (dy > 25 || dy < -25) continue;
+    const dx = (r[1] - lon) * kx; if (dx > 25 || dx < -25) continue;
+    const d = Math.hypot(dx, dy); if (d > (r[2] === 'v' ? 8 : 25)) continue;
+    const sc = d / (r[2] === 'c' ? 3 : r[2] === 't' ? 1.6 : 1);
+    if (sc < bs) { bs = sc; best = r; }
+  }
+  return best ? best[3] : '';
+}
+
 /* недавні місця: показуються, щойно поле отримує фокус */
 export function recent() { try { return JSON.parse(localStorage.getItem('reis.recent') || '[]'); } catch (_) { return []; } }
 export function remember(p) {

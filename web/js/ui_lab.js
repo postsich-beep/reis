@@ -10,6 +10,7 @@ import { off, offlineActive, refreshStatus } from './offline.js';
 import { sdb, TYPES } from './stopsdb.js';
 import { drawStops } from './map.js';
 import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } from './sim.js';
+import * as rough from './rough.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason } from './ui.js';
@@ -30,6 +31,14 @@ function simHtml() {
     <div class="btns"><button class="btn sm${sim.lost ? ' danger' : ''}" data-sim="lost" ${sim.on ? '' : 'disabled'}>${sim.lost ? t('simLostOff') : t('simLost')}</button>
       <button class="btn sm${sim.spoof ? ' danger' : ''}" data-sim="spoof" ${sim.on ? '' : 'disabled'}>${sim.spoof ? t('simSpoofOff') : t('simSpoof')}</button></div></div>`;
 }
+function roughHtml() {
+  const s = rough.stats();
+  const body = !s.cells ? t('roughEmpty') : s.calib < 100 ? t('roughCalib', s.km, s.calib) : t('roughStats', s.km, s.g, s.y, s.r);
+  return `<div class="card" style="margin-top:8px"><div>${body}</div>
+    <div class="legend" style="margin-top:8px"><button disabled><span class="sdot" style="background:#2f9e62"></span>${t('roughG')}</button><button disabled><span class="sdot" style="background:#f6bd16"></span>${t('roughY')}</button><button disabled><span class="sdot" style="background:#e5484d"></span>${t('roughR')}</button></div>
+    ${s.cells ? `<div class="btns"><button class="btn sm" data-act="roughClear">${b_sure ? t('roughClearSure') : t('roughClear')}</button></div>` : ''}</div>`;
+}
+let b_sure = false;
 function labHtml() {
   let h = '';
   for (const [k, v] of TG) {
@@ -37,6 +46,7 @@ function labHtml() {
     h += toggleRow(k, t('tg_' + k), t('tgd_' + k, k === 'stops' ? S.stopKm : k === 'lookahead' ? S.aheadH : ''), S[k]);
   }
   h = h.replace(/^<\/div>/, '') + '</div>';
+  h += `<div class="sec">${t('labRough')}</div><div class="muted" style="margin:0 2px 8px">${t('labRoughHint')}</div><div class="list">${toggleRow('rough', t('tg_rough'), t('tgd_rough'), S.rough)}${toggleRow('roughMap', t('tg_roughMap'), t('tgd_roughMap'), S.roughMap)}</div><div id="roughBox">${roughHtml()}</div>`;
   h += `<div class="sec">${t('labTest')}</div><div id="simBox">${simHtml()}</div>`;
   h += `<div class="sec">${t('labSoon')}</div><div class="list">${SOON.map(k => toggleRow(k, t('soon_' + k), t('soond_' + k), false, t('soon'))).join('')}</div>`;
   h += `<div class="sec">${t('labMore')}</div><div class="btns"><button class="btn" data-go="settings">${t('settings')}</button><button class="btn" data-go="channels">${t('channels')}</button></div>
@@ -58,13 +68,14 @@ definePanel('lab', {
       }
       if (!b) return;
       if (b.dataset.go) openPanel(b.dataset.go);
+      else if (b.dataset.act === 'roughClear') { if (b_sure) { rough.clear(); b_sure = false; toast(t('done'), 'green', 2500); } else b_sure = true; const rb = $('roughBox'); if (rb) rb.innerHTML = roughHtml(); }
       else if (b.dataset.sim === 'toggle') { if (sim.on) simStop(); else if (!simStart()) toast(t('simNeedTrip'), 'yellow'); }
       else if (b.dataset.sim === 'lost') setLost(!sim.lost);
       else if (b.dataset.sim === 'spoof') setSpoof(!sim.spoof);
     };
     body.onchange = e => { if (e.target.id === 'simSpd') setSpeed(+e.target.value); };
   },
-  update() { const b = $('simBox'); if (b) b.innerHTML = simHtml(); }
+  update() { const b = $('simBox'); if (b) b.innerHTML = simHtml(); const rb = $('roughBox'); if (rb) rb.innerHTML = roughHtml(); }
 });
 
 /* =====================  НАЛАШТУВАННЯ  ===================== */
@@ -125,7 +136,7 @@ function settingsHtml() {
   <div class="muted" style="margin:-4px 2px 10px">${t('glassHint')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setMapStyle')}</div>
   ${offlineActive() ? `<div class="muted" style="margin:0 2px 10px">${t('styleOffNote')}</div>` : seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
-  <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}</div>
+  <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}${tog('routeCats')}</div>
 
   <div class="sec">${t('secPoints')}</div>
   <div id="ptsSec">${pointsHtml()}</div>
@@ -149,6 +160,7 @@ function settingsHtml() {
     ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5')}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
   <div class="muted" style="margin-top:6px">${t('setTruckHint')}</div>
+  <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
 
   <div class="sec">${t('setAhead')}</div><div class="form">
     ${num('s_aheadH', t('setAheadH'), S.aheadH, '0.5')}${num('s_stopKm', t('setStopKm'), S.stopKm, '5')}</div>
@@ -364,6 +376,7 @@ export function initLab() {
   bus.on('offline', () => { const el = $('offSec'); if (el) el.innerHTML = offlineHtml(); });
   bus.on('settings', k => { if (k === 'lang' && offlineActive()) applyMapSource(); });
   bus.on('sim', () => refresh('lab'));
+  bus.on('rough', () => refresh('lab'));
   bus.on('pos', () => refresh('gps'));
   bus.on('log', () => refresh('diag'));
   bus.on('native:update', d => {

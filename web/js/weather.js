@@ -1,6 +1,7 @@
 // Погода на маршруті на той час, коли фура туди доїде (Open-Meteo, без ключа):
 // ожеледиця, сніг, туман, сильний вітер, гроза. Події йдуть у стрічку й на карту.
-import { bus, log, S, fmtDur, clamp } from './core.js';
+import { bus, log, S, fmtDur, clamp, RouteIndex } from './core.js';
+import * as places from './places.js';
 import { getJson, online } from './platform.js';
 import { pos } from './nav.js';
 import { g } from './guide.js';
@@ -9,6 +10,36 @@ import { townName } from './route.js';
 import { t } from './i18n.js';
 
 export const wx = { at: 0, err: '', points: 0 };
+
+// Спека: понад +28 °C фурам з фактичною масою понад 24 т або навантаженням на вісь понад 7 т
+// рух дорогами державного значення вдень обмежено (сезонне обмеження Агентства відновлення; у Києві — на всіх в'їздах).
+// Не діє для швидкопсувних і небезпечних вантажів, живих тварин, військових перевезень і ліквідації НС.
+export const HEAT_T = 28;
+export const heatApplies = () => { const tr = S.truck || {}; return ((tr.weight || 40) > 24 || (tr.axle || 11.5) > 7) && !S.heatExempt; };
+
+// Прогноз температури вздовж усього маршруту на час проїзду (для планування рейсу до «Поїхали»).
+export async function heatAlong(route, startMs = Date.now()) {
+  if (!S.weather || !online() || !route || !route.coords) return null;
+  const idx = new RouteIndex(route.coords), spd = route.time > 0 ? route.dist / route.time : 18;
+  const n = clamp(Math.ceil(idx.total / 40000), 1, 16), pts = [];
+  for (let i = 0; i <= n; i++) { const d = idx.total * i / n, p = idx.at(d); pts.push({ lat: +p.lat.toFixed(3), lon: +p.lon.toFixed(3), d, eta: d / spd }); }
+  const url = 'https://api.open-meteo.com/v1/forecast?latitude=' + pts.map(p => p.lat).join(',') + '&longitude=' + pts.map(p => p.lon).join(',') +
+    '&hourly=temperature_2m&forecast_days=3&timeformat=unixtime&timezone=GMT';
+  try {
+    let j = await getJson(url, { timeout: 20000 });
+    if (!Array.isArray(j)) j = [j];
+    let first = null, maxT = -99;
+    pts.forEach((p, i) => {
+      const hr = j[i] && j[i].hourly; if (!hr || !hr.time || !hr.temperature_2m) return;
+      const when = startMs / 1000 + p.eta;
+      let k = 0; for (let m = 0; m < hr.time.length; m++) if (Math.abs(hr.time[m] - when) < Math.abs(hr.time[k] - when)) k = m;
+      const tmp = hr.temperature_2m[k]; if (tmp == null) return;
+      if (tmp > maxT) maxT = tmp;
+      if (tmp > HEAT_T && !first) first = { d: p.d, when: when * 1000, temp: tmp, town: places.nearest(p.lat, p.lon) };
+    });
+    return { maxT, first, at: Date.now() };
+  } catch (e) { log('warn', 'спека на маршруті: ' + e.message); return null; }
+}
 let busy = false, lastRouteKey = '';
 
 // Що загрожує фурі за прогнозом на годину: [рівень, код умови, текст] або null.
@@ -58,6 +89,15 @@ export async function checkWeather(force) {
       const hr = j[i] && j[i].hourly; if (!hr || !hr.time) return;
       const when = Date.now() / 1000 + p.eta;
       let k = 0; for (let n = 0; n < hr.time.length; n++) if (Math.abs(hr.time[n] - when) < Math.abs(hr.time[k] - when)) k = n;
+      const tmpK = hr.temperature_2m[k];
+      if (tmpK != null && tmpK > HEAT_T && heatApplies() && !seen.has('heat')) {     // спекотне обмеження для важких фур
+        seen.add('heat');
+        const town = nearestTown(p) || places.nearest(p.lat, p.lon);
+        bus.emit('feedPush', {
+          src: 'wx', level: 'yellow', text: t('wxEvent', p.eta < 1800 ? t('wxNow') : t('wxIn', fmtDur(p.eta)), town ? t('wxNear', town) : '', t('wxHeat'), Math.round(tmpK)),
+          lat: p.lat, lon: p.lon, locName: town, locKind: 'wx', key: 'wx:heat:' + p.lat.toFixed(1) + ':' + p.lon.toFixed(1) + ':' + Math.floor(when / 10800), quiet: true
+        });
+      }
       const res = judge({ code: hr.weather_code[k], temp: hr.temperature_2m[k], snow: hr.snowfall[k], prec: hr.precipitation[k], gust: hr.wind_gusts_10m[k], vis: hr.visibility ? hr.visibility[k] : null });
       if (!res) return;
       const [level, cond, what] = res;

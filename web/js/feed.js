@@ -201,6 +201,7 @@ export const DEFAULT_CHANNELS = [
   { name: 'dsns_telegram', region: 'all', on: true },                // ДСНС України
   { name: 'UA_National_Police', region: 'all', on: true },           // Національна поліція
   { name: 'truexanewsua', region: 'all', on: true },                 // Труха Україна: швидкі новини
+  { name: 'Agency_for_restoration', region: 'all', on: true },       // Агентство відновлення: ремонти, мости, обмеження для фур (спека)
   { name: 'kyivoda', region: 'kyiv', on: true },
   { name: 'synegubov', region: 'kharkiv', on: true },
   { name: 'dnipropetrovskaODA', region: 'dnipro', on: true },
@@ -218,7 +219,7 @@ export const DEFAULT_CHANNELS = [
   { name: 'zakarpatskaODA', region: 'zakarpattia', on: true },
   { name: 'chernivetskaODA', region: 'chernivtsi', on: true }
 ];
-const CH_DEF_VER = 2;                  // збільшується, коли список поповнюється: нові канали додаються й тим, у кого вже є список
+const CH_DEF_VER = 3;                  // збільшується, коли список поповнюється: нові канали додаються й тим, у кого вже є список
 export function addDefaultChannels() {
   const have = new Set((S.channels || []).map(c => c.name.toLowerCase()));
   const add = DEFAULT_CHANNELS.filter(c => !have.has(c.name.toLowerCase())).map(c => ({ ...c }));
@@ -226,8 +227,17 @@ export function addDefaultChannels() {
   return add.length;
 }
 // Чи стосується повідомлення загальноукраїнського каналу нашого шляху: згадано область попереду або місто на маршруті.
+// Номери трас на маршруті («М-03», «Н-31») у вигляді, стійкому до написання: «м03», «н31».
+const refKey = x => x.toLowerCase().replace(/[\s-]/g, '').replace(/m/g, 'м').replace(/h/g, 'н').replace(/p/g, 'р').replace(/t/g, 'т').replace(/e/g, 'е');
+function routeRefs() {
+  const out = new Set();
+  for (const m of (g.route && g.route.mans) || []) for (const n of m.streets || []) if (/^[МMНHРPТTЕE]\s?-?\s?\d/.test(n)) out.add(refKey(n));
+  return out;
+}
 function mentionsRoute(text) {
   const s = text.toLowerCase();
+  const refs = routeRefs();
+  if (refs.size) for (const m of s.matchAll(/(?:^|[^а-яa-z])([мmнhрpтtеe])\s?-?\s?(\d{1,4})(?!\d)/g)) if (refs.has(refKey(m[1] + m[2]))) return true;
   const ids = regionsAhead().map(r => r.id);
   if (ids.some(id => { const o = OBLASTS.find(x => x.id === id); return o && o.re.test(s); })) return true;
   return feed.towns.some(x => { const n = townName(x); return n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))); });

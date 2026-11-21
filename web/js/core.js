@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 12, name: '1.0.10' };
+export const VERSION = { web: 16, name: '1.0.11' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -36,7 +36,7 @@ const DEFAULTS = {
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 40, axle: 11.5, hazmat: false },
-  stopKm: 30, aheadH: 3, ttsRate: 1, glass: 'high',
+  stopKm: 30, aheadH: 3, ttsRate: 1, glass: 'high', routeCats: true, heatExempt: false, rough: true, roughMap: true,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',

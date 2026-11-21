@@ -8,7 +8,10 @@ import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegra
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
-import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme } from './map.js';
+import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS } from './map.js';
+import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
+import { heatAlong, heatApplies } from './weather.js';
+import * as rough from './rough.js';
 import { offlineActive } from './offline.js';
 import { sdb, TYPES, F } from './stopsdb.js';
 import * as places from './places.js';
@@ -175,6 +178,48 @@ async function loadRegions(trip) {
   plan.regBusy = false; refresh('trip');
 }
 
+/* ---------- «Для фури на маршруті»: категорії доріг, Київ у години пік, спека, проблемні місця ---------- */
+const NO_ENTRY_ICO = '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#e5484d"/><rect x="6" y="10.5" width="12" height="3" rx="1" fill="#fff"/></svg>';
+const SUN_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="4"/><path d="M12 2.5v2.5M12 19v2.5M2.5 12H5M19 12h2.5M5.2 5.2l1.8 1.8M17 17l1.8 1.8M5.2 18.8 7 17M17 7l1.8-1.8"/></svg>';
+const heatBusy = new WeakSet();
+function ensureRouteInfo(route) {
+  if (!route) return;
+  loadHazards();
+  const fresh = route.heat && Date.now() - (route.heat.at || 0) < 3600e3;   // прогноз на маршрут — не старший за годину
+  if (!fresh && !heatBusy.has(route) && S.weather && P.online()) {
+    heatBusy.add(route);
+    heatAlong(route).then(h => { heatBusy.delete(route); if (h) route.heat = h; else route.heat = { maxT: null, first: null, at: Date.now() }; refresh('trip'); });
+  }
+}
+function truckHtml(route, fromD, etaAt) {
+  if (!route) return '';
+  ensureRouteInfo(route);
+  const items = [];
+  const ky = kyivOnRoute(route, fromD, etaAt);
+  if (ky && !ky.inside) items.push({ level: ky.rush ? 'red' : 'green', ico: 'К', title: t(ky.rush ? 'kyivRush' : 'kyivOk', fmtClock(ky.when)), sub: t('kyivRule'), d: ky.d });
+  const h = route.heat && route.heat.first;
+  if (h && h.d + 1 >= fromD) {
+    if (heatApplies()) items.push({ level: 'yellow', ico: SUN_ICO, title: t('heatTitle', Math.round(route.heat.maxT), fmtClock(new Date(h.when))) + (h.town ? ' · ' + h.town : ''), sub: t('heatRule'), d: h.d });
+    else items.push({ level: 'green', ico: SUN_ICO, title: t('heatExemptOk', Math.round(route.heat.maxT)), sub: '', d: h.d });
+  }
+  const rb = S.rough ? rough.badAlong(indexOfRoute(route)) : null;
+  if (rb && rb.d + rb.m >= fromD) items.push({ level: 'yellow', ico: '≈', title: t('roughOnRoute', (rb.m / 1000).toFixed(1).replace('.', ',')), sub: t('roughOnRouteSub'), d: Math.max(rb.d, fromD) });
+  for (const x of hazardsAlong(route)) {
+    if (x.d1 < fromD) continue;
+    const tx = hazardText(x);
+    items.push({ level: x.level, ico: x.kind === 'g' && x.value === 0 ? NO_ENTRY_ICO : esc(tx.tag || '≈'), title: tx.title, sub: [x.name, tx.sub].filter(Boolean).join(' · '), d: Math.max(x.d0, fromD) });
+  }
+  items.sort((a, b) => a.d - b.d);
+  const rc = S.routeCats !== false ? routeCats(route) : null;
+  const bar = rc && rc.share ? `<div class="card"><div class="roadbar">${['a', 'b', 'c'].map(k => `<i style="width:${(rc.share[k] * 100).toFixed(1)}%;background:${ROUTE_COLORS[k]}"></i>`).join('')}</div>
+    <div class="muted">${['a', 'b', 'c'].filter(k => rc.share[k] >= 0.005).map(k => `<span style="white-space:nowrap;margin-right:10px"><span class="rdot" style="background:${ROUTE_COLORS[k]}"></span>${t('cat_' + k)} ${Math.round(rc.share[k] * 100)}%</span>`).join('')}</div></div>` : '';
+  const list = items.length
+    ? `<div class="list" style="margin-top:8px">${items.map(x => `<div class="item hz-item ${x.level}"><div class="hz-ico ${x.level}">${x.ico}</div><div class="grow"><div class="t">${esc(x.title)}</div>${x.sub ? `<div class="muted">${esc(x.sub)}</div>` : ''}</div><b style="font:800 18px var(--f-num);white-space:nowrap">${fmtDist(Math.max(0, x.d - fromD))}</b></div>`).join('')}</div>`
+    : `<div class="muted" style="margin-top:8px">${hz.ready ? t('hzNone') : t('hzNoData')}</div>`;
+  const src = hz.ready ? `<div class="muted" style="margin-top:6px">${t('hzSrc', hz.date ? hz.date.slice(6, 8) + '.' + hz.date.slice(4, 6) + '.' + hz.date.slice(0, 4) : '')}</div>` : '';
+  return `<div class="sec">${t('truckSec')}</div>${bar}${list}${src}`;
+}
+
 function tripActiveHtml() {
   const tr = g.trip;
   const st = stopsAhead(3).slice(0, 3).map(s => { const l = stopLabel(s); return `<div class="item"><div class="grow"><div class="t">${esc(l.title)}</div><div class="muted">${esc(l.sub)}</div></div><b style="font:800 20px var(--f-num)">${fmtDist(Math.max(0, s.d - (pos.rd || 0)))}</b></div>`; }).join('');
@@ -185,7 +230,8 @@ function tripActiveHtml() {
   <div class="btns"><button class="btn" data-act="reroute">${t('reroute')}</button><button class="btn" data-act="offline">${t('offlineMap')}</button></div>
   <div class="btns"><button class="btn danger wide" data-act="stop">${t('endTrip')}</button></div>
   ${poi.drive > 300 ? `<div class="sec">${t('driveSec')}</div><div class="card">${t('driveNow', fmtDur(poi.drive))}</div>` : ''}
-  <div class="sec">${t('stopsSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>`;
+  <div class="sec">${t('stopsSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>
+  ${truckHtml(g.route, pos.rd || 0, d => Date.now() + Math.max(0, d - (pos.rd || 0)) / Math.max(1, g.remain) * g.remTime * 1000)}`;
 }
 function savedHtml() {
   const list = getTrips().filter(x => !g.trip || x.id !== g.trip.id);
@@ -214,7 +260,8 @@ function planSumHtml() {
       <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
     : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
   return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
-    <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>`;
+    <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
+    ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
 }
 function showSugg(k, list, head) {
   const box = $('sg_' + k); if (!box) return;
@@ -252,7 +299,7 @@ async function doBuild() {
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
     trip.route = await buildRoute(trip);
-    plan.trip = trip; previewRoute(trip.route.coords);
+    plan.trip = trip; previewRoute(trip.route.coords, trip.route);
     loadRegions(trip);
   } catch (e) {
     plan.err = (e.code ? t('routeFail') : t('netErr')) + ' ' + (e.message || '');
@@ -281,13 +328,13 @@ function tripClicks(e) {
   else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
     const tr = plan.trip, alt = tr.route.alt;
     alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
-    previewRoute(alt.coords); refresh('trip'); loadRegions(tr);
+    previewRoute(alt.coords, alt); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) { saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); openPanel('trip'); }
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') { const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); } stopTrip(); previewRoute(null); setRouteContext([], []); openPanel('trip'); }
-  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords); openPanel('trip'); loadRegions(tr); } }
+  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
     if (pos.lat == null) { toast(t('gpsWait')); return; }
@@ -295,7 +342,7 @@ function tripClicks(e) {
     reverse(pos.lat, pos.lon).then(r => { if (r && plan.a && plan.a.label === t('myPlace')) { plan.a.label = [r.name || r.city, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan.a.label; const i = $('in_a'); if (i) i.value = plan.a.label; } }).catch(() => {});
   }
   else if (d.clear) { plan[d.clear] = null; const i = $('in_' + d.clear); if (i) { i.value = ''; i.focus(); } showSugg(d.clear, []); }
-  else if (d.sg) { const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); places.remember(s); } }
+  else if (d.sg) { clearTimeout(geoTimer); const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); places.remember(s); } }
 }
 function tripInput(e) {
   const k = e.target.dataset && e.target.dataset.f; if (!k) return;
@@ -306,7 +353,7 @@ function tripInput(e) {
   if (places.pl.ready) showSugg(k, places.search(q, 8));
   geoTimer = setTimeout(async () => {
     const r = await findPlaces(q);
-    if ($('in_' + k) && $('in_' + k).value.trim() === q) showSugg(k, r);
+    if ($('in_' + k) && $('in_' + k).value.trim() === q && !plan[k]) showSugg(k, r);   // місце вже вибрано — список не відкриваємо знову
   }, places.pl.ready ? 500 : 300);
 }
 function tripFocus(e) {
@@ -473,6 +520,7 @@ export function initUI() {
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
   bus.on('chat', () => { refresh('chat'); micState(); });
   bus.on('trips', () => refresh('trip'));
+  bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });

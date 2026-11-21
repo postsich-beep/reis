@@ -110,7 +110,7 @@ export function parseTrip(trip) {
       mans.push({
         type: m.type, ins: m.instruction || '', alert: m.verbal_transition_alert_instruction || '',
         pre: m.verbal_pre_transition_instruction || m.instruction || '', post: m.verbal_post_transition_instruction || '',
-        street: (m.street_names || [])[0] || '', len: (m.length || 0) * 1000, time: m.time || 0,
+        street: (m.street_names || [])[0] || '', streets: m.street_names || [], len: (m.length || 0) * 1000, time: m.time || 0,
         i0: base + m.begin_shape_index, i1: base + m.end_shape_index, exits: m.roundabout_exit_count || 0
       });
     }
