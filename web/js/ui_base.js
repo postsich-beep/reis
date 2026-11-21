@@ -39,6 +39,7 @@ export const ICON = {
   here: I('<circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8"/>'),
   send: I('<path d="M4 12 20 4l-5 16-3.5-6.5Z"/>'),
   trash: I('<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>'),
+  shower: I('<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.5 8h7"/><path d="M12 12v.01M15 12v.01M18 12v.01M12.5 15v.01M15.5 15v.01M18.5 15v.01M13 18v.01M16 18v.01M19 18v.01"/>'),
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
   cam: I('<rect x="3" y="8" width="13" height="9" rx="2"/><path d="m16 11 5-3v9l-5-3"/>')
 };

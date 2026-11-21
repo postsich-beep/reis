@@ -6,7 +6,8 @@ import { poi } from './poi.js';
 import { feed } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { offlineActive, offlineStyle } from './offline.js';
-import { sdb, TYPES } from './stopsdb.js';
+import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
+import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
 import * as rough from './rough.js';
 
@@ -109,6 +110,8 @@ export function initMap() {
   bus.on('route', drawRoute);
   bus.on('hazards', drawHazards);
   bus.on('rough', drawRough);
+  bus.on('marks', drawMarks);
+  bus.on('settings', k => { if (k === 'mapStopTypes') drawMarks(); });
   bus.on('settings', k => { if (k === 'roughMap') drawRough(); });
   bus.on('settings', k => { if (k === 'routeCats') drawRoute(); if (k === 'truck') drawHazards(); });
   bus.on('guide', drawProgress);
@@ -137,6 +140,7 @@ function addLayers() {
   map.addSource('acc', { type: 'geojson', data: EMPTY });
   map.addSource('route-bad', { type: 'geojson', data: EMPTY });
   map.addSource('rough', { type: 'geojson', data: EMPTY });
+  map.addSource('marks', { type: 'geojson', data: EMPTY });
   // Лабораторія: якість покриття за власними замірами — маленькі кольорові крапки на дорозі
   map.addLayer({ id: 'rough-dot', type: 'circle', source: 'rough', minzoom: 10.5, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
@@ -150,11 +154,13 @@ function addLayers() {
   // похибка позиції — лише тонкий пунктирний контур, без заливки
   map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
   // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
-  const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, '#1f2937'];
+  const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, 'h', TYPES.h.color, '#1f2937'];
+  // точка з душем — товстий бірюзовий обідок, щоб душ було видно серед АЗС і стоянок
   const stopPaint = r => ({
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, r, 9, r + 1.8, 13, r + 4.5, 16, r + 7],
-    'circle-color': color, 'circle-stroke-color': ['match', ['get', 't'], 'c', '#e5484d', '#ffffff'],
-    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 12, 2]
+    'circle-color': color,
+    'circle-stroke-color': ['case', ['==', ['get', 'sh'], 1], SHOWER_COLOR, ['match', ['get', 't'], 'c', '#e5484d', '#ffffff']],
+    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, ['case', ['==', ['get', 'sh'], 1], 1.6, 0.8], 12, ['case', ['==', ['get', 'sh'], 1], 3.5, 2]]
   });
   map.addLayer({ id: 'stops-major', type: 'circle', source: 'stops', minzoom: 5, maxzoom: 9.5, filter: ['>=', ['get', 'r'], 2], paint: stopPaint(2.2) });
   map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, paint: stopPaint(2.6) });
@@ -165,12 +171,17 @@ function addLayers() {
       'circle-color': '#1f2937', 'circle-stroke-color': '#e5484d', 'circle-stroke-width': 2.5
     }
   });
+  // власні позначки водія «тут є душ»
+  map.addLayer({ id: 'marks-dot', type: 'circle', source: 'marks', minzoom: 5, paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 12], 'circle-color': SHOWER_COLOR,
+    'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
+  map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f) bus.emit('markTap', f.properties.id); });
   for (const id of ['stops-major', 'stops-all']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
-  doneD = -1; drawRoute(); drawPoi(); drawStops(); drawRough();
+  doneD = -1; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks();
 }
 
 /* ---------- день / ніч ---------- */
@@ -314,6 +325,11 @@ export function setMapStyle(url) {
 }
 export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
 
+function drawMarks() {
+  const src = map && map.getSource && map.getSource('marks'); if (!src) return;
+  const on = (S.mapStopTypes || {}).shower !== false;
+  src.setData({ type: 'FeatureCollection', features: on ? showers.myShowers().map(m => ({ type: 'Feature', properties: { id: m.id }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })) : [] });
+}
 function drawRough() {
   const src = map && map.getSource && map.getSource('rough'); if (!src) return;
   src.setData(S.roughMap ? rough.geojson() : EMPTY);
@@ -354,8 +370,9 @@ export function drawStops() {
   const src = map && map.getSource && map.getSource('stops'); if (!src) return;
   if (!sdb.ready || !S.mapStops) { src.setData(EMPTY); drawPoi(); return; }
   const on = S.mapStopTypes || {};
-  const want = t => t === 'c' ? S.cams && on.cam !== false : t === 'e' ? on.food !== false : t === 'f' ? on.fuel !== false : t === 'm' ? on.motel !== false : on.park !== false;
-  src.setData({ type: 'FeatureCollection', features: sdb.geo.features.filter(f => want(f.properties.t)) });
+  const want = t => t === 'c' ? S.cams && on.cam !== false : t === 'e' ? on.food !== false : t === 'f' ? on.fuel !== false : t === 'm' ? on.motel !== false : t === 'h' ? on.shower !== false : on.park !== false;
+  // точки з душем показуємо, навіть якщо їхній тип вимкнено, — коли ввімкнено «Душ»
+  src.setData({ type: 'FeatureCollection', features: sdb.geo.features.filter(f => want(f.properties.t) || (f.properties.sh && on.shower !== false)) });
   drawPoi();
 }
 

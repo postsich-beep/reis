@@ -65,7 +65,8 @@ const STOPS_JSON = { v: 1, date: '20261121', rows: [
   [stopPt[0], stopPt[1], 'f', 1 | 2 | 8 | 16 | 32, 'OKKO', 0],
   [coords[turnIdx[3] + 60][0], coords[turnIdx[3] + 60][1], 'f', 0, 'АЗС', 0],
   [coords[turnIdx[3] + 300][0], coords[turnIdx[3] + 300][1], 'e', 4, 'Кафе Дорога', 0],
-  [coords[turnIdx[3] + 200][0] + 0.05, coords[turnIdx[3] + 200][1], 'p', 1, 'Стоянка для фур', 0]
+  [coords[turnIdx[3] + 200][0] + 0.05, coords[turnIdx[3] + 200][1], 'p', 1, 'Стоянка для фур', 0],
+  [coords[turnIdx[3] + 330][0], coords[turnIdx[3] + 330][1], 'h', 2, 'Душ для водіїв', 0]
 ] };
 const PLACES_JSON = { v: 1, date: '20261121', rows: [
   [49.993, 36.230, 'c', 'Харків', 'Харьков', 'kharkiv', 1421125], [49.839, 24.029, 'c', 'Львів', 'Львов', 'lviv', 717273],
@@ -194,11 +195,21 @@ try {
   const jr = await app(page, () => { const n = window.__nativeCalls.find(x => /^saveFile:reis-gps-\d{8}-\d{4}\.json$/.test(x)); let j = null; try { j = JSON.parse(window.__savedText); } catch (_) {} return { n, cnt: j ? j.entries.length : 0, rej: j ? j.entries.filter(e => /^rej:/.test(e.v)).map(e => e.v) : [] }; });
   ok('журнал GPS зберігається файлом і показує, що відкинуто й чому', !!jr.n && jr.cnt >= 4 && jr.rej.includes('rej:bounds'), JSON.stringify(jr));
   await page.click('#panelClose');
-  ok('база піт-стопів завантажена й намальована на карті', await page.waitForFunction(() => { const s = window.__app.stopsdb.sdb; const m = window.__app.map.map; return s.ready && s.count === 5 && m.getLayer('stops-all') && m.getLayer('stops-major'); }, null, { timeout: 8000 }).then(() => true, () => false));
+  ok('база піт-стопів завантажена й намальована на карті', await page.waitForFunction(() => { const s = window.__app.stopsdb.sdb; const m = window.__app.map.map; return s.ready && s.count === 6 && m.getLayer('stops-all') && m.getLayer('stops-major'); }, null, { timeout: 8000 }).then(() => true, () => false), await app(page, () => JSON.stringify({ c: window.__app.stopsdb.sdb.count, r: window.__app.stopsdb.sdb.ready, l: !!window.__app.map.map.getLayer('stops-all') })));
   await app(page, () => window.__app.bus.emit('stopTap', { i: 1 }));
   const card = await page.textContent('#pick');
   ok('торкання точки: картка з назвою й зручностями', /OKKO/.test(card) && /душ/.test(card) && /для фур/.test(card), card.slice(0, 120));
   await page.click('#pick [data-k="x"]');
+  // душ: позначка водія на АЗС без душу в базі
+  await app(page, () => window.__app.bus.emit('stopTap', { i: 2 }));
+  ok('картка АЗС: кнопка «Тут є душ»', /Тут є душ/.test(await page.textContent('#pick')));
+  await page.click('#pick [data-k="shower"]'); await sleep(200);
+  const shm = await app(page, async () => { const d = await window.__app.map.map.getSource('marks').getData(); return { n: window.__app.showers.myShowers().length, f: d.features.length, all: window.__app.showers.allShowers().length }; });
+  ok('позначка душу збережена й намальована на карті; усього душів: OKKO, окремий душ і позначка', shm.n === 1 && shm.f === 1 && shm.all === 3, JSON.stringify(shm));
+  await page.click('#tabs button[data-panel="trip"]');
+  ok('«Рейс» без маршруту: найближчий душ', /Найближчий душ/.test(await page.textContent('#panelBody')) && /ваша позначка/.test(await page.textContent('#panelBody')));
+  await shot(page, '01b-shower');
+  await page.click('#panelClose');
   await shot(page, '01-start');
 
   // пошук: «Львов» — це Львів, а не село під Бєлгородом
@@ -227,6 +238,7 @@ try {
   const tk = await page.textContent('#panelBody');
   ok('план: частка доріг за категоріями (М-03 ≈ 75%)', /траси М і Н 7[45]%/.test(tk) && /місцеві й вулиці 2[56]%/.test(tk), (tk.match(/траси М і Н \d+%|місцеві й вулиці \d+%/g) || []).join(' '));
   ok('план: міст 20 т на маршруті — червоним, з вагою фури', /Міст до 20 т/.test(tk) && /ваша фура 40 т/.test(tk) && await page.$$eval('.hz-item.red', e => e.some(x => /Міст до 20 т/.test(x.textContent))));
+  ok('план: душ попереду — OKKO і окремий душ, з відстанню', /Душ попереду/.test(tk) && /OKKO/.test(tk) && /Душ для водіїв/.test(tk), (tk.match(/Душ попереду.{0,120}/) || [''])[0]);
   ok('план: ґрунт ≈ 1,2 км', /Ґрунт або щебінь — 1,[12] км/.test(tk), (tk.match(/Ґрунт[^·]*?км/) || [''])[0]);
   ok('проїзд на вулиці навхрест і міст 55 т не вважаються проблемою', !/3,8 м/.test(tk) && !/55 т/.test(tk));
   const rmap = await app(page, async () => { const m = window.__app.map.map; const d = await m.getSource('route').getData(); const bad = await m.getSource('route-bad').getData();
@@ -262,7 +274,7 @@ try {
   await sleep(300);
   const fs = await app(page, () => window.__app.feed.feed.items.map(i => ({ src: i.src, level: i.level, filtered: i.filtered, text: i.text.slice(0, 40) })));
   const by = k => fs.find(i => i.text.includes(k)) || {};
-  ok('перекриття через ДТП — червоне', by('Перекрито рух').level === 'red' && !by('Перекрито рух').filtered, JSON.stringify(by('Перекрито рух')));
+  ok('перекриття через ДТП — червоне', by('Перекрито рух').level === 'red' && !by('Перекрито рух').filtered, JSON.stringify(by('Перекрито рух')) + ' ' + (by('Перекрито рух').level ? '' : JSON.stringify(await app(page, () => ({ ch: window.__app.S.channels.map(c => c.name), tg: window.__app.S.tg, n: window.__app.feed.feed.items.length, log: window.__app.core.getLog ? window.__app.core.getLog().filter(l => l.level !== 'info').slice(-6).map(l => l.msg) : [] })))));
   ok('зупинка заводу — відсіяно', by('На заводі').filtered === true, JSON.stringify(by('На заводі')));
   ok('дорогу відкрили — зелене', by('Рух на мосту').level === 'green', JSON.stringify(by('Рух на мосту')));
   ok('«можливо, перекриють» — жовте', by('Можливо').level === 'yellow', JSON.stringify(by('Можливо')));

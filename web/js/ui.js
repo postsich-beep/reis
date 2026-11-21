@@ -8,10 +8,11 @@ import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegra
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
-import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS } from './map.js';
+import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
 import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
+import * as showers from './showers.js';
 import { offlineActive } from './offline.js';
 import { sdb, TYPES, F } from './stopsdb.js';
 import * as places from './places.js';
@@ -220,6 +221,23 @@ function truckHtml(route, fromD, etaAt) {
   return `<div class="sec">${t('truckSec')}</div>${bar}${list}${src}`;
 }
 
+/* ---------- душ: попереду на маршруті або найближчий ---------- */
+function showerKind(x) { return x.kind === 'mine' ? t('showerMineShort') : t(STOP_T[x.kind] || 'stop_shower') + (x.mine ? ' · ' + t('showerMineShort') : ''); }
+function showerItems(list, distOf) {
+  return list.map(x => `<div class="item hz-item sh-item" data-shlat="${x.lat}" data-shlon="${x.lon}"><div class="hz-ico sh">${ICON.shower}</div><div class="grow"><div class="t">${esc(x.name || t('stop_shower'))}</div><div class="muted">${esc(showerKind(x))}${x.off > 300 ? ' · ' + t('showerOff', fmtDist(x.off)) : ''}</div></div><b style="font:800 18px var(--f-num);white-space:nowrap">${fmtDist(distOf(x))}</b></div>`).join('');
+}
+function showersRouteHtml(route, idx, fromD) {
+  const list = showers.along(route, idx).filter(x => x.d >= fromD - 200).slice(0, 3);
+  return `<div class="sec">${t('showerSec')}</div>` + (list.length
+    ? `<div class="list">${showerItems(list, x => Math.max(0, x.d - fromD))}</div>`
+    : `<div class="muted">${sdb.ready ? t('showerNoneRoute') : t('loading')}</div>`);
+}
+function showersNearHtml() {
+  if (pos.lat == null || !sdb.ready) return '';
+  const list = showers.nearest(pos, 2); if (!list.length) return '';
+  return `<div class="sec">${t('showerNear')}</div><div class="list">${showerItems(list, x => x.dist)}</div><div class="muted" style="margin-top:6px">${t('showerHint')}</div>`;
+}
+
 function tripActiveHtml() {
   const tr = g.trip;
   const st = stopsAhead(3).slice(0, 3).map(s => { const l = stopLabel(s); return `<div class="item"><div class="grow"><div class="t">${esc(l.title)}</div><div class="muted">${esc(l.sub)}</div></div><b style="font:800 20px var(--f-num)">${fmtDist(Math.max(0, s.d - (pos.rd || 0)))}</b></div>`; }).join('');
@@ -231,6 +249,7 @@ function tripActiveHtml() {
   <div class="btns"><button class="btn danger wide" data-act="stop">${t('endTrip')}</button></div>
   ${poi.drive > 300 ? `<div class="sec">${t('driveSec')}</div><div class="card">${t('driveNow', fmtDur(poi.drive))}</div>` : ''}
   <div class="sec">${t('stopsSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>
+  ${showersRouteHtml(g.route, g.idx, pos.rd || 0)}
   ${truckHtml(g.route, pos.rd || 0, d => Date.now() + Math.max(0, d - (pos.rd || 0)) / Math.max(1, g.remain) * g.remTime * 1000)}`;
 }
 function savedHtml() {
@@ -245,7 +264,7 @@ function fieldHtml(k, cls, tag, ph) {
     ${k === 'a' ? `<button data-here="1" aria-label="${t('myPlace')}">${ICON.here}</button>` : `<button data-clear="${k}" aria-label="${t('clear')}">${ICON.x}</button>`}</div><div class="sugg" id="sg_${k}" hidden></div>`;
 }
 function planHtml() {
-  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec">${t('newTrip')}</div>
+  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div>${plan.trip ? '' : showersNearHtml()}<div class="sec">${t('newTrip')}</div>
     ${fieldHtml('a', 'a', 'A', t('phA'))}${fieldHtml('v', 'v', '•', t('phV'))}${fieldHtml('b', 'b', 'Б', t('phB'))}
     <div class="muted">${t('pickHint')}</div>
     <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
@@ -261,7 +280,8 @@ function planSumHtml() {
     : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
   return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
-    ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
+    ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}
+    ${showersRouteHtml(r, indexOfRoute(r), 0)}`;
 }
 function showSugg(k, list, head) {
   const box = $('sg_' + k); if (!box) return;
@@ -321,6 +341,8 @@ async function goTrip(trip) {
   pollAir(); pollTelegram(true);
 }
 function tripClicks(e) {
+  const sh = e.target.closest('[data-shlat]');
+  if (sh) { closePanel(); flyTo({ lat: +sh.dataset.shlat, lon: +sh.dataset.shlon }, 15); return; }
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
   if (d.act === 'build') doBuild();
@@ -389,11 +411,13 @@ function onMapPick(p) {
   const box = $('pick'); box.hidden = false;
   const pts = g.active ? '' : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
   box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
-    ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
+    ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
+    <div class="row"><button class="btn wide" data-k="shower">${ICON.shower}${t('showerHere')}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
     const k = b.dataset.k; if (k === 'x') { showPick(null); return; }
+    if (k === 'shower') { showPick(null); showers.toggleShower(p, ''); toast(t('showerMarked'), 'green', 4000); return; }
     if (k === 'here') { showPick(null); setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return; }
     plan[k] = { lat: p.lat, lon: p.lon, label: p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
     reverse(p.lat, p.lon).then(r => { if (r && plan[k]) { plan[k].label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan[k].label; const i = $('in_' + k); if (i) i.value = plan[k].label; } }).catch(() => {});
@@ -401,8 +425,31 @@ function onMapPick(p) {
   };
 }
 
+/* картка власної позначки «тут є душ» */
+function onMarkTap(id) {
+  const m = showers.myShowers().find(x => x.id === id); if (!m) return;
+  const p = { lat: m.lat, lon: m.lon, label: m.name || t('showerMineTitle') };
+  const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, m)) + ' ' + t('fromYou') : '';
+  const box = $('pick'); box.hidden = false; showPick(null);
+  const btns = g.active ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
+    : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
+  box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:#06b6d4"></span><div class="grow"><div class="t">${esc(m.name || t('showerMineTitle'))}</div>
+    <div class="muted">${t('showerMineShort')} · ${new Date(m.t).toLocaleDateString('uk-UA')}${dist}</div></div></div>
+    <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
+    <div class="row"><button class="btn wide" data-k="del">${t('showerRemove')}</button></div>`;
+  box.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    box.hidden = true;
+    const k = b.dataset.k;
+    if (k === 'x') return;
+    if (k === 'del') { showers.removeMark(id); toast(t('showerUnmarked'), '', 3000); return; }
+    if (k === 'via') { setVia(p); toast(t('stopViaOk', p.label), 'green', 5000); return; }
+    plan[k] = p; openPanel('trip');
+  };
+}
+
 /* картка піт-стопу: торкання кольорової точки на карті */
-const STOP_T = { e: 'stop_food', f: 'stop_fuel', s: 'stop_services', p: 'stop_parking', m: 'stop_motel', c: 'camera' };
+const STOP_T = { e: 'stop_food', f: 'stop_fuel', s: 'stop_services', p: 'stop_parking', m: 'stop_motel', c: 'camera', h: 'stop_shower' };
 function onStopTap(x) {
   const r = sdb.rows[x.i]; if (!r) return;
   const [lat, lon, ty, f, name, extra] = r;
@@ -414,14 +461,17 @@ function onStopTap(x) {
   const btns = ty === 'c' ? '' : g.active
     ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
     : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
-  box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}"></span><div class="grow"><div class="t">${esc(title)}</div>
-    <div class="muted">${esc((name ? t(STOP_T[ty]) : '') + (name && feats.length ? ' · ' : '') + feats.join(', '))}${dist}</div></div></div>
-    <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
+  const mine = showers.myShowerAt({ lat, lon }, 60);
+  const shBtn = ty === 'c' ? '' : `<div class="row"><button class="btn wide${mine ? ' sh-on' : ''}" data-k="shower">${ICON.shower}${mine ? t('showerMine') : f & F.SHOWER ? t('showerConfirm') : t('showerHere')}</button></div>`;
+  box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER || mine ? ';border-color:#06b6d4' : ''}"></span><div class="grow"><div class="t">${esc(title)}</div>
+    <div class="muted">${esc((name ? t(STOP_T[ty]) : '') + (name && feats.length ? ' · ' : '') + feats.join(', ') + (mine && !(f & F.SHOWER) ? (feats.length || name ? ' · ' : '') + t('showerMineShort') : ''))}${dist}</div></div></div>
+    <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>${shBtn}`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
     const k = b.dataset.k;
     if (k === 'x') return;
+    if (k === 'shower') { const on = showers.toggleShower({ lat, lon }, name || t(STOP_T[ty])); toast(on ? t('showerMarked') : t('showerUnmarked'), on ? 'green' : '', 4000); return; }
     if (k === 'via') { setVia(p); toast(t('stopViaOk', p.label), 'green', 5000); return; }
     plan[k] = p; openPanel('trip');
   };
@@ -526,6 +576,8 @@ export function initUI() {
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
   bus.on('stopTap', onStopTap);
+  bus.on('markTap', onMarkTap);
+  bus.on('marks', () => refresh('trip'));
   bus.on('evTap', id => {
     if (id.startsWith('air:')) { toast(t('airOn', oblastName(id.slice(4))), 'yellow', 7000, () => openPanel('feed')); return; }
     const it = feed.items.find(x => x.id === id); if (!it) return;

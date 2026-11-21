@@ -8,8 +8,10 @@ export const TYPES = {
   s: { key: 'svc', color: '#7c3aed' },       // зона сервісу / відпочинку — фіолетове
   p: { key: 'park', color: '#7c3aed' },      // стоянка для фур — фіолетове
   m: { key: 'motel', color: '#e07b00' },     // мотель — помаранчеве
-  c: { key: 'cam', color: '#1f2937' }        // камера швидкості — темне з червоним обідком
+  c: { key: 'cam', color: '#1f2937' },       // камера швидкості — темне з червоним обідком
+  h: { key: 'shower', color: '#0891b2' }     // душ — бірюзове (і бірюзовий обідок у будь-якої точки з душем)
 };
+export const SHOWER_COLOR = '#06b6d4';
 export const F = { HGV: 1, SHOWER: 2, FOOD: 4, WC: 8, H24: 16, BIG: 32 };
 export const sdb = { ready: false, date: '', rows: [], geo: null, count: 0 };
 
@@ -19,6 +21,7 @@ export function rank(r) {
   if (t === 's' || t === 'p') return 3;
   if (t === 'f') return (f & F.HGV ? 2 : 0) + (f & F.BIG ? 1 : 0) + (f & (F.SHOWER | F.FOOD) ? 1 : 0);
   if (t === 'm') return 2;
+  if (t === 'h') return 2;
   if (t === 'e') return r[4] ? 1 : 0;
   return 0;
 }
@@ -37,7 +40,7 @@ export async function load() {
     sdb.rows = j.rows || []; sdb.date = j.date || ''; sdb.count = sdb.rows.length;
     sdb.geo = {
       type: 'FeatureCollection',
-      features: sdb.rows.map((x, i) => ({ type: 'Feature', id: i, geometry: { type: 'Point', coordinates: [x[1], x[0]] }, properties: { t: x[2], r: rank(x), i } }))
+      features: sdb.rows.map((x, i) => ({ type: 'Feature', id: i, geometry: { type: 'Point', coordinates: [x[1], x[0]] }, properties: { t: x[2], r: rank(x) + (x[3] & F.SHOWER ? 1 : 0), sh: x[3] & F.SHOWER ? 1 : 0, i } }))
     };
     sdb.ready = sdb.count > 0;
     log('info', `база піт-стопів: ${sdb.count} точок, дані від ${sdb.date}`);

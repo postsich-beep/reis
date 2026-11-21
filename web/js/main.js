@@ -11,6 +11,7 @@ import * as sim from './sim.js';
 import * as weather from './weather.js';
 import * as roads from './roads.js';
 import * as rough from './rough.js';
+import * as showers from './showers.js';
 import * as offline from './offline.js';
 import * as stopsdb from './stopsdb.js';
 import * as mapM from './map.js';
@@ -34,5 +35,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

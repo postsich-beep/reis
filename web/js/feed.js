@@ -260,13 +260,25 @@ export function activeChannels() {
   return (S.channels || []).filter(c => c.on !== false && (c.region === 'all' || !ahead.length || ahead.includes(c.region)));
 }
 let tgRunning = false;
+// Якщо опитування вже йде, а водій щойно рушив чи змінив канали, — після поточного кола робимо ще одне
+// і віддаємо той самий проміс, щоб той, хто просив, дочекався свіжих даних.
+let tgAgain = false, tgWait = null;
 export async function pollTelegram(manual) {
-  if (tgRunning || !S.tg || !S.lookahead && !manual) return;
+  if (tgRunning) { if (manual) { tgAgain = true; return tgWait; } return; }
+  if (!S.tg || !S.lookahead && !manual) return;
   if (!tgAvailable()) { feed.tgErr = 'web'; return; }
   if (!online()) { feed.tgErr = 'offline'; return; }
   tgRunning = true; feed.tgErr = '';
-  const chans = activeChannels(), first = feed.tgAt === 0;
+  let done; tgWait = new Promise(r => { done = r; });
+  try { do { tgAgain = false; await pollRound(); } while (tgAgain); }
+  finally { tgRunning = false; done(); }
+  bus.emit('feed', feed);
+  runAi();
+}
+async function pollRound() {
+  const chans = activeChannels(), first = feed.tgAt === 0, names = chans.map(c => c.name).join();
   for (const c of chans) {
+    if (activeChannels().map(x => x.name).join() !== names) { tgAgain = true; return; }   // список каналів змінився — почнемо заново
     try {
       const msgs = await pollChannel(c.name);
       feed.chStatus[c.name] = msgs.length ? 'ok' : 'empty';
@@ -280,9 +292,7 @@ export async function pollTelegram(manual) {
     } catch (e) { feed.chStatus[c.name] = 'err'; feed.tgErr = e.message; log('warn', 'Telegram @' + c.name + ': ' + e.message); }
     await sleep(1500);
   }
-  feed.tgAt = Date.now(); tgRunning = false;
-  bus.emit('feed', feed);
-  runAi();
+  feed.tgAt = Date.now();
 }
 
 /* ---------- ШІ-фільтр: Claude перечитує кандидатів і вирішує, що справді стосується дороги ---------- */

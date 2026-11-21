@@ -7,6 +7,7 @@ import { g } from './guide.js';
 import { feed, regionsAhead } from './feed.js';
 import { poi, stopsAhead, stopLabel } from './poi.js';
 import { oblastName, tripTitle } from './route.js';
+import * as showers from './showers.js';
 import { t } from './i18n.js';
 
 export const chat = { msgs: [], busy: false, live: false, listening: false, partial: '', error: '' };
@@ -30,6 +31,9 @@ function context() {
   L.push(ev.length ? 'Події у стрічці за 3 години:\n' + ev.map(i => `- [${i.level}] ${cut(i.sum || i.text)}`).join('\n') : 'У стрічці подій немає нових записів.');
   const st = stopsAhead(3).slice(0, 4);
   if (st.length) L.push('Стоянки для фур попереду: ' + st.map(s => stopLabel(s).title + ' через ' + fmtDist(s.d - (pos.rd || 0))).join('; '));
+  const sh = g.active && g.route ? showers.along(g.route, g.idx).filter(x => x.d >= (pos.rd || 0)).slice(0, 3).map(x => (x.name || 'душ') + ' через ' + fmtDist(x.d - (pos.rd || 0)))
+    : showers.nearest(pos, 3).map(x => (x.name || 'душ') + ' за ' + fmtDist(x.dist) + ' по прямій');
+  L.push(sh.length ? 'Душ для водія (база OpenStreetMap і позначки водія): ' + sh.join('; ') : 'Душів поблизу в базі немає.');
   if (poi.drive > 600) L.push('За кермом без перерви: ' + fmtDur(poi.drive));
   const tr = S.truck; L.push(`Фура: висота ${tr.height} м, довжина ${tr.length} м, маса ${tr.weight} т.`);
   return L.join('\n');

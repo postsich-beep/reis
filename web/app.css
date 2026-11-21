@@ -288,6 +288,11 @@ body[data-theme="night"]{
 .hz-item .hz-ico.green{border-color:var(--green);color:var(--green)}
 .hz-item .hz-ico svg{width:22px;height:22px}
 .hz-item.red .t{color:var(--red);font-weight:600}
+.hz-item .hz-ico.sh{border-color:#06b6d4;color:#0e7490}
+.sh-item{cursor:pointer}
+#pick .btn.wide{flex:1}
+#pick .btn svg{width:22px;height:22px}
+#pick .btn.sh-on{background:#06b6d4;color:#fff}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}

@@ -114,12 +114,12 @@ function offlineHtml() {
   h += `<div class="muted" style="margin-top:8px">${t('offRouteNote')}</div>`;
   return h;
 }
-const LEG = [['food', 'e', 'legFood'], ['fuel', 'f', 'legFuel'], ['park', 'p', 'legPark'], ['motel', 'm', 'legMotel'], ['cam', 'c', 'legCam']];
+const LEG = [['food', 'e', 'legFood'], ['fuel', 'f', 'legFuel'], ['park', 'p', 'legPark'], ['motel', 'm', 'legMotel'], ['shower', 'h', 'legShower'], ['cam', 'c', 'legCam']];
 function pointsHtml() {
   const on = S.mapStopTypes || {};
   const info = sdb.ready ? t('dbInfo', sdb.count.toLocaleString('uk-UA'), fmtDate(sdb.date)) : t('dbNone');
   return `<div class="list">${toggleRow('mapStops', t('set_mapStops'), info, S.mapStops)}</div>
-    <div class="legend" style="margin-top:10px">${LEG.map(([k, ty, lbl]) => `<button data-leg="${k}" class="${on[k] === false ? 'off' : ''}"><span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ''}"></span>${t(lbl)}</button>`).join('')}
+    <div class="legend" style="margin-top:10px">${LEG.map(([k, ty, lbl]) => `<button data-leg="${k}" class="${on[k] === false ? 'off' : ''}"><span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>${t(lbl)}</button>`).join('')}
       <button disabled><span class="sdot" style="background:var(--red)"></span>${t('legEvent')}</button></div>
     <div class="muted" style="margin-top:6px">${t('legHint')}</div>`;
 }
