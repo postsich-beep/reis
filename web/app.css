@@ -145,7 +145,8 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 .sugg{margin:-2px 0 10px;border-radius:14px;overflow:hidden;border:1px solid var(--line)}
 .sugg button{display:block;width:100%;text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);background:var(--panel)}
 .sugg button:last-child{border-bottom:0}
-.sugg b{display:block;font-weight:600}.sugg small{color:var(--ink-2)}
+.sugg b{display:block;font-weight:600}
+.sg-head{padding:8px 12px 4px;font-size:12px;letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2)}.sugg small{color:var(--ink-2)}
 .kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;text-align:center}
 .kv div{background:var(--panel-2);border-radius:14px;padding:10px 4px}
 .kv b{display:block;font:800 26px/1 var(--f-num)}.kv span{font-size:12px;color:var(--ink-2)}
@@ -230,6 +231,30 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #boot{position:absolute;inset:0;z-index:50;background:#13171c;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:opacity .4s}
 #boot b{font:800 54px/1 var(--f-num);letter-spacing:.04em}#boot span{color:#9aa4ae;font-size:14px}
 #boot.gone{opacity:0;pointer-events:none}
+/* ---- напівпрозорі плашки: карту видно крізь усе, що лежить поверх неї ---- */
+:root{
+  --glass:rgba(255,255,255,.70); --glass-strong:rgba(255,255,255,.86); --glass-2:rgba(214,221,228,.55);
+  --man-glass:rgba(19,23,28,.76); --blur:blur(12px) saturate(1.35);
+}
+body[data-theme="night"]{
+  --glass:rgba(23,27,32,.70); --glass-strong:rgba(23,27,32,.88); --glass-2:rgba(52,61,70,.55); --man-glass:rgba(8,10,12,.74);
+}
+.man,.strip,.rb,#speed,#cam,#bottom,#panel,.toast,#pick,.chip{-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
+.man{background:var(--man-glass)}
+.man-ico{background:rgba(255,255,255,.08)}
+.strip[data-level="none"]{background:var(--glass)}
+.strip[data-level="red"]{background:rgba(229,72,77,.86)}
+.strip[data-level="yellow"]{background:rgba(246,189,22,.86)}
+.strip[data-level="green"]{background:rgba(47,158,98,.86)}
+.rb{background:var(--glass)}
+#speed,#cam{background:var(--glass)}
+#bottom{background:var(--glass)}
+#panel{background:var(--glass-strong)}
+.toast,#pick{background:var(--glass-strong)}
+.chip{background:var(--glass-2)}
+.card,.item,.ev,.tg,.field,.seg,.kv div{background:var(--glass-2)}
+.sugg button{background:var(--glass-strong)}
+.nudge button{background:var(--glass)}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}

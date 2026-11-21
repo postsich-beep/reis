@@ -16,7 +16,7 @@ permissions:
   actions: write
 
 concurrency:
-  group: pitstops
+  group: data-commit
   cancel-in-progress: false
 
 jobs:
@@ -38,12 +38,12 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git pull --rebase origin main
           git add web/data/stops.json
           if git diff --cached --quiet; then echo "без змін"; exit 0; fi
           # нова версія інтерфейсу — щоб телефони підтягнули базу оновленням «повітрям»
           python3 -c "import json;p='web/version.json';v=json.load(open(p));v['web']+=1;json.dump(v,open(p,'w'))"
           git add web/version.json
           git commit -m "Піт-стопи: оновлення бази з OpenStreetMap"
-          git pull --rebase origin main
           git push origin HEAD:main
           gh workflow run build.yml --ref main

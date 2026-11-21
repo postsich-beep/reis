@@ -11,6 +11,7 @@ import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTr
 import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme } from './map.js';
 import { offlineActive } from './offline.js';
 import { sdb, TYPES, F } from './stopsdb.js';
+import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc } from './ui_base.js';
 import { t } from './i18n.js';
@@ -214,11 +215,25 @@ function planSumHtml() {
   return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>`;
 }
-function showSugg(k, list) {
+function showSugg(k, list, head) {
   const box = $('sg_' + k); if (!box) return;
+  for (const o of ['a', 'v', 'b']) if (o !== k) { const ob = $('sg_' + o); if (ob) ob.hidden = true; }
   box.hidden = !list.length;
-  box.innerHTML = list.map((s, i) => `<button data-sg="${k}:${i}"><b>${esc(s.label)}</b><small>${esc(s.sub || '')}</small></button>`).join('');
+  box.innerHTML = (head && list.length ? `<div class="sg-head">${esc(head)}</div>` : '') +
+    list.map((s, i) => `<button data-sg="${k}:${i}"><b>${esc(s.label)}</b><small>${esc(s.sub || '')}</small></button>`).join('');
   plan.sugg = list; plan.field = k;
+}
+// Підказки: спершу довідник у телефоні (миттєво, без інтернету), потім адреси й вулиці з сервера.
+const ADDR = /\d|вул|просп|пров|пл\.|бульв|шосе|ул\.|улиц|street/i;
+async function findPlaces(q) {
+  await places.load();
+  const local = places.search(q, 8);
+  if (local.length >= 5 && !ADDR.test(q)) return local;
+  if (q.length < 3 || !P.online()) return local;
+  let remote = [];
+  try { remote = await geocode(q, pos.lat != null ? pos : null); } catch (e) { log('warn', 'пошук: ' + e.message); }
+  const near = (a, b) => Math.abs(a.lat - b.lat) < 0.02 && Math.abs(a.lon - b.lon) < 0.03;
+  return local.concat(remote.filter(r => !local.some(l => near(l, r)))).slice(0, 9);
 }
 async function doBuild() {
   plan.err = '';
@@ -226,8 +241,8 @@ async function doBuild() {
   for (const k of ['a', 'v', 'b']) {
     const inp = $('in_' + k), txt = inp ? inp.value.trim() : '';
     if (txt && (!plan[k] || plan[k].label !== txt)) {
-      try { const r = await geocode(txt, pos.lat != null ? pos : null); if (r[0]) plan[k] = r[0]; else { plan.err = t('notFound', txt); refresh('trip'); return; } }
-      catch (e) { plan.err = t('netErr'); refresh('trip'); return; }
+      const r = await findPlaces(txt);
+      if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); refresh('trip'); return; }
     } else if (!txt) plan[k] = null;
   }
   if (!plan.a && pos.lat != null) plan.a = { lat: pos.lat, lon: pos.lon, label: t('myPlace') };
@@ -245,7 +260,7 @@ async function doBuild() {
   plan.busy = false; refresh('trip');
 }
 async function goTrip(trip) {
-  saveTrip(trip);
+  saveTrip(trip); places.remember(trip.b);
   restorePoi(trip.cams, trip.stops);
   closePanel(); showPick(null);
   P.keepAwake(S.keepAwake !== false);
@@ -279,24 +294,31 @@ function tripClicks(e) {
     reverse(pos.lat, pos.lon).then(r => { if (r && plan.a && plan.a.label === t('myPlace')) { plan.a.label = [r.name || r.city, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan.a.label; const i = $('in_a'); if (i) i.value = plan.a.label; } }).catch(() => {});
   }
   else if (d.clear) { plan[d.clear] = null; const i = $('in_' + d.clear); if (i) { i.value = ''; i.focus(); } showSugg(d.clear, []); }
-  else if (d.sg) { const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); } }
+  else if (d.sg) { const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); places.remember(s); } }
 }
 function tripInput(e) {
   const k = e.target.dataset && e.target.dataset.f; if (!k) return;
   plan[k] = null; clearTimeout(geoTimer);
   const q = e.target.value.trim();
-  if (q.length < 3) { showSugg(k, []); return; }
+  if (!q) { showSugg(k, places.recent(), t('recentPlaces')); return; }
+  // довідник — одразу з першої літери; сервер — лише після паузи в наборі
+  if (places.pl.ready) showSugg(k, places.search(q, 8));
   geoTimer = setTimeout(async () => {
-    try { const r = await geocode(q, pos.lat != null ? pos : null); if ($('in_' + k) && $('in_' + k).value.trim() === q) showSugg(k, r); }
-    catch (err) { log('warn', 'пошук: ' + err.message); }
-  }, 450);
+    const r = await findPlaces(q);
+    if ($('in_' + k) && $('in_' + k).value.trim() === q) showSugg(k, r);
+  }, places.pl.ready ? 500 : 300);
+}
+function tripFocus(e) {
+  const k = e.target.dataset && e.target.dataset.f; if (!k) return;
+  places.load();
+  if (!e.target.value.trim()) showSugg(k, places.recent(), t('recentPlaces'));
 }
 definePanel('trip', {
   title: () => t('tabTrip'),
   render(body) {
     const active = g.trip && (g.active || g.arrived);
     body.innerHTML = active ? tripActiveHtml() : planHtml();
-    body.onclick = tripClicks; body.oninput = tripInput;
+    body.onclick = tripClicks; body.oninput = tripInput; body.onfocusin = tripFocus;
     $('panel').classList.toggle('half', !active && !!plan.trip);     // маршрут побудовано — панель нижче, лінію видно на карті
   },
   update(body) {
