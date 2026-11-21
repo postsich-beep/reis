@@ -1,0 +1,66 @@
+name: Дані OpenStreetMap
+
+# Раз на місяць збирає з вивантаження OpenStreetMap для України (Geofabrik) базу піт-стопів
+# (АЗС, стоянки й зони відпочинку для фур, мотелі, камери, кафе біля трас) і довідник
+# міст, селищ і сіл для миттєвих підказок. Без Overpass: його публічні сервери часто перевантажені.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 2 2 * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/osm-data.yml', 'tools/build_osm.py', 'tools/build_stops.py', 'tools/build_places.py']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: data-commit
+  cancel-in-progress: false
+
+jobs:
+  osm:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Інструменти
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+          pip install --quiet osmium shapely
+
+      - name: Вивантаження України з Geofabrik
+        run: |
+          curl -fsSL --retry 5 --retry-delay 30 -o ukraine.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf
+          ls -la ukraine.osm.pbf
+          osmium tags-filter ukraine.osm.pbf \
+            nwr/amenity=fuel,restaurant,cafe,fast_food,parking \
+            nwr/highway=services,rest_area,speed_camera w/highway=motorway,trunk,primary \
+            nwr/tourism=motel n/place=city,town,village r/admin_level=4 \
+            -o filtered.osm.pbf --overwrite
+          ls -la filtered.osm.pbf
+
+      - name: Зібрати піт-стопи й довідник населених пунктів
+        run: |
+          mkdir -p "$RUNNER_TEMP/out"
+          python3 tools/build_osm.py filtered.osm.pbf "$RUNNER_TEMP/out/stops.json" "$RUNNER_TEMP/out/places.json"
+          ls -la "$RUNNER_TEMP/out"
+
+      - name: Зберегти в репозиторій і перезібрати застосунок
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          rm -f ukraine.osm.pbf filtered.osm.pbf
+          git pull --rebase origin main
+          mkdir -p web/data
+          for f in stops places; do if [ -f "$RUNNER_TEMP/out/$f.json" ]; then cp "$RUNNER_TEMP/out/$f.json" web/data/ && git add "web/data/$f.json"; fi; done
+          if git diff --cached --quiet; then echo "без змін"; exit 0; fi
+          python3 -c "import json;p='web/version.json';v=json.load(open(p));v['web']+=1;json.dump(v,open(p,'w'))"
+          git add web/version.json
+          git commit -m "Дані OpenStreetMap: піт-стопи й населені пункти"
+          git push origin HEAD:main
+          gh workflow run build.yml --ref main
