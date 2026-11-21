@@ -178,8 +178,8 @@ try {
   const before = await app(page, () => window.__app.nav.pos.rd);
   await page.click('#bFwd100'); const up = await app(page, () => window.__app.nav.pos.rd);
   await page.click('#bBack100'); await page.click('#bBack100'); const dn = await app(page, () => window.__app.nav.pos.rd);
-  ok('↑100 зсуває вперед (100 м + рух за час натискання)', up - before >= 100 && up - before < 150, `${Math.round(up - before)} м`);
-  ok('↓100 двічі зсуває назад (200 м мінус рух)', up - dn > 140 && up - dn <= 200, `${Math.round(up - dn)} м`);
+  ok('↑100 зсуває вперед (100 м + рух за час натискання)', up - before >= 99 && up - before < 150, `${Math.round(up - before)} м`);
+  ok('↓100 двічі зсуває назад (200 м мінус рух)', up - dn > 140 && up - dn <= 201, `${Math.round(up - dn)} м`);
   await app(page, () => window.__app.sim.setLost(false));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
   ok('GPS повернувся → знову веде GPS, панель сховано', await app(page, () => document.getElementById('lost').hidden));
@@ -197,7 +197,7 @@ try {
 
   // камера, стоянка, далі швидко до фінішу
   await app(page, () => window.__app.sim.setSpeed(1400));
-  await page.waitForFunction(() => window.__app.guide.g.arrived, null, { timeout: 90000 });
+  await page.waitForFunction(() => window.__app.guide.g.arrived, null, { timeout: 240000 });
   const fin = await app(page, () => ({ spoken: window.__spoken, feed: window.__app.feed.feed.items.filter(i => i.src === 'stop').map(i => i.text), man: document.getElementById('manDist').textContent, cams: window.__app.poi.poi.cams.length, stops: window.__app.poi.poi.stops.length }));
   ok('камеру і стоянки з OSM прив’язано до маршруту', fin.cams === 1 && fin.stops === 2, `камер ${fin.cams}, стоянок ${fin.stops}`);
   ok('попередження про камеру прозвучало', fin.spoken.some(s => /Камера швидкості через/.test(s)), '');

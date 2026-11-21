@@ -11,6 +11,7 @@ function step() {
   const now = Date.now(), dt = Math.min(3, (now - last) / 1000); last = now;
   let v = sim.kmh / 3.6;
   if (g.next && g.distNext < 90) v = Math.min(v, 9);           // перед поворотом пригальмовуємо
+  else if (g.next && g.distNext < 700) v = Math.min(v, 40);     // на підході — не швидше 145 км/год, щоб прозвучали підказки
   sim.d = Math.min(g.idx.total, sim.d + v * dt);
   const p = g.idx.at(sim.d);
   bus.emit('sens', { var: 0.6, hdg: p.brg });
