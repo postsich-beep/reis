@@ -8,7 +8,8 @@ export const pos = {
   lostSince: 0, reason: '', drDist: 0, accRef: 0, accBase: 15,
   pending: null,           // GPS повернувся, але показує іншу точку: чекаємо рішення водія
   rd: null, onRoute: false, off: 0,   // положення вздовж маршруту
-  sats: null, sim: false, approxSrc: '', approxAge: 0
+  sats: null, sim: false, approxSrc: '', approxAge: 0,
+  spoofAt: 0               // коли востаннє відкинули підроблену точку (за межами України, неможлива швидкість, програма-підміна)
 };
 
 let route = null, routeInUA = true;
@@ -18,6 +19,29 @@ let moving = true, stillT = 0, varStop = null, varMove = null;
 let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0, approxT = 0;
 
 const ema = (o, v, k = 0.1) => o == null ? v : o + (v - o) * k;
+const MAX_SPD = 50;                          // 180 км/год — фура так не їде
+
+// Чи схожа точка на справжню. Підміна в Україні переносить телефон у Перу, Москву тощо — такі точки не беремо ніколи.
+function fake(f, now) {
+  if (!S.spoof || f.sim && !f.spoofSim) return '';
+  if (f.mock) return 'mock';
+  if (!inUkraine(f)) return 'bounds';
+  if (f.spd != null && f.spd > MAX_SPD) return 'speed';
+  if (f.prov !== 'network' && net && now - net.rt < 90000 && net.acc < 3000 && hav(net, f) > Math.max(5000, 4 * net.acc)) return 'net';
+  return '';
+}
+function spoofSeen(why, f) {
+  const first = Date.now() - pos.spoofAt > 60000;
+  pos.spoofAt = Date.now();
+  if (first) log('warn', `підміна GPS (${why}, ${f.prov}): ${(+f.lat).toFixed(3)}, ${(+f.lon).toFixed(3)} — відкинуто`);
+  bus.emit('spoof', { why, prov: f.prov });
+}
+// Останнє справжнє місце: з нього стартуємо після перезапуску, якщо GPS підмінено.
+let goodT = 0;
+function saveGood() {
+  const now = Date.now(); if (now - goodT < 20000 || pos.lat == null || pos.sim) return; goodT = now;
+  try { localStorage.setItem('reis.lastGood', JSON.stringify({ lat: pos.lat, lon: pos.lon, t: now })); } catch (_) {}
+}
 
 export function setRoute(idx) {
   route = idx; pos.rd = null; pos.onRoute = false; pos.off = 0;
@@ -61,13 +85,16 @@ function accept(f) {
     pos.lat = loc.lat; pos.lon = loc.lon;
     if (spd < 1.5) pos.hdg = loc.brg;
   }
+  saveGood();
   bus.emit('pos', pos);
 }
 
 // Поки GPS не знайшов супутників: показуємо приблизне місце за вишками й Wi-Fi або останнє відоме.
 function approx(f) {
   if (pos.mode !== 'none' && pos.mode !== 'approx') return;
-  if (f.prov === 'last' && pos.mode !== 'none') return;
+  if ((f.prov === 'last' || f.prov === 'saved') && pos.mode !== 'none') return;
+  const why = fake(f, Date.now());
+  if (why) { spoofSeen(why, f); return; }
   const age = f.age > 0 ? f.age : 0;
   if (age > 7 * 86400) return;
   let acc = Math.round(f.acc || 1500); if (age > 600) acc = Math.max(acc, 1000);
@@ -78,6 +105,7 @@ function approx(f) {
   if (f.brg != null) pos.hdg = f.brg; else if (compass != null) pos.hdg = compass;
   pos.approxSrc = f.prov; pos.approxAge = age;
   matchRoute(pos, pos.spd);
+  if (f.prov === 'network') saveGood();
   bus.emit('pos', pos);
 }
 
@@ -104,20 +132,18 @@ function exitDR(f) {
 function onGps(f) {
   if (simOn && !f.sim) return;
   const now = Date.now();
-  if (f.prov === 'network' || f.prov === 'fused' || f.prov === 'last') {
-    if (f.prov === 'network') net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now };
+  if (f.prov === 'network' || f.prov === 'fused' || f.prov === 'last' || f.prov === 'saved') {
+    if (f.prov === 'network' && inUkraine(f)) net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now };
     approx(f);
     return;
   }
   let bad = '';
   if (f.acc != null && f.acc > 120) bad = 'weak';
-  if (S.spoof) {
-    if (!inUkraine(f) && (hadUA || (route && routeInUA))) bad = 'bounds';
-    else if (pos.raw && pos.mode === 'gps') {
-      const dt = (now - pos.raw.rt) / 1000, d = hav(pos.raw, f);
-      if (!f.sim && d > 200 && d / Math.max(dt, 0.5) > 70) bad = 'jump';   // понад 250 км/год — це не фура
-    }
-    if (bad !== 'bounds' && bad !== 'jump' && net && now - net.rt < 90000 && net.acc < 3000 && hav(net, f) > Math.max(5000, 4 * net.acc)) bad = 'net';
+  const why = fake(f, now);
+  if (why) { bad = why; spoofSeen(why, f); }
+  else if (S.spoof && pos.raw && pos.mode === 'gps') {
+    const dt = (now - pos.raw.rt) / 1000, d = hav(pos.raw, f);
+    if (!f.sim && d > 200 && d / Math.max(dt, 0.5) > MAX_SPD) { bad = 'jump'; spoofSeen('jump', f); }   // стрибок, якого фура не зробить
   }
 
   if (pos.mode === 'dr') {
@@ -136,12 +162,24 @@ function onGps(f) {
 
   if (bad) {
     if ((pos.mode === 'none' || pos.mode === 'approx') && bad === 'weak') { accept(f); return; }   // неточний GPS кращий за вишки
+    if (pos.mode !== 'gps') return;                                   // ще немає справжньої позиції — підробку просто ігноруємо
     badRun++;
-    if (pos.mode === 'gps' && badRun >= (bad === 'weak' ? 4 : 2)) enterDR(bad === 'weak' ? 'weak' : 'spoof');
+    if (badRun >= (bad === 'weak' ? 4 : 2)) enterDR(bad === 'weak' ? 'weak' : 'spoof');
     return;
   }
   badRun = 0;
   accept(f);
+}
+
+// «Я тут»: водій сам ставить точку на карті (GPS підмінено, а вишки мовчать). Далі — розрахунок і кнопки ±100.
+export function setManual(p) {
+  const was = pos.mode;
+  pos.lat = p.lat; pos.lon = p.lon; pos.acc = 50; pos.spd = 0;
+  if (was === 'dr') { pos.reason = 'manual'; pos.accRef = pos.drDist; pos.accBase = 50; pos.pending = null; }
+  else { pos.mode = 'approx'; enterDR('manual'); pos.accBase = 50; }
+  matchRoute(pos, 0);
+  saveGood();
+  bus.emit('pos', pos);
 }
 
 export function acceptPending() {
@@ -200,5 +238,9 @@ export function start() {
   bus.on('gnss', g => { pos.sats = g; });
   lastTick = Date.now();
   timer = setInterval(tick, 1000);
+  try {                                     // після перезапуску — з останнього справжнього місця
+    const g = JSON.parse(localStorage.getItem('reis.lastGood') || 'null');
+    if (g && g.lat != null) onGps({ prov: 'saved', lat: g.lat, lon: g.lon, acc: 300, age: Math.round((Date.now() - g.t) / 1000), t: g.t });
+  } catch (_) {}
 }
 export const debugState = () => ({ vCruise, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun });

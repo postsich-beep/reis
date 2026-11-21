@@ -1,7 +1,7 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending } from './nav.js';
+import { pos, nudge, acceptPending, setManual } from './nav.js';
 import { g, startTrip, stopTrip, rerouteNow, say } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
@@ -62,7 +62,9 @@ function hud() {
   // стан GPS
   const chip = $('gpsChip');
   const off = locState.enabled === false && !pos.sim;
+  const spoofNow = Date.now() - pos.spoofAt < 30000 && pos.mode !== 'gps' && pos.mode !== 'dr';
   if (off) { chip.className = 'chip lost'; $('gpsText').textContent = t('locOffChip'); }
+  else if (spoofNow) { chip.className = 'chip lost'; $('gpsText').textContent = t('spoofChip'); }
   else if (pos.mode === 'dr') { chip.className = 'chip lost'; $('gpsText').textContent = 'GPS ✕'; }
   else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
   else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
@@ -306,15 +308,16 @@ definePanel('trip', {
 
 /* вибір точки довгим натисканням на карті */
 function onMapPick(p) {
-  if (g.active) return;
   showPick(p);
   const box = $('pick'); box.hidden = false;
+  const pts = g.active ? '' : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
   box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
-    <button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button><button class="btn" data-k="x">${ICON.x}</button></div>`;
+    ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
     const k = b.dataset.k; if (k === 'x') { showPick(null); return; }
+    if (k === 'here') { showPick(null); setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return; }
     plan[k] = { lat: p.lat, lon: p.lon, label: p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
     reverse(p.lat, p.lon).then(r => { if (r && plan[k]) { plan[k].label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan[k].label; const i = $('in_' + k); if (i) i.value = plan[k].label; } }).catch(() => {});
     openPanel('trip');
@@ -424,6 +427,14 @@ export function initUI() {
   bus.on('mapBlank', () => toast(t('mapBlank'), 'yellow', 9000));
   bus.on('native:ttsLang', d => { if (d && !d.ok) toast(t('ttsNoVoice'), 'yellow', 12000); });
   bus.on('native:perm', d => { if (d && d.loc === false) toast(t('permLoc'), 'red', 15000, () => P.openAppSettings()); });
+  let spoofWarnT = 0;
+  bus.on('spoof', () => {
+    hud();
+    if (Date.now() - spoofWarnT < 600000) return;
+    spoofWarnT = Date.now(); P.vibrate(300);
+    toast(t('spoofToast'), 'red', 15000, () => openPanel('gps'));
+    if (pos.mode !== 'dr') say(t('voiceSpoof'), { urgent: true });
+  });
   bus.on('native:locstate', d => {
     if (!d) return;
     Object.assign(locState, { known: true, enabled: d.enabled, gps: d.gps, fine: d.fine, listening: !!d.listening, error: d.error || '' });

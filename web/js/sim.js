@@ -16,7 +16,7 @@ function step() {
   const p = g.idx.at(sim.d);
   bus.emit('sens', { var: 0.6, hdg: p.brg });
   if (sim.lost) return;
-  if (sim.spoof) { bus.emit('gps', { lat: -12.0219, lon: -77.1143, acc: 6, spd: 0, brg: 0, t: now, prov: 'gps', sim: true }); return; }   // «Ліма»
+  if (sim.spoof) { bus.emit('gps', { lat: -12.0219, lon: -77.1143, acc: 6, spd: 0, brg: 0, t: now, prov: 'gps', sim: true, spoofSim: true }); return; }   // «Ліма»
   bus.emit('gps', { lat: p.lat, lon: p.lon, acc: 5, spd: v, brg: p.brg, t: now, prov: 'gps', sim: true });
   if (sim.d >= g.idx.total) stop();
 }

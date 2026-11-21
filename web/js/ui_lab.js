@@ -205,11 +205,12 @@ function gpsHtml() {
   rows.push([t('gpsSats'), pos.sats ? t('gpsSatsVal', pos.sats.used, pos.sats.vis) + (pos.sats.cn0 != null ? ' · ' + Math.round(pos.sats.cn0) + ' dB-Hz' : '') : locState.listening ? t('gpsSatsNone') : t('gpsNetNo')]);
   if (locState.error) rows.push([t('errShort'), locState.error]);
   rows.push([t('gpsNet'), d.net ? t('gpsNetYes', Math.round(d.net.acc)) : t('gpsNetNo')]);
-  rows.push([t('gpsSpoofDet'), S.spoof ? t('on') : t('off')]);
+  rows.push([t('gpsSpoofDet'), (S.spoof ? t('on') : t('off')) + (pos.spoofAt ? ' · ' + t('spoofLast', fmtClock(new Date(pos.spoofAt))) : '')]);
   if (pos.mode === 'dr') { rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]); }
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';
   return `<div class="list">${rows.map(r => `<div class="item"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
     <div class="sec">${t('gpsManual')}</div><div class="muted">${t('gpsManualHint')}</div>
+    <div class="muted" style="margin-top:6px">${t('hereHint')}</div>
     <div class="btns">${pos.mode === 'dr' ? `<button class="btn pri wide" data-act="back" ${pos.pending ? '' : 'disabled'}>${t('backToGps')}</button>` : `<button class="btn dark wide" data-act="manual" ${pos.lat == null ? 'disabled' : ''}>${t('gpsManualOn')}</button>`}</div>`;
 }
 definePanel('gps', {
