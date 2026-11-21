@@ -111,6 +111,7 @@ async function newPage(native, opts = {}) {
     { type: 'node', id: 1, lat: camPt[0], lon: camPt[1], tags: { highway: 'speed_camera', maxspeed: '50' } },
     { type: 'node', id: 2, lat: stopPt[0], lon: stopPt[1], tags: { amenity: 'fuel', brand: 'OKKO', hgv: 'yes', shower: 'yes', toilets: 'yes', opening_hours: '24/7' } },
     { type: 'node', id: 3, lat: coords[turnIdx[3] + 60][0], lon: coords[turnIdx[3] + 60][1], tags: { amenity: 'fuel', name: 'АЗС' } }] }));
+  if (opts.motion) await page.addInitScript(m => { try { localStorage.setItem('reis.motion', JSON.stringify(m)); } catch (_) {} }, opts.motion);
   if (native) await page.addInitScript(({ tg, air, offline }) => {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
@@ -127,7 +128,7 @@ async function newPage(native, opts = {}) {
       },
       offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
       offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {},
-      keepAwake() {}, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n) { window.__nativeCalls.push('saveFile:' + n); }, openUrl() {}, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}
+      keepAwake() {}, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl() {}, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}, reloadUi() { window.__nativeCalls.push('reloadUi'); }
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
   await page.goto(BASE);
@@ -167,6 +168,19 @@ try {
   ok('коло похибки без заливки', await app(page, () => !window.__app.map.map.getLayer('acc-fill') && !!window.__app.map.map.getLayer('acc-line')));
   await page.click('#gpsChip'); await page.waitForSelector('#panelBody .item');
   ok('панель GPS: стан і супутники', /Приблизно/.test(await page.textContent('#panelBody')) && /Супутники/.test(await page.textContent('#panelBody')));
+  await page.click('#panelClose');
+  // підміна «в Бєлгород»: усередині старого прямокутника, але за кордоном — тепер ловиться за контуром України
+  await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() });
+  await sleep(150);
+  ok('підміна в Бєлгород відкинута як «за межами України»', await app(page, () => window.__app.nav.pos.spoofWhy === 'bounds' && window.__app.nav.pos.lat < 50.1));
+  ok('Крим і прикордонні міста — Україна, Бєлгород і Гомель — ні', await app(page, () => {
+    const u = window.__app.core.inUkraine;
+    return u({ lat: 44.95, lon: 34.1 }) && u({ lat: 50.91, lon: 34.8 }) && u({ lat: 48.43, lon: 22.2 }) && u({ lat: 45.35, lon: 28.84 }) && !u({ lat: 50.6, lon: 36.59 }) && !u({ lat: 52.44, lon: 30.99 }) && !u({ lat: 47.01, lon: 28.86 });
+  }));
+  await page.click('#gpsChip'); await page.waitForSelector('[data-act="journal"]');
+  await page.click('[data-act="journal"]'); await sleep(200);
+  const jr = await app(page, () => { const n = window.__nativeCalls.find(x => /^saveFile:reis-gps-\d{8}-\d{4}\.json$/.test(x)); let j = null; try { j = JSON.parse(window.__savedText); } catch (_) {} return { n, cnt: j ? j.entries.length : 0, rej: j ? j.entries.filter(e => /^rej:/.test(e.v)).map(e => e.v) : [] }; });
+  ok('журнал GPS зберігається файлом і показує, що відкинуто й чому', !!jr.n && jr.cnt >= 4 && jr.rej.includes('rej:bounds'), JSON.stringify(jr));
   await page.click('#panelClose');
   ok('база піт-стопів завантажена й намальована на карті', await page.waitForFunction(() => { const s = window.__app.stopsdb.sdb; const m = window.__app.map.map; return s.ready && s.count === 5 && m.getLayer('stops-all') && m.getLayer('stops-major'); }, null, { timeout: 8000 }).then(() => true, () => false));
   await app(page, () => window.__app.bus.emit('stopTap', { i: 1 }));
@@ -344,6 +358,34 @@ try {
   ok('жодної помилки JS за весь прохід', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('сценарій 1 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 2б: перезапуск посеред зони підміни ============ */
+try {
+  const { page, ctx, errors } = await newPage(true, { motion: { v: 16.4, t: Date.now() - 90000 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('loc', { prov: 'network', lat: 50.0, lon: 35.97, acc: 900, t: Date.now() });
+  await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() });
+  await sleep(1200);
+  const v1 = await app(page, () => ({ val: document.getElementById('spdVal').textContent, unit: document.getElementById('spdUnit').textContent, mode: window.__app.nav.pos.mode }));
+  ok('після перезапуску в зоні підміни — остання чесна швидкість як оцінка', v1.val === '≈59' && v1.unit === 'оцінка' && v1.mode === 'approx', JSON.stringify(v1));
+  // вишки й Wi-Fi, що помітно зсуваються: швидкість за ними (≈ 72 км/год)
+  const t0 = Date.now();
+  await app(page, () => { window.__realNow = Date.now; });
+  for (let i = 0; i <= 6; i++) {
+    await app(page, k => { const base = window.__realNow(); Date.now = () => base + k * 30000; }, i);
+    await emitN('loc', { prov: 'network', lat: 50.0 + i * 30 * 20 / 111320, lon: 35.97, acc: 60, t: t0 + i * 30000 });
+  }
+  await sleep(1200);
+  const v2 = await app(page, () => ({ sv: window.__app.nav.speedView(), st: window.__app.nav.debugState() }));
+  await app(page, () => { Date.now = window.__realNow; });
+  ok('швидкість за вишками й Wi-Fi рахується прямою через точки', v2.sv.kind === 'approx' && Math.abs(v2.sv.kmh - 72) < 6, JSON.stringify({ sv: v2.sv, ap: v2.st.apSpd, err: v2.st.apSpdErr }));
+  // нова версія інтерфейсу приїхала посеред підміни — не перезавантажуємось самі
+  await emitN('webUpdated', { ok: true, ver: 99 });
+  await sleep(300);
+  ok('у зоні підміни інтерфейс не перезавантажується сам', await app(page, () => !window.__nativeCalls.includes('reloadUi') && /підміна GPS/.test(document.getElementById('toasts').textContent)));
+  ok('прохід перезапуску без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід перезапуску дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
 try {

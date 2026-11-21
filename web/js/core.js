@@ -1,5 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
-export const VERSION = { web: 11, name: '1.0.9' };
+import { UA_RINGS } from './ua_border.js';
+export const VERSION = { web: 12, name: '1.0.10' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -124,7 +125,35 @@ export function decodePolyline6(str) {
   return out;
 }
 // Межі України із запасом: для детектора підміни GPS.
-export const inUkraine = p => p.lat > 44.0 && p.lat < 52.7 && p.lon > 21.9 && p.lon < 40.6;
+// Чи точка в Україні: за справжнім контуром кордону (з Кримом), із запасом 8 км на неточність контуру.
+// Прямокутник лише відсікає далеке; Бєлгород чи Гомель всередині прямокутника, але не в Україні.
+const UA_EDGE_M = 8000;
+function inRing(lat, lon, r) {
+  let c = false;
+  for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const [yi, xi] = r[i], [yj, xj] = r[j];
+    if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) c = !c;
+  }
+  return c;
+}
+function nearEdge(lat, lon, m) {
+  const ky = 111320, kx = 111320 * Math.cos(lat * Math.PI / 180), lim = m * m;
+  for (const r of UA_RINGS) for (let i = 0, j = r.length - 1; i < r.length; j = i++) {
+    const ax = (r[j][1] - lon) * kx, ay = (r[j][0] - lat) * ky, bx = (r[i][1] - lon) * kx, by = (r[i][0] - lat) * ky;
+    const dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+    const t = L > 0 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L)) : 0;
+    const px = ax + t * dx, py = ay + t * dy;
+    if (px * px + py * py <= lim) return true;
+  }
+  return false;
+}
+export const inUkraineBox = p => p.lat > 44.0 && p.lat < 52.7 && p.lon > 21.9 && p.lon < 40.6;
+export function inUkraine(p) {
+  if (p == null || !inUkraineBox(p)) return false;
+  const lat = +p.lat, lon = +p.lon;
+  for (const r of UA_RINGS) if (inRing(lat, lon, r)) return true;
+  return nearEdge(lat, lon, UA_EDGE_M);
+}
 
 /* ---------- маршрут як індекс відстаней ---------- */
 export class RouteIndex {

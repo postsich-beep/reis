@@ -55,10 +55,11 @@ const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace(
 function hud() {
   // швидкість
   const sv = speedView(), sp = $('speed'), kmh = sv.kmh || 0;
-  $('spdVal').textContent = sv.kind === 'none' ? '—' : (sv.kind === 'approx' ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
-  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : t('kmh');
+  const guess = sv.kind === 'approx' || sv.kind === 'est';
+  $('spdVal').textContent = sv.kind === 'none' ? '—' : (guess ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
+  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'approx' ? t('spdNet') : t('kmh');
   sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
-  sp.classList.toggle('wide', sv.kind === 'approx');
+  sp.classList.toggle('wide', guess);
   const cam = S.cams ? poi.nextCam : null;
   sp.classList.toggle('over', !!(cam && cam.max && kmh > cam.max + 3 && cam.ahead < 600));
   $('cam').hidden = !cam;

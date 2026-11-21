@@ -1,7 +1,7 @@
 // Панелі «Лабораторія», «Налаштування», «Telegram-канали», «GPS», «Діагностика», «Про застосунок».
 import { bus, log, getLog, S, VERSION, fmtClock, fmtMS } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, debugState } from './nav.js';
+import { pos, nudge, acceptPending, debugState, speedView, gpsJournal } from './nav.js';
 import { g, say } from './guide.js';
 import { feed, resetLearning, clearFeed, tgAvailable, addDefaultChannels } from './feed.js';
 import { OBLASTS, oblastName } from './route.js';
@@ -271,11 +271,15 @@ function gpsHtml() {
   rows.push([t('gpsSpoofDet'), (S.spoof ? t('on') : t('off')) + (pos.spoofAt ? ' · ' + t('spoofLast', fmtClock(new Date(pos.spoofAt))) : '')]);
   if (pos.spoofAt) rows.push([t('spoofWhat'), t('spoofWhy_' + pos.spoofWhy) + ' · ' + pos.spoofProv + ' · ' + pos.spoofLat.toFixed(3) + ', ' + pos.spoofLon.toFixed(3) + (pos.spoofSpd != null ? ' · ' + Math.round(pos.spoofSpd * 3.6) + ' ' + t('kmh') : '')]);
   if (pos.mode === 'dr') { rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]); }
+  const sv = speedView();
+  rows.push([t('gpsSpeedSrc'), sv.kind === 'none' ? '—' : Math.round(sv.kmh || 0) + ' ' + t('kmh') + ' · ' + t('spdKind_' + sv.kind) + (sv.kind === 'approx' && d.apSpdErr != null ? ' ±' + Math.round(d.apSpdErr * 3.6 * 2) : '')]);
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';
   return `<div class="list">${rows.map(r => `<div class="item"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
     <div class="sec">${t('gpsManual')}</div><div class="muted">${t('gpsManualHint')}</div>
     <div class="muted" style="margin-top:6px">${t('hereHint')}</div>
-    <div class="btns">${pos.mode === 'dr' ? `<button class="btn pri wide" data-act="back" ${pos.pending ? '' : 'disabled'}>${t('backToGps')}</button>` : `<button class="btn dark wide" data-act="manual" ${pos.lat == null ? 'disabled' : ''}>${t('gpsManualOn')}</button>`}</div>`;
+    <div class="btns">${pos.mode === 'dr' ? `<button class="btn pri wide" data-act="back" ${pos.pending ? '' : 'disabled'}>${t('backToGps')}</button>` : `<button class="btn dark wide" data-act="manual" ${pos.lat == null ? 'disabled' : ''}>${t('gpsManualOn')}</button>`}</div>
+    <div class="sec">${t('jSec')}</div><div class="muted">${t('jHint')}</div>
+    <div class="btns"><button class="btn wide" data-act="journal">${t('jSave')}</button></div>`;
 }
 definePanel('gps', {
   title: () => 'GPS', half: true,
@@ -285,6 +289,12 @@ definePanel('gps', {
       const b = e.target.closest('button'); if (!b) return;
       const a = b.dataset.act;
       if (a === 'manual') nudge(0); else if (a === 'back') acceptPending();
+      else if (a === 'journal') {
+        const j = gpsJournal(), d = new Date(), p2 = n => String(n).padStart(2, '0');
+        const name = `reis-gps-${d.getFullYear()}${p2(d.getMonth() + 1)}${p2(d.getDate())}-${p2(d.getHours())}${p2(d.getMinutes())}.json`;
+        if (!P.saveText(name, 'application/json', JSON.stringify(j))) toast(t('saveErr'), 'yellow');
+        else if (!P.isNative) toast(t('jSaved', name), 'green', 6000);
+      }
       else if (a === 'locset') P.openLocationSettings(); else if (a === 'appset') P.openAppSettings();
       refresh('gps');
     };
@@ -367,10 +377,12 @@ export function initLab() {
     if (!P.canReloadUi()) { toast(t('updWebDone'), 'green', 9000); return; }
     // Без активного рейсу оновлюємось одразу; під час рейсу — коли він закінчиться або водій торкнеться сповіщення.
     const go = () => { toast(t('updWebNow'), 'green', 4000); setTimeout(() => P.reloadUi(), 1500); };
-    if (!g.active) { go(); return; }
-    toast(t('updWebLater'), 'green', 12000, go);
-    const iv = setInterval(() => { if (!g.active) { clearInterval(iv); go(); } }, 20000);
+    // Не перезавантажуємо і в зоні підміни чи без сигналу: там застосунок тримає місце й швидкість у пам'яті.
+    const calm = () => !g.active && pos.mode !== 'dr' && Date.now() - (pos.spoofAt || 0) > 10 * 60000;
+    if (calm()) { go(); return; }
+    toast(g.active ? t('updWebLater') : t('updWebSpoof'), 'green', 12000, go);
+    const iv = setInterval(() => { if (calm()) { clearInterval(iv); go(); } }, 20000);
   });
-  bus.on('native:saved', d => { if (d && d.error) toast(t('saveErr') + ' ' + d.error, 'yellow'); });
+  bus.on('native:saved', d => { if (d && d.error) toast(t('saveErr') + ' ' + d.error, 'yellow'); else if (d && /^reis-gps/.test(d.name || '')) toast(t('jSaved', d.path || d.name), 'green', 9000); });
   if (P.isNative) setTimeout(() => { if (P.online()) P.checkUpdate(); }, 15000);
 }
