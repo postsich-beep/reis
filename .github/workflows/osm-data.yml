@@ -1,8 +1,8 @@
 name: Дані OpenStreetMap
 
 # Раз на місяць збирає з вивантаження OpenStreetMap для України (Geofabrik) базу піт-стопів
-# (АЗС, стоянки й зони відпочинку для фур, мотелі, камери, кафе біля трас) і довідник
-# міст, селищ і сіл для миттєвих підказок. Без Overpass: його публічні сервери часто перевантажені.
+# (АЗС, стоянки й зони відпочинку для фур, мотелі, камери, кафе біля трас), довідник
+# міст, селищ і сіл для миттєвих підказок і проблемні для фур ділянки (мости, висота, ґрунт, заборони). Без Overpass: його публічні сервери часто перевантажені.
 on:
   workflow_dispatch:
   schedule:
@@ -39,13 +39,15 @@ jobs:
             nwr/amenity=fuel,restaurant,cafe,fast_food,parking \
             nwr/highway=services,rest_area,speed_camera w/highway=motorway,trunk,primary \
             nwr/tourism=motel n/place=city,town,village r/admin_level=4 \
+            w/maxweight w/maxweight:hgv w/maxheight w/maxheight:physical w/maxaxleload w/hgv w/smoothness \
+            w/highway=secondary,tertiary,unclassified \
             -o filtered.osm.pbf --overwrite
           ls -la filtered.osm.pbf
 
       - name: Зібрати піт-стопи й довідник населених пунктів
         run: |
           mkdir -p "$RUNNER_TEMP/out"
-          python3 tools/build_osm.py filtered.osm.pbf "$RUNNER_TEMP/out/stops.json" "$RUNNER_TEMP/out/places.json"
+          python3 tools/build_osm.py filtered.osm.pbf "$RUNNER_TEMP/out/stops.json" "$RUNNER_TEMP/out/places.json" "$RUNNER_TEMP/out/hazards.json"
           ls -la "$RUNNER_TEMP/out"
 
       - name: Зберегти в репозиторій і перезібрати застосунок
@@ -57,7 +59,7 @@ jobs:
           rm -f ukraine.osm.pbf filtered.osm.pbf
           git pull --rebase origin main
           mkdir -p web/data
-          for f in stops places; do if [ -f "$RUNNER_TEMP/out/$f.json" ]; then cp "$RUNNER_TEMP/out/$f.json" web/data/ && git add "web/data/$f.json"; fi; done
+          for f in stops places hazards; do if [ -f "$RUNNER_TEMP/out/$f.json" ]; then cp "$RUNNER_TEMP/out/$f.json" web/data/ && git add "web/data/$f.json"; fi; done
           if git diff --cached --quiet; then echo "без змін"; exit 0; fi
           python3 -c "import json;p='web/version.json';v=json.load(open(p));v['web']+=1;json.dump(v,open(p,'w'))"
           git add web/version.json
