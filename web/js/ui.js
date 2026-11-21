@@ -139,8 +139,10 @@ let geoTimer = null;
 function summaryHtml(trip) {
   const r = trip.route;
   const regs = (trip.regions || []).map(x => `<span class="pill${feed.air[x.id] ? ' air' : ''}">${esc(oblastName(x.id))}</span>`).join('');
+  const fx = (trip.foreign || []).map(c => t('cc_' + c) !== 'cc_' + c ? t('cc_' + c) : c).join(', ');
+  const foreign = fx ? `<div style="margin-top:10px;padding:10px;border-radius:12px;background:var(--red);color:#fff;font-weight:600">${esc(t('routeForeign', fx))}</div>` : '';
   return `<div class="kv"><div><b>${fmtDist(r.dist)}</b><span>${t('distance')}</span></div><div><b>${fmtDur(r.time)}</b><span>${t('driveTime')}</span></div><div><b>${fmtClock(new Date(Date.now() + r.time * 1000))}</b><span>${t('arrival')}</span></div></div>
-  <div style="margin-top:10px">${regs || (plan.regBusy ? `<span class="muted">${t('regionsLoading')}</span>` : '')}</div>`;
+  <div style="margin-top:10px">${regs || (plan.regBusy ? `<span class="muted">${t('regionsLoading')}</span>` : '')}</div>${foreign}`;
 }
 function offlineHtml() {
   const o = plan.off; if (!o) return '';
@@ -164,7 +166,7 @@ async function loadRegions(trip) {
   plan.regBusy = true; refresh('trip');
   try {
     const r = await regionsAlong(new RouteIndex(trip.route.coords));
-    trip.regions = r.regions; trip.towns = r.towns;
+    trip.regions = r.regions; trip.towns = r.towns; trip.foreign = r.foreign || [];
     if (getTrips().some(x => x.id === trip.id)) saveTrip(trip);
     if (g.trip && g.trip.id === trip.id) setRouteContext(trip.regions, trip.towns);
   } catch (e) { log('warn', 'регіони: ' + e.message); }

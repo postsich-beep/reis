@@ -10,20 +10,36 @@ export async function geocode(q, near) {
   q = q.trim(); if (!q) return [];
   const m = q.match(/^\s*(-?\d{1,2}[.,]\d+)\s*[,; ]\s*(-?\d{1,3}[.,]\d+)\s*$/);     // «49.99, 36.23»
   if (m) { const lat = +m[1].replace(',', '.'), lon = +m[2].replace(',', '.'); return [{ lat, lon, label: lat.toFixed(5) + ', ' + lon.toFixed(5), sub: '' }]; }
-  let url = PHOTON + '/api/?q=' + encodeURIComponent(q) + '&limit=7&bbox=' + UA_BBOX;
+  let url = PHOTON + '/api/?q=' + encodeURIComponent(q) + '&limit=20&bbox=' + UA_BBOX;
   if (near) url += '&lat=' + near.lat.toFixed(4) + '&lon=' + near.lon.toFixed(4);
   const j = await getJson(url, { timeout: 12000 });
-  return (j.features || []).map(f => {
+  const nq = normName(q);
+  const out = (j.features || []).map((f, i) => {
     const p = f.properties || {}, c = f.geometry.coordinates;
     const name = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || p.city || '';
     const sub = [p.street && p.name ? [p.street, p.housenumber].filter(Boolean).join(' ') : '', p.city !== name ? p.city : '', p.county, p.state].filter(Boolean).join(', ');
-    return { lat: c[1], lon: c[0], label: name, sub };
-  }).filter(x => x.label);
+    // лише Україна: у прямокутник пошуку потрапляють і шматки Росії та Білорусі
+    const ua = p.countrycode ? p.countrycode === 'UA' : /укра|ukrain|украин/i.test(p.country || '');
+    // великі міста — вище за однойменні села поблизу («Львов» = Львів, а не село під Бєлгородом)
+    const kind = p.osm_key === 'place' ? ({ city: 50, town: 38, village: 22, suburb: 16, hamlet: 10 }[p.osm_value] || 12) : 6;
+    const nn = normName(name), exact = nn === nq ? 30 : nn.startsWith(nq) ? 10 : 0;
+    const close = near && Math.hypot((c[1] - near.lat) * 111, (c[0] - near.lon) * 71) < 40 ? 6 : 0;
+    return { lat: c[1], lon: c[0], label: name, sub, ua, score: kind + exact + close + (20 - i) * 0.5 };
+  }).filter(x => x.label && x.ua);
+  return out.sort((a, b) => b.score - a.score).slice(0, 7).map(({ lat, lon, label, sub }) => ({ lat, lon, label, sub }));
 }
+// Порівняння назв без різниці між українським і російським написанням (Львів/Львов, Київ/Киев).
+export function normName(s) {
+  return String(s || '').toLowerCase().replace(/[ʼ'’`\-ьъ]/g, '')
+    .replace(/їв(?=\s|$)/g, 'ев').replace(/ів(?=\s|$)/g, 'ов')
+    .replace(/[іїиый]/g, 'и').replace(/[еєэё]/g, 'е').replace(/ґ/g, 'г')
+    .replace(/(.)\1+/g, '$1').replace(/\s+/g, ' ').trim();
+}
+
 export async function reverse(lat, lon) {
   const j = await getJson(PHOTON + '/reverse?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5), { timeout: 10000 });
   const p = j.features && j.features[0] && j.features[0].properties;
-  return p ? { name: p.name || '', city: p.city || p.town || p.village || p.name || '', county: p.county || '', state: p.state || '' } : null;
+  return p ? { name: p.name || '', city: p.city || p.town || p.village || p.name || '', county: p.county || '', state: p.state || '', cc: p.countrycode || '' } : null;
 }
 
 /* ---------- області України ---------- */
@@ -106,7 +122,7 @@ export function parseTrip(trip) {
 
 /* ---------- регіони вздовж маршруту (для аналізу наперед) ---------- */
 export async function regionsAlong(idx, onStep) {
-  const regions = [], towns = [];
+  const regions = [], towns = [], foreign = [];
   const stepM = Math.max(15000, Math.min(30000, idx.total / 12)), n = Math.floor(idx.total / stepM);
   let last = null;
   for (let i = 0; i <= n; i++) {
@@ -116,11 +132,12 @@ export async function regionsAlong(idx, onStep) {
       const id = r && oblastOf(r.state);
       if (r && r.city && !towns.some(x => x.name === r.city)) towns.push({ name: r.city, lat: +p.lat.toFixed(5), lon: +p.lon.toFixed(5), d: Math.round(d) });
       if (id && id !== last) { regions.push({ id, d }); last = id; }
+      if (r && r.cc && r.cc !== 'UA' && !foreign.includes(r.cc)) foreign.push(r.cc);     // маршрут виходить за кордон
     } catch (e) { log('warn', 'reverse: ' + e.message); }
     if (onStep) onStep(i, n);
     await sleep(350);
   }
-  return { regions, towns };
+  return { regions, towns, foreign };
 }
 
 /* ---------- сховище рейсів ---------- */

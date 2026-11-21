@@ -22,12 +22,14 @@ QUERIES = {
   node["highway"="speed_camera"](area.ua);
 );
 out center tags;''',
-    # їжа лише біля великих доріг: там, де реально зупиняється фура
-    'food': f'''[out:json][timeout:900][maxsize:1073741824];{UA}
-way["highway"~"^(motorway|trunk|primary)$"](area.ua)->.roads;
-nwr["amenity"~"^(restaurant|cafe|fast_food)$"](around.roads:120);
-out center tags;''',
 }
+# їжа лише біля великих доріг — шматками 3°×2°, щоб важкий запит «поруч із дорогою» не падав на сервері
+for lo in range(22, 41, 3):
+    for la in (44.3, 46.3, 48.3, 50.3):
+        QUERIES[f'food {la},{lo}'] = f'''[out:json][timeout:600];{UA}
+way["highway"~"^(motorway|trunk|primary)$"]({la},{lo},{la + 2},{lo + 3})->.roads;
+nwr["amenity"~"^(restaurant|cafe|fast_food)$"](area.ua)(around.roads:120);
+out center tags;'''
 BIG = re.compile(r'okko|окко|wog|upg|socar|shell|amic|brsm|брсм|ukrnafta|укрнафта|klo|кло|avantage|авантаж|motto|мотто|glusco|chipo|ovis|катрал|katral', re.I)
 
 
@@ -38,7 +40,10 @@ def overpass(q):
             try:
                 req = urllib.request.Request(url, data=urllib.parse.urlencode({'data': q}).encode(), headers={'User-Agent': 'Reis-truck-nav/1.0 (github.com/postsich-beep/reis)'})
                 with urllib.request.urlopen(req, timeout=1000) as r:
-                    return json.load(r)
+                    data = json.load(r)
+                if 'error' in str(data.get('remark', '')).lower():   # сервер не встиг — це не порожня відповідь
+                    raise RuntimeError(data['remark'][:200])
+                return data
             except Exception as e:  # пробуємо інше дзеркало
                 last = e
                 print('overpass', url, e, file=sys.stderr)
@@ -101,6 +106,7 @@ def main(out):
                 rows.append(r)
                 n += 1
         print(f'{key}: {n}', file=sys.stderr)
+        time.sleep(3)
     rows.sort(key=lambda r: (r[2], r[0], r[1]))
     from collections import Counter
     print('усього', len(rows), dict(Counter(r[2] for r in rows)), file=sys.stderr)
