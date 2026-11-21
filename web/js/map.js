@@ -3,6 +3,8 @@ import { bus, log, S, db, isNight, clamp, sleep } from './core.js';
 import { pos } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
+import { feed } from './feed.js';
+import { OBLAST_CENTER, oblastName } from './route.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -57,7 +59,8 @@ async function fetchToCache(url) {                    // для завантаж
 }
 
 /* ---------- створення карти ---------- */
-let puck = null, puckEl = null, wps = [], pickMarker = null, lastGrad = -1, styleTimer = null;
+let puck = null, puckEl = null, wps = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
+const evMarks = new Map();
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 export function initMap() {
@@ -85,6 +88,8 @@ export function initMap() {
   bus.on('route', drawRoute);
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
+  bus.on('feed', drawEvents);
+  setInterval(drawEvents, 60000);
   bus.on('settings', k => { if (k === 'theme') applyTheme(); if (k === 'view3d') follow(true); });
   setInterval(() => {
     applyTheme();
@@ -98,11 +103,14 @@ function addLayers() {
   clearTimeout(styleTimer);
   if (map.getSource('route')) return;
   const w = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 6, a, 12, b, 17, c];
-  map.addSource('route', { type: 'geojson', data: EMPTY, lineMetrics: true });
+  map.addSource('route', { type: 'geojson', data: EMPTY });
+  map.addSource('route-done', { type: 'geojson', data: EMPTY });
   map.addSource('poi', { type: 'geojson', data: EMPTY });
   map.addSource('acc', { type: 'geojson', data: EMPTY });
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2f6bff', 'line-width': w(3, 6, 12) } });
+  // пройдене — світло-сіро-блакитне поверх синього
+  map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
   map.addLayer({ id: 'acc-fill', type: 'fill', source: 'acc', paint: { 'fill-color': '#f5a300', 'fill-opacity': 0.16 } });
   map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 2, 'line-dasharray': [2, 2] } });
   map.addLayer({
@@ -112,7 +120,7 @@ function addLayers() {
       'circle-color': ['match', ['get', 'k'], 'cam', '#e5484d', '#2f9e62'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2
     }
   });
-  lastGrad = -1; drawRoute(); drawPoi();
+  doneD = -1; drawRoute(); drawPoi();
 }
 
 /* ---------- день / ніч ---------- */
@@ -165,25 +173,63 @@ function wpEl(cls, txt) { const d = document.createElement('div'); d.className =
 function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
-  lastGrad = -1;
+  doneD = -1; setDone(EMPTY);
   if (!g.route) { src.setData(EMPTY); return; }
   src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: g.route.coords.map(c => [c[1], c[0]]) } });
-  map.setPaintProperty('route-line', 'line-gradient', undefined);
   const tr = g.trip; if (!tr) return;
   const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
   add(tr.a, 'wp-a', 'A'); add(tr.v, 'wp-v', '•'); add(tr.b, 'wp-b', 'Б');
   drawProgress();
 }
-// Пройдена частина маршруту сіріє (через градієнт — без перемальовування геометрії).
+function setDone(data) { const s = map && map.getSource && map.getSource('route-done'); if (s) s.setData(data); }
+// Пройдена частина маршруту — окрема світла лінія від старту до машини. Оновлюється не частіше ніж раз на 2 с.
 function drawProgress() {
-  if (!map || !g.idx || !map.getLayer || !map.getLayer('route-line')) return;
-  const f = clamp((pos.rd || 0) / (g.idx.total || 1), 0, 1);
-  if (Math.abs(f - lastGrad) < 0.0004) return;
-  lastGrad = f;
-  try {
-    map.setPaintProperty('route-line', 'line-gradient', f <= 0.0001 ? ['interpolate', ['linear'], ['line-progress'], 0, '#2f6bff', 1, '#2f6bff']
-      : ['step', ['line-progress'], '#8b93a1', Math.min(f, 0.9999), '#2f6bff']);
-  } catch (_) {}
+  if (!map || !g.idx) return;
+  const rd = pos.rd == null ? 0 : pos.rd, now = Date.now();
+  if (Math.abs(rd - doneD) < 10 || (now - doneT < 2000 && Math.abs(rd - doneD) < 300)) return;
+  doneD = rd; doneT = now;
+  if (rd < 5) { setDone(EMPTY); return; }
+  let c = g.idx.slice(0, rd);
+  if (c.length > 3000) {                    // давню частину проріджуємо, останні 600 точок — повністю
+    const head = c.slice(0, c.length - 600), k = Math.ceil(head.length / 2400);
+    c = head.filter((_, i) => i % k === 0).concat(c.slice(c.length - 600));
+  }
+  setDone({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } });
+}
+
+/* ---------- події на карті: Telegram, погода, тривоги ---------- */
+const EV_ICON = {
+  red: '<svg viewBox="0 0 24 24"><path d="M12 5v9" stroke="#fff" stroke-width="3.4" stroke-linecap="round"/><circle cx="12" cy="19" r="2" fill="#fff"/></svg>',
+  yellow: '<svg viewBox="0 0 24 24"><path d="M12 6v7" stroke="#231a00" stroke-width="3.2" stroke-linecap="round"/><circle cx="12" cy="18" r="1.9" fill="#231a00"/></svg>',
+  green: '<svg viewBox="0 0 24 24"><path d="m6.5 12.5 3.6 3.6L17.8 8" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  wx: '<svg viewBox="0 0 24 24"><path d="M7 17.5h10a4 4 0 0 0 .6-8 5.5 5.5 0 0 0-10.6 1.4A3.4 3.4 0 0 0 7 17.5Z" fill="currentColor"/></svg>',
+  air: '<svg viewBox="0 0 24 24"><path d="M12 3 4 7v5c0 4.4 3.4 8.3 8 9 4.6-.7 8-4.6 8-9V7Z" fill="currentColor"/><path d="M12 8v5" stroke="#f6bd16" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="16.5" r="1.5" fill="#f6bd16"/></svg>'
+};
+function evMarker(id, p, cls, icon, title) {
+  let m = evMarks.get(id);
+  if (m) { m.seen = true; return; }
+  const el = document.createElement('button');
+  el.className = 'evm ' + cls; el.innerHTML = icon; el.setAttribute('aria-label', title || '');
+  el.addEventListener('click', e => { e.stopPropagation(); bus.emit('evTap', id); });
+  m = new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map);
+  m.seen = true; evMarks.set(id, m);
+}
+export function drawEvents() {
+  if (!map) return;
+  for (const m of evMarks.values()) m.seen = false;
+  const now = Date.now();
+  if (S.lookahead) {
+    for (const it of feed.items) {
+      if (it.filtered || !it.level || it.vote === -1 || it.lat == null || it.src === 'stop' || now - it.time > 3 * 3600e3) continue;
+      const cls = (it.src === 'wx' ? 'wx ' : '') + it.level + (it.locKind === 'area' ? ' area' : '');
+      evMarker(it.id, it, cls, it.src === 'wx' ? EV_ICON.wx : EV_ICON[it.level], it.sum || it.text);
+    }
+    if (S.air) for (const id of Object.keys(feed.air || {})) {
+      const c = OBLAST_CENTER[id]; if (!c) continue;
+      evMarker('air:' + id, { lat: c[0], lon: c[1] }, 'air', EV_ICON.air, oblastName(id));
+    }
+  }
+  for (const [id, m] of evMarks) if (!m.seen) { m.remove(); evMarks.delete(id); }
 }
 export function showRoute(coords) {
   if (!map || !coords || coords.length < 2) return;
@@ -199,13 +245,12 @@ export function showRoute(coords) {
 export function previewRoute(coords) {
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
   src.setData(coords ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } } : EMPTY);
-  try { map.setPaintProperty('route-line', 'line-gradient', undefined); } catch (_) {}
-  lastGrad = -1;
+  doneD = -1; setDone(EMPTY);
   if (coords) showRoute(coords);
 }
 export function setMapStyle(url) {
   if (!map || !url) return;
-  view.blank = false; lastGrad = -1;
+  view.blank = false; doneD = -1;
   try { map.setStyle(url); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
 export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }

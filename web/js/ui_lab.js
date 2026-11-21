@@ -15,7 +15,7 @@ import { t } from './i18n.js';
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
   ['sec', 'labMain'], ['lookahead'],
-  ['sec', 'labWatch'], ['tg'], ['air'], ['cams'], ['stops'], ['drive'], ['aiFilter'],
+  ['sec', 'labWatch'], ['tg'], ['air'], ['weather'], ['cams'], ['stops'], ['drive'], ['aiFilter'],
   ['sec', 'labPos'], ['spoof'], ['offline'], ['rec']
 ];
 const SOON = ['obd', 'camera', 'mesh', 'localAi', 'fullMap', 'traffic'];

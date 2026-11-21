@@ -326,7 +326,7 @@ function onMapPick(p) {
 
 /* =====================  ПАНЕЛЬ «ПОДІЇ»  ===================== */
 let feedTab = 'main';
-const SRC = { tg: 'Telegram', air: 'srcAir', stop: 'srcStop', drive: 'srcDrive', sys: 'srcSys' };
+const SRC = { tg: 'Telegram', air: 'srcAir', stop: 'srcStop', drive: 'srcDrive', sys: 'srcSys', wx: 'srcWx' };
 function ago(ts) { const s = (Date.now() - ts) / 1000; return s < 90 ? t('justNow') : s < 3600 ? Math.round(s / 60) + ' ' + t('minAgo') : fmtClock(new Date(ts)); }
 function evHtml(i) {
   const src = i.src === 'tg' ? '@' + i.ch : t(SRC[i.src] || 'srcSys');
@@ -421,6 +421,12 @@ export function initUI() {
   bus.on('settings', k => { railState(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
+  bus.on('evTap', id => {
+    if (id.startsWith('air:')) { toast(t('airOn', oblastName(id.slice(4))), 'yellow', 7000, () => openPanel('feed')); return; }
+    const it = feed.items.find(x => x.id === id); if (!it) return;
+    const src = it.src === 'tg' ? '@' + it.ch : t(SRC[it.src] || 'srcSys');
+    toast(src + ' · ' + ago(it.time) + (it.locName ? ' · ' + it.locName : '') + '\n' + (it.sum || it.text).replace(/\s+/g, ' ').slice(0, 260), it.level, 12000, () => openPanel('feed'));
+  });
   bus.on('gpsLost', d => { if (d.reason !== 'manual') say(t(d.reason === 'spoof' ? 'voiceSpoof' : 'voiceLost'), { urgent: true }); P.vibrate(300); });
   bus.on('gpsBack', d => { if (d.reason !== 'sim') { say(t('voiceBack')); toast(t('gpsBackToast', d.err), 'green', 5000); } });
   bus.on('arrived', () => { toast(t('arrived'), 'green', 8000); });

@@ -42,6 +42,22 @@ export const OBLASTS = [
   ['chernivtsi', 'Чернівецька', 'Черновицкая', 'чернівец|черновиц|chernivts|буковин'], ['chernihiv', 'Чернігівська', 'Черниговская', 'чернігів|чернигов|chernihiv'],
   ['crimea', 'АР Крим', 'АР Крым', 'крим|крым|crimea']
 ].map(([id, uk, ru, re]) => ({ id, uk, ru, re: new RegExp(re, 'i') }));
+// Обласні центри: куди ставити позначку, якщо подія стосується всієї області.
+export const OBLAST_CENTER = {
+  vinnytsia: [49.233, 28.468], volyn: [50.747, 25.325], dnipro: [48.464, 35.046], donetsk: [48.723, 37.556], zhytomyr: [50.254, 28.658],
+  zakarpattia: [48.621, 22.288], zaporizhzhia: [47.838, 35.139], 'ivano-frankivsk': [48.922, 24.711], kyiv: [50.45, 30.523], kirovohrad: [48.508, 32.262],
+  luhansk: [48.948, 38.49], lviv: [49.839, 24.029], mykolaiv: [46.975, 31.994], odesa: [46.482, 30.723], poltava: [49.588, 34.551], rivne: [50.619, 26.252],
+  sumy: [50.907, 34.798], ternopil: [49.553, 25.594], kharkiv: [49.993, 36.23], kherson: [46.635, 32.616], khmelnytskyi: [49.422, 26.996],
+  cherkasy: [49.444, 32.059], chernivtsi: [48.292, 25.935], chernihiv: [51.498, 31.289], crimea: [44.952, 34.102]
+};
+// Пошук населеного пункту (не вулиці, не магазину) в межах України.
+export async function placeSearch(q) {
+  const url = PHOTON + '/api/?q=' + encodeURIComponent(q) + '&limit=4&bbox=' + UA_BBOX +
+    '&osm_tag=place:city&osm_tag=place:town&osm_tag=place:village&osm_tag=place:hamlet&osm_tag=place:suburb';
+  const j = await getJson(url, { timeout: 12000 });
+  return (j.features || []).map(f => ({ name: (f.properties || {}).name || '', state: (f.properties || {}).state || '', lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] })).filter(x => x.name);
+}
+export const townName = x => typeof x === 'string' ? x : (x && x.name) || '';
 export const oblastOf = s => { if (!s) return null; const o = OBLASTS.find(o => o.re.test(s)); return o ? o.id : null; };
 export const oblastName = id => { const o = OBLASTS.find(o => o.id === id); return o ? (S.lang === 'ru' ? o.ru : o.uk) : id; };
 
@@ -98,7 +114,7 @@ export async function regionsAlong(idx, onStep) {
     try {
       const r = await reverse(p.lat, p.lon);
       const id = r && oblastOf(r.state);
-      if (r && r.city && !towns.includes(r.city)) towns.push(r.city);
+      if (r && r.city && !towns.some(x => x.name === r.city)) towns.push({ name: r.city, lat: +p.lat.toFixed(5), lon: +p.lon.toFixed(5), d: Math.round(d) });
       if (id && id !== last) { regions.push({ id, d }); last = id; }
     } catch (e) { log('warn', 'reverse: ' + e.message); }
     if (onStep) onStep(i, n);

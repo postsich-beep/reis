@@ -1,5 +1,5 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
-export const VERSION = { web: 3, name: '1.0.2' };
+export const VERSION = { web: 4, name: '1.0.3' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -32,7 +32,7 @@ const DEFAULTS = {
   voice: true, popups: true, lookahead: true,
   tg: true, air: true, cams: true, stops: true, drive: true,
   aiFilter: false, spoof: true, offline: true, rec: false,
-  vibrate: true, notify: true, keepAwake: true, channelsSeeded: false,
+  vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 40, axle: 11.5, hazmat: false },
   stopKm: 30, aheadH: 3, ttsRate: 1,
   apiKey: '', model: 'claude-sonnet-5-5',

@@ -1,9 +1,9 @@
 // Стрічка подій: Telegram-канали регіонів попереду, повітряні тривоги, фільтр «дорожньо важливе», навчання від оцінок.
-import { bus, log, S, db, uid, fmtDur, sleep } from './core.js';
+import { bus, log, S, db, uid, fmtDur, sleep, hav } from './core.js';
 import { http, isNative, online, notify, vibrate } from './platform.js';
 import { pos } from './nav.js';
 import { g, say } from './guide.js';
-import { oblastOf, oblastName, reverse, OBLASTS } from './route.js';
+import { oblastOf, oblastName, reverse, OBLASTS, OBLAST_CENTER, placeSearch, townName } from './route.js';
 import { askClaude, hasKey } from './ai.js';
 import { t } from './i18n.js';
 
@@ -67,7 +67,7 @@ export function classify(text, ch) {
   else if (yel >= 2 || red >= 2) { level = 'yellow'; score = yel + red; }
   if (level && !road && !hard) level = null;                 // закрився завод — нам не цікаво; дорога — цікаво
   if (SPAM.test(s)) score -= 3;
-  const town = feed.towns.some(n => n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))));
+  const town = feed.towns.some(x => { const n = townName(x); return n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))); });
   if (town) score += 1.5;
   score += learned(s, ch);
   return { level, score, road: road || hard };
@@ -75,6 +75,58 @@ export function classify(text, ch) {
 const VISIBLE = 1.2;
 
 /* ---------- оцінки водія: 👍 потрібно, 👎 не потрібно, ? не вирішив ---------- */
+/* ---------- де сталася подія: місто на маршруті, назва з тексту, або вся область ---------- */
+const STOPW = new Set(['україна', 'україни', 'україні', 'україну', 'украина', 'украины', 'росія', 'росії', 'россия', 'дснс', 'дтп', 'зсу', 'бпла', 'увага', 'внимание',
+  'терміново', 'срочно', 'оновлено', 'сьогодні', 'вчора', 'завтра', 'понеділок', 'вівторок', 'середа', 'четвер', 'пʼятниця', 'субота', 'неділя',
+  'січня', 'лютого', 'березня', 'квітня', 'травня', 'червня', 'липня', 'серпня', 'вересня', 'жовтня', 'листопада', 'грудня', 'поліція', 'патрульні', 'рятувальники', 'водіїв', 'водії']);
+const norm = s => s.toLowerCase().replace(/[ʼ'’]/g, '').replace(/[іїи]/g, 'і').replace(/[єе]/g, 'е');
+const geoCache = new Map();
+try { for (const [k, v] of JSON.parse(localStorage.getItem('reis.geo') || '[]')) geoCache.set(k, v); } catch (_) {}
+const saveGeo = () => { try { localStorage.setItem('reis.geo', JSON.stringify([...geoCache].slice(-400))); } catch (_) {} };
+function nearRoute(p) {
+  if (g.idx) { const l = g.idx.locate(p, null); return l && l.off < 40000; }
+  return pos.lat == null || hav(p, pos) < 200000;
+}
+async function findPlace(word) {
+  const key = norm(word);
+  if (geoCache.has(key)) return geoCache.get(key);
+  const vars = [...new Set([word, word.replace(/ова$/, 'ів'), word.replace(/єва$/, 'їв'), word.replace(/ові$/, 'ів'), word.replace(/(ою|ому|ого|ах|ах|і|у|а)$/, '')])].filter(v => v.length >= 4);
+  let hit = null;
+  for (const v of vars) {
+    let res = [];
+    try { res = await placeSearch(v); } catch (_) { return null; }        // немає мережі — не кешуємо
+    hit = res.find(r => norm(r.name).slice(0, 4) === key.slice(0, 4) && nearRoute(r));
+    if (hit) break;
+    await sleep(300);
+  }
+  geoCache.set(key, hit || 0); saveGeo();
+  return hit;
+}
+const locQueue = []; let locBusy = false;
+export function locate(it) {
+  if (!it || it.lat != null || it.locTried) return;
+  it.locTried = true; locQueue.push(it);
+  if (!locBusy) runLocate();
+}
+async function runLocate() {
+  locBusy = true;
+  while (locQueue.length) {
+    const it = locQueue.shift(), s = norm(it.text);
+    let p = null, kind = 'town';
+    // 1) місто з маршруту
+    for (const x of feed.towns) { if (typeof x !== 'object' || x.lat == null) continue; const n = norm(x.name); if (n.length > 3 && s.includes(n.slice(0, Math.max(4, n.length - 2)))) { p = x; break; } }
+    // 2) назва від ШІ або великі літери в тексті
+    if (!p && online()) {
+      const words = it.place ? [it.place] : [...new Set(it.text.split(/[^\p{L}ʼ'’-]+/u).filter(w => /^[А-ЯІЇЄҐ][а-яіїєґʼ'’-]{3,}$/.test(w) && !STOPW.has(w.toLowerCase()) && !/ськ|цьк|щин/.test(w.toLowerCase())))].slice(0, 3);
+      for (const w of words) { p = await findPlace(w); if (p) break; }
+    }
+    // 3) лише область — позначка в обласному центрі
+    if (!p) { const o = OBLASTS.find(x => x.re.test(it.text.toLowerCase())); if (o && OBLAST_CENTER[o.id]) { p = { name: oblastName(o.id), lat: OBLAST_CENTER[o.id][0], lon: OBLAST_CENTER[o.id][1] }; kind = 'area'; } }
+    if (p) { it.lat = p.lat; it.lon = p.lon; it.locName = p.name; it.locKind = kind; save(); bus.emit('feed', feed); }
+  }
+  locBusy = false;
+}
+
 export function vote(id, v) {
   const it = feed.items.find(x => x.id === id); if (!it) return;
   const prev = it.vote; it.vote = v;
@@ -101,6 +153,7 @@ function add(it, quiet) {
   feed.items.push(item); if (feed.items.length > 300) feed.items.splice(0, 50);
   if (!item.filtered && item.level && !quiet) alertUser(item);
   save(); bus.emit('feed', feed);
+  if (item.src === 'tg' && !item.filtered && item.level) locate(item);
   return item;
 }
 function alertUser(item) {
@@ -154,8 +207,18 @@ export const DEFAULT_CHANNELS = [
   { name: 'odeskaODA', region: 'odesa', on: true },
   { name: 'zoda_gov_ua', region: 'zaporizhzhia', on: true },
   { name: 'kozytskyy_maksym_official', region: 'lviv', on: true },
-  { name: 'chernigivskaODA', region: 'chernihiv', on: true }
+  { name: 'chernigivskaODA', region: 'chernihiv', on: true },
+  { name: 'zhytomyrskaODA', region: 'zhytomyr', on: true },
+  { name: 'volynskaODA', region: 'volyn', on: true },
+  { name: 'cherkaskaODA', region: 'cherkasy', on: true },
+  { name: 'khersonskaODA', region: 'kherson', on: true },
+  { name: 'kirovogradskaODA', region: 'kirovohrad', on: true },
+  { name: 'ternopilskaODA', region: 'ternopil', on: true },
+  { name: 'khmelnytskaODA', region: 'khmelnytskyi', on: true },
+  { name: 'zakarpatskaODA', region: 'zakarpattia', on: true },
+  { name: 'chernivetskaODA', region: 'chernivtsi', on: true }
 ];
+const CH_DEF_VER = 2;                  // збільшується, коли список поповнюється: нові канали додаються й тим, у кого вже є список
 export function addDefaultChannels() {
   const have = new Set((S.channels || []).map(c => c.name.toLowerCase()));
   const add = DEFAULT_CHANNELS.filter(c => !have.has(c.name.toLowerCase())).map(c => ({ ...c }));
@@ -167,7 +230,7 @@ function mentionsRoute(text) {
   const s = text.toLowerCase();
   const ids = regionsAhead().map(r => r.id);
   if (ids.some(id => { const o = OBLASTS.find(x => x.id === id); return o && o.re.test(s); })) return true;
-  return feed.towns.some(n => n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))));
+  return feed.towns.some(x => { const n = townName(x); return n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))); });
 }      // у браузерній версії сайт Telegram не відповідає сторінкам (CORS)
 async function pollChannel(name) {
   const r = await http('https://t.me/s/' + encodeURIComponent(name), { viaNative: true, timeout: 20000, headers: { 'Accept-Language': 'uk,ru;q=0.8' } });
@@ -222,8 +285,8 @@ async function runAi() {
   const lang = S.lang === 'ru' ? 'російською' : 'українською';
   const system = `Ти фільтр дорожніх новин для водія вантажівки в Україні. Для кожного повідомлення визнач, чи впливає воно на проїзд дорогами: перекриття, ДТП, затори, мости, об'їзди, вибухи й обстріли біля доріг, погода на дорозі, блокпости.
 Рівні: red — підтверджена перешкода руху; yellow — попередження або непідтверджене; green — проїзд відновлено чи корисна для водія новина; none — доріг не стосується (виробництво, політика, реклама).
-Відповідай лише JSON-масивом без пояснень: [{"i":номер,"level":"red|yellow|green|none","sum":"суть до 12 слів ${lang}"}]`;
-  const user = `Населені пункти на маршруті: ${feed.towns.slice(0, 25).join(', ') || 'невідомо'}.
+Відповідай лише JSON-масивом без пояснень: [{"i":номер,"level":"red|yellow|green|none","sum":"суть до 12 слів ${lang}","place":"назва населеного пункту в називному відмінку, де сталася подія, або порожньо"}]`;
+  const user = `Населені пункти на маршруті: ${feed.towns.slice(0, 25).map(townName).join(', ') || 'невідомо'}.
 ${liked.length ? 'Водій позначив корисним: ' + JSON.stringify(liked) + '\n' : ''}${disliked.length ? 'Водій позначив непотрібним: ' + JSON.stringify(disliked) + '\n' : ''}Повідомлення:
 ${JSON.stringify(batch.map((b, i) => ({ i, ch: b.ch, text: short(b.text, 600) })))}`;
   try {
@@ -232,7 +295,7 @@ ${JSON.stringify(batch.map((b, i) => ({ i, ch: b.ch, text: short(b.text, 600) })
     for (const r of arr) {
       const it = batch[r.i]; if (!it) continue;
       if (r.level === 'none') { it.filtered = true; }
-      else if (['red', 'yellow', 'green'].includes(r.level)) { it.level = r.level; it.filtered = it.vote === -1; it.sum = r.sum || ''; it.ai = true; alertUser(it); }
+      else if (['red', 'yellow', 'green'].includes(r.level)) { it.level = r.level; it.filtered = it.vote === -1; it.sum = r.sum || ''; it.ai = true; if (r.place) it.place = String(r.place).slice(0, 60); alertUser(it); locate(it); }
     }
   } catch (e) {
     log('warn', 'ШІ-фільтр: ' + e.message);
@@ -305,8 +368,8 @@ export function clearFeed() { feed.items = []; save(); bus.emit('feed', feed); }
 export async function init() {
   const st = await db.get('kv', 'feed');
   if (st) { feed.items = (st.items || []).filter(i => Date.now() - i.time < 24 * 3600e3); seenKeys = new Set(st.seen || []); }
-  bus.on('feedPush', it => add(it));
-  if (!S.channelsSeeded) { if (!(S.channels || []).length) addDefaultChannels(); S.channelsSeeded = true; }
+  bus.on('feedPush', it => add(it, it.quiet));
+  if ((S.chDefVer || 0) < CH_DEF_VER) { addDefaultChannels(); S.chDefVer = CH_DEF_VER; S.channelsSeeded = true; }
   bus.emit('feed', feed);
   const loop = async () => {
     if (S.lookahead) { await updateHere(); if (S.air) await pollAir(); if (S.tg) await pollTelegram(); }
