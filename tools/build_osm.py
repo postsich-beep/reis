@@ -23,7 +23,7 @@ from shapely.geometry import LineString, Point
 from shapely.strtree import STRtree
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from build_stops import row as stop_row          # noqa: E402  — та сама класифікація АЗС, стоянок, мотелів, камер
+from build_stops import row as stop_row, has_shower   # noqa: E402  — та сама класифікація АЗС, стоянок, мотелів, камер, душів
 from build_places import OBLASTS, KIND, pop      # noqa: E402
 
 FOOD = {'restaurant', 'cafe', 'fast_food'}
@@ -110,6 +110,8 @@ def stop_kind(t, is_node):
         return 'stop'
     if is_node and t.get('highway') == 'speed_camera':
         return 'cam'
+    if has_shower(t):                              # окремий душ або інше місце з душем (туалет, кемпінг, база)
+        return 'shower'
     return None
 
 
@@ -196,6 +198,7 @@ def main(pbf, stops_out, places_out, hazards_out=None):
             rows.append(x)
     rows.sort(key=lambda x: (x[2], x[0], x[1]))
     print('піт-стопи:', len(rows), dict(Counter(x[2] for x in rows)), f'(їжа далеко від трас відкинута: {food_far})', file=sys.stderr)
+    print('з душем:', sum(1 for x in rows if x[3] & 2), dict(Counter(x[2] for x in rows if x[3] & 2)), file=sys.stderr)
 
     # населені пункти
     prow = []

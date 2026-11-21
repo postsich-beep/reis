@@ -4,7 +4,8 @@
 Запускає GitHub Actions (робочий процес «Піт-стопи»). Результат — web/data/stops.json:
   {"v": 1, "date": "YYYYMMDD", "rows": [[lat, lon, type, flags, name, extra], ...]}
 type:  f — АЗС, s — зона сервісу / майданчик відпочинку, p — стоянка для фур,
-       e — їжа біля траси (кафе, ресторан), m — мотель, c — камера швидкості
+       e — їжа біля траси (кафе, ресторан), m — мотель, c — камера швидкості,
+       h — душ (окремий душ або інше місце, де OSM каже, що є душ)
 flags: 1 для фур, 2 душ, 4 їжа, 8 туалет, 16 цілодобово, 32 велика мережа
 extra: для камер — обмеження швидкості
 """
@@ -55,6 +56,13 @@ def yes(v):
     return str(v or '').lower() in ('yes', 'designated', '24/7')
 
 
+SHOWER_YES = ('yes', 'paid', 'fee', 'free', 'hot', 'hot_water', 'customers', 'designated', 'public', 'outdoor', 'indoor')
+
+
+def has_shower(t):
+    return t.get('amenity') == 'shower' or any(str(t.get(k, '')).lower() in SHOWER_YES for k in ('shower', 'amenity:shower', 'shower:hgv'))
+
+
 def row(el):
     t = el.get('tags', {})
     lat = el.get('lat', (el.get('center') or {}).get('lat'))
@@ -73,12 +81,16 @@ def row(el):
         typ = 'p'
     elif t.get('tourism') == 'motel':
         typ = 'm'
+    elif t.get('amenity') in ('restaurant', 'cafe', 'fast_food'):
+        typ = 'e'
+    elif has_shower(t):
+        typ = 'h'
     else:
         typ = 'e'
     f = 0
     if yes(t.get('hgv')) or t.get('fuel:HGV_diesel') == 'yes' or typ == 'p':
         f |= 1
-    if yes(t.get('shower')) or yes(t.get('amenity:shower')):
+    if has_shower(t):
         f |= 2
     if typ == 'e' or any(yes(t.get(k)) for k in ('restaurant', 'cafe', 'fast_food')) or t.get('shop') == 'convenience' or t.get('cuisine'):
         f |= 4

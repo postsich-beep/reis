@@ -39,6 +39,7 @@ jobs:
             nwr/amenity=fuel,restaurant,cafe,fast_food,parking \
             nwr/highway=services,rest_area,speed_camera w/highway=motorway,trunk,primary \
             nwr/tourism=motel n/place=city,town,village r/admin_level=4 \
+            nwr/amenity=shower nwr/shower nwr/amenity:shower nwr/shower:hgv \
             w/maxweight w/maxweight:hgv w/maxheight w/maxheight:physical w/maxaxleload w/hgv w/smoothness \
             w/highway=secondary,tertiary,unclassified \
             -o filtered.osm.pbf --overwrite
