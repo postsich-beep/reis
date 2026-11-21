@@ -113,8 +113,8 @@ function addLayers() {
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2f6bff', 'line-width': w(3, 6, 12) } });
   // пройдене — світло-сіро-блакитне поверх синього
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
-  map.addLayer({ id: 'acc-fill', type: 'fill', source: 'acc', paint: { 'fill-color': '#f5a300', 'fill-opacity': 0.16 } });
-  map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 2, 'line-dasharray': [2, 2] } });
+  // похибка позиції — лише тонкий пунктирний контур, без заливки
+  map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
   map.addLayer({
     id: 'poi-dot', type: 'circle', source: 'poi', minzoom: 8,
     paint: {
@@ -144,6 +144,8 @@ function follow(force) {
   const kmh = pos.spd * 3.6;
   let zoom = clamp(16.8 - kmh / 45, 14.4, 16.8);
   if (g.active && g.next && g.distNext < 350) zoom = Math.max(zoom, 16.3);
+  // позиція приблизна — віддаляємо карту, щоб коло похибки вміщалося на екрані
+  if ((pos.mode === 'approx' || pos.mode === 'dr') && pos.acc > 80) zoom = Math.min(zoom, clamp(16.6 - Math.log2(pos.acc / 50), 10, 16.6));
   const h = map.getContainer().clientHeight;
   map.easeTo({
     center: [pos.lon, pos.lat], zoom: clamp(zoom + view.zoomBias, 5, 19), bearing: view.north ? 0 : pos.hdg, pitch: S.view3d ? 52 : 0,

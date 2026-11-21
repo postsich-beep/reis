@@ -17,6 +17,7 @@ let lastFixT = 0, lastTick = Date.now(), vCruise = 0, net = null, compass = null
 let yawNow = null, yawRef = null, hdgRef = null;
 let moving = true, stillT = 0, varStop = null, varMove = null;
 let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0, approxT = 0;
+let netHist = [], apSpd = null, apSpdT = 0;      // швидкість за зсувом вишок/Wi-Fi, коли GPS немає або підмінено
 
 const ema = (o, v, k = 0.1) => o == null ? v : o + (v - o) * k;
 const MAX_SPD = 50;                          // 180 км/год — фура так не їде
@@ -32,7 +33,7 @@ function fake(f, now) {
 }
 function spoofSeen(why, f) {
   const first = Date.now() - pos.spoofAt > 60000;
-  pos.spoofAt = Date.now();
+  pos.spoofAt = Date.now(); pos.spoofWhy = why; pos.spoofProv = f.prov; pos.spoofLat = +f.lat; pos.spoofLon = +f.lon; pos.spoofSpd = f.spd;
   if (first) log('warn', `підміна GPS (${why}, ${f.prov}): ${(+f.lat).toFixed(3)}, ${(+f.lon).toFixed(3)} — відкинуто`);
   bus.emit('spoof', { why, prov: f.prov });
 }
@@ -89,6 +90,26 @@ function accept(f) {
   bus.emit('pos', pos);
 }
 
+// Швидкість за вишками: беремо найстарішу точку за останні 30–180 с; рахуємо, лише якщо зсув помітно більший за похибку.
+function netSpeed(p) {
+  netHist.push(p); netHist = netHist.filter(x => p.rt - x.rt <= 180000);
+  const old = netHist.find(x => p.rt - x.rt >= 30000);
+  if (!old) return;
+  const d = hav(old, p), dt = (p.rt - old.rt) / 1000;
+  if (d > 1.5 * (Math.min(old.acc, 800) + Math.min(p.acc, 800))) { apSpd = Math.min(d / dt, MAX_SPD); apSpdT = p.rt; }
+  else if (d < 150) { apSpd = 0; apSpdT = p.rt; }
+}
+// Що показувати на спідометрі: справжня швидкість GPS, оцінка, «стоїть» або «невідомо».
+export function speedView() {
+  const fresh = apSpd != null && Date.now() - apSpdT < 60000;
+  if (pos.mode === 'gps') return { kmh: pos.spd * 3.6, kind: 'gps' };
+  if (!moving) return { kmh: 0, kind: 'still' };
+  if (pos.mode === 'dr' && vCruise > 0.5) return { kmh: pos.spd * 3.6, kind: 'est' };
+  if (fresh && apSpd > 0.5) return { kmh: apSpd * 3.6, kind: 'approx' };
+  if (pos.mode === 'approx' && pos.spd > 0.5) return { kmh: pos.spd * 3.6, kind: 'approx' };
+  return { kmh: null, kind: 'none' };
+}
+
 // Поки GPS не знайшов супутників: показуємо приблизне місце за вишками й Wi-Fi або останнє відоме.
 function approx(f) {
   if (pos.mode !== 'none' && pos.mode !== 'approx') return;
@@ -133,7 +154,7 @@ function onGps(f) {
   if (simOn && !f.sim) return;
   const now = Date.now();
   if (f.prov === 'network' || f.prov === 'fused' || f.prov === 'last' || f.prov === 'saved') {
-    if (f.prov === 'network' && inUkraine(f)) net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now };
+    if (f.prov === 'network' && inUkraine(f)) { net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now }; netSpeed(net); }
     approx(f);
     return;
   }
@@ -206,7 +227,7 @@ function tick() {
   const now = Date.now(), dt = clamp((now - lastTick) / 1000, 0, 300); lastTick = now;
   if (pos.mode === 'gps' && now - lastFixT > 5000) enterDR('timeout');
   if (pos.mode !== 'dr') return;
-  const v = moving ? vCruise : 0, step = v * (dt + carry); carry = 0;
+  const v = moving ? (vCruise > 0.5 ? vCruise : (apSpd != null && Date.now() - apSpdT < 60000 ? apSpd : 0)) : 0, step = v * (dt + carry); carry = 0;
   if (route && pos.onRoute && pos.rd != null) {
     pos.rd = Math.min(route.total, pos.rd + step);
     const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;

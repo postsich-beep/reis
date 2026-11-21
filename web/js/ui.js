@@ -1,7 +1,7 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual } from './nav.js';
+import { pos, nudge, acceptPending, setManual, speedView } from './nav.js';
 import { g, startTrip, stopTrip, rerouteNow, say } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
@@ -52,9 +52,11 @@ let searchSince = Date.now(), indoorHinted = false, offWarned = false;
 const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace('.', ',') + ' ' + t('km') : a + ' ' + t('m');
 function hud() {
   // швидкість
-  const kmh = pos.spd * 3.6, sp = $('speed');
-  $('spdVal').textContent = kmh < 2 ? '0' : Math.round(kmh);
-  sp.classList.toggle('est', pos.mode === 'dr');
+  const sv = speedView(), sp = $('speed'), kmh = sv.kmh || 0;
+  $('spdVal').textContent = sv.kind === 'none' ? '—' : (sv.kind === 'approx' ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
+  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : t('kmh');
+  sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
+  sp.classList.toggle('wide', sv.kind === 'approx');
   const cam = S.cams ? poi.nextCam : null;
   sp.classList.toggle('over', !!(cam && cam.max && kmh > cam.max + 3 && cam.ahead < 600));
   $('cam').hidden = !cam;

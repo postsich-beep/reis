@@ -246,6 +246,7 @@ function gpsHtml() {
   if (locState.error) rows.push([t('errShort'), locState.error]);
   rows.push([t('gpsNet'), d.net ? t('gpsNetYes', Math.round(d.net.acc)) : t('gpsNetNo')]);
   rows.push([t('gpsSpoofDet'), (S.spoof ? t('on') : t('off')) + (pos.spoofAt ? ' · ' + t('spoofLast', fmtClock(new Date(pos.spoofAt))) : '')]);
+  if (pos.spoofAt) rows.push([t('spoofWhat'), t('spoofWhy_' + pos.spoofWhy) + ' · ' + pos.spoofProv + ' · ' + pos.spoofLat.toFixed(3) + ', ' + pos.spoofLon.toFixed(3) + (pos.spoofSpd != null ? ' · ' + Math.round(pos.spoofSpd * 3.6) + ' ' + t('kmh') : '')]);
   if (pos.mode === 'dr') { rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]); }
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';
   return `<div class="list">${rows.map(r => `<div class="item"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
