@@ -128,6 +128,15 @@ class MainActivity : Activity() {
         }
     }
 
+    /** Нова версія інтерфейсу вже розпакована: перезавантажуємо сторінку без перезапуску застосунку.
+     *  Служба з GPS при цьому працює далі, тож місце не губиться. */
+    fun reloadUi() = runOnUiThread {
+        jsReady = false
+        pending.clear()
+        WebStore.init(this)
+        web.loadUrl("https://" + WebStore.HOST + "/index.html")
+    }
+
     fun onJsReady() {
         WebStore.bootOk(this)
         runOnUiThread {

@@ -2,6 +2,17 @@
 import { bus, S, esc } from './core.js';
 
 export const $ = id => document.getElementById(id);
+
+/* Прозорість плашок: непрозорість легких плашок (кнопки, швидкість, низ) і похідні для панелей,
+   картки маневру і кольорової шторки. Значення — у змінних CSS, див. кінець app.css. */
+export const GLASS = { low: 0.82, mid: 0.6, high: 0.4, max: 0.22 };
+export function applyGlass() {
+  const a = GLASS[S.glass] ?? GLASS.high, r = document.documentElement.style, cl = (x, lo, hi) => Math.min(hi, Math.max(lo, x));
+  r.setProperty('--ga', a.toFixed(2));
+  r.setProperty('--gs', cl(a + 0.36, 0.6, 0.95).toFixed(2));
+  r.setProperty('--gm', cl(a + 0.3, 0.55, 0.92).toFixed(2));
+  r.setProperty('--gc', cl(a + 0.3, 0.62, 0.92).toFixed(2));
+}
 const I = (d, extra = '') => `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" ${extra}>${d}</svg>`;
 export const ICON = {
   trip: I('<circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="6" r="2.5"/><path d="M8.5 18H15a3.5 3.5 0 0 0 0-7H9a3.5 3.5 0 0 1 0-7h6.5"/>'),

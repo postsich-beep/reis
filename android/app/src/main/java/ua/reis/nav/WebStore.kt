@@ -117,6 +117,11 @@ object WebStore {
         dst.deleteRecursively()
         if (!tmp.renameTo(dst)) throw IOException("rename failed")
         prefs(ctx).edit().putInt("current", ver).putBoolean("bootPending", false).apply()
+        // Старі завантажені версії більше не потрібні: лишаємо нову і ту, що працює зараз.
+        root(ctx).listFiles()?.forEach { d ->
+            val n = d.name.toIntOrNull()
+            if (d.isDirectory && n != null && n != ver && n != activeVersion) d.deleteRecursively()
+        }
         return ver
     }
 }

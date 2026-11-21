@@ -192,6 +192,9 @@ export function offlineDownload(wifiOnly) { if (offlineSupported()) { try { N.of
 export function offlineCancel() { if (offlineSupported()) { try { N.offlineCancel(); } catch (_) {} } }
 export function offlineDelete() { if (offlineSupported()) { try { N.offlineDelete(); } catch (_) {} } }
 export function checkUpdate() { if (N) { try { N.checkUpdate(); return true; } catch (_) {} } return false; }
+export const canReloadUi = () => !!(N && typeof N.reloadUi === 'function');
+/** Перезавантажити інтерфейс на щойно встановлену версію (оболонка з 1.0.9). */
+export function reloadUi() { if (N && typeof N.reloadUi === 'function') { try { N.reloadUi(); return true; } catch (_) {} } return false; }
 export function applyWebUpdate() { if (N) { try { N.applyWebUpdate(); return true; } catch (_) {} } return false; }
 export function installApk() { if (N) { try { N.installApk(); return true; } catch (_) {} } return false; }
 export function nativeReady() { if (N) { try { N.ready(); } catch (_) {} } }

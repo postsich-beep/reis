@@ -231,30 +231,50 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #boot{position:absolute;inset:0;z-index:50;background:#13171c;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;transition:opacity .4s}
 #boot b{font:800 54px/1 var(--f-num);letter-spacing:.04em}#boot span{color:#9aa4ae;font-size:14px}
 #boot.gone{opacity:0;pointer-events:none}
-/* ---- напівпрозорі плашки: карту видно крізь усе, що лежить поверх неї ---- */
+/* ---- прозорі плашки: карту видно крізь усе, що лежить поверх неї ----
+   Щільність задає налаштування «Прозорість плашок» (ui_base.applyGlass → --ga/--gs/--gm/--gc).
+   Без розмиття: воно перетворює плашку на молочне скло і ховає дороги під нею.
+   Текст і значки читаються завдяки ореолу — світлому вдень, темному вночі. */
 :root{
-  --glass:rgba(255,255,255,.70); --glass-strong:rgba(255,255,255,.86); --glass-2:rgba(214,221,228,.55);
-  --man-glass:rgba(19,23,28,.76); --blur:blur(12px) saturate(1.35);
+  --ga:.40; --gs:.76; --gm:.70; --gc:.70;
+  --glass-rgb:255,255,255; --glass2-rgb:206,214,222; --man-rgb:19,23,28;
+  --halo:rgba(255,255,255,.95); --edge:rgba(19,23,28,.14);
 }
 body[data-theme="night"]{
-  --glass:rgba(23,27,32,.70); --glass-strong:rgba(23,27,32,.88); --glass-2:rgba(52,61,70,.55); --man-glass:rgba(8,10,12,.74);
+  --glass-rgb:23,27,32; --glass2-rgb:52,61,70; --man-rgb:8,10,12;
+  --halo:rgba(8,10,12,.95); --edge:rgba(255,255,255,.14);
 }
-.man,.strip,.rb,#speed,#cam,#bottom,#panel,.toast,#pick,.chip{-webkit-backdrop-filter:var(--blur);backdrop-filter:var(--blur)}
-.man{background:var(--man-glass)}
-.man-ico{background:rgba(255,255,255,.08)}
-.strip[data-level="none"]{background:var(--glass)}
-.strip[data-level="red"]{background:rgba(229,72,77,.86)}
-.strip[data-level="yellow"]{background:rgba(246,189,22,.86)}
-.strip[data-level="green"]{background:rgba(47,158,98,.86)}
-.rb{background:var(--glass)}
-#speed,#cam{background:var(--glass)}
-#bottom{background:var(--glass)}
-#panel{background:var(--glass-strong)}
-.toast,#pick{background:var(--glass-strong)}
-.chip{background:var(--glass-2)}
-.card,.item,.ev,.tg,.field,.seg,.kv div{background:var(--glass-2)}
-.sugg button{background:var(--glass-strong)}
-.nudge button{background:var(--glass)}
+.man,.strip,.rb,#speed,#cam,#bottom,.chip,.nudge button{-webkit-backdrop-filter:none;backdrop-filter:none}
+#panel,.toast,#pick{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.man{background:rgba(var(--man-rgb),var(--gm));box-shadow:none}
+.man-ico{background:rgba(255,255,255,.10)}
+.strip{box-shadow:none}
+.strip[data-level="none"]{background:rgba(var(--glass-rgb),var(--ga));border:1px solid var(--edge);border-top:0}
+.strip.alone[data-level="none"]{border-top:1px solid var(--edge)}
+.strip[data-level="red"]{background:rgba(229,72,77,var(--gc))}
+.strip[data-level="yellow"]{background:rgba(246,189,22,var(--gc))}
+.strip[data-level="green"]{background:rgba(47,158,98,var(--gc))}
+.rb{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none;border:1px solid var(--edge)}
+.rb.on{background:var(--ink);border-color:transparent}
+.rb.rec.on{background:var(--red)}
+#bCenter.need{background:var(--amber)}
+#speed{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none}
+#cam{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none;border:1px solid var(--edge)}
+#bottom{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none;border-top:1px solid var(--edge)}
+#tabs button.act{background:rgba(var(--glass2-rgb),calc(var(--ga) + .15))}
+.chip{background:rgba(var(--glass2-rgb),var(--ga))}
+.chip.lost{background:var(--red)}
+.nudge button{background:rgba(var(--glass-rgb),var(--ga))}
+#attr{background:transparent}
+#panel{background:rgba(var(--glass-rgb),var(--gs))}
+.toast,#pick{background:rgba(var(--glass-rgb),var(--gs))}
+.card,.item,.ev,.tg,.field,.seg,.kv div{background:rgba(var(--glass2-rgb),.55)}
+.sugg button{background:rgba(var(--glass-rgb),var(--gs))}
+/* ореол: світлий контур навколо тексту і значків, щоб їх було видно на будь-якому місці карти */
+#bottom,.rb,#speed,#cam,.strip[data-level="none"],.nudge button,#attr{text-shadow:0 0 2px var(--halo),0 0 5px var(--halo),0 0 9px var(--halo)}
+.rb svg,#tabs button svg,.nudge button svg,#cam svg{filter:drop-shadow(0 0 1.5px var(--halo)) drop-shadow(0 0 4px var(--halo))}
+.rb.on,.rb.rec.on,#bCenter.need,.chip.lost,#bMic,#bAcceptGps,#tabs .badge{text-shadow:none}
+.rb.on svg,.rb.rec.on svg,#bCenter.need svg,#bMic svg{filter:none}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}

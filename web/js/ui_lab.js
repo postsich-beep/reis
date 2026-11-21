@@ -120,6 +120,9 @@ function settingsHtml() {
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
   <div class="muted" style="margin:-4px 2px 10px">${t('themeHint')}</div>
+  <div class="muted" style="margin:0 2px 6px">${t('setGlass')}</div>
+  ${seg('glass', [['low', t('glass_low'), S.glass === 'low'], ['mid', t('glass_mid'), S.glass === 'mid'], ['high', t('glass_high'), S.glass === 'high'], ['max', t('glass_max'), S.glass === 'max']])}
+  <div class="muted" style="margin:-4px 2px 10px">${t('glassHint')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setMapStyle')}</div>
   ${offlineActive() ? `<div class="muted" style="margin:0 2px 10px">${t('styleOffNote')}</div>` : seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
   <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}</div>
@@ -189,6 +192,7 @@ definePanel('settings', {
         const [k, v] = b.dataset.seg.split(':');
         if (k === 'theme') { S.theme = v; applyTheme(); }
         else if (k === 'lang') S.lang = v;
+        else if (k === 'glass') S.glass = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }
@@ -358,7 +362,15 @@ export function initLab() {
     if (d.web) { P.applyWebUpdate(); }
     if (d.apk) toast(t('updApk', d.apk.name), 'green', 9000, () => openPanel('about'));
   });
-  bus.on('native:webUpdated', d => { toast(d && d.ok ? t('updWebDone') : t('updError'), d && d.ok ? 'green' : 'yellow', 7000); });
+  bus.on('native:webUpdated', d => {
+    if (!(d && d.ok)) { toast(t('updError'), 'yellow', 7000); return; }
+    if (!P.canReloadUi()) { toast(t('updWebDone'), 'green', 9000); return; }
+    // Без активного рейсу оновлюємось одразу; під час рейсу — коли він закінчиться або водій торкнеться сповіщення.
+    const go = () => { toast(t('updWebNow'), 'green', 4000); setTimeout(() => P.reloadUi(), 1500); };
+    if (!g.active) { go(); return; }
+    toast(t('updWebLater'), 'green', 12000, go);
+    const iv = setInterval(() => { if (!g.active) { clearInterval(iv); go(); } }, 20000);
+  });
   bus.on('native:saved', d => { if (d && d.error) toast(t('saveErr') + ' ' + d.error, 'yellow'); });
   if (P.isNative) setTimeout(() => { if (P.online()) P.checkUpdate(); }, 15000);
 }

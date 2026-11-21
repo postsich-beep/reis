@@ -399,6 +399,9 @@ class Bridge(private val act: MainActivity) {
     }
 
     @JavascriptInterface
+    fun reloadUi() = act.reloadUi()
+
+    @JavascriptInterface
     fun installApk() {
         if (BuildConfig.UPDATE_REPO.isEmpty()) return
         openUrl(releaseUrl("reis.apk"))        // браузер завантажить файл, Android запропонує встановити поверх

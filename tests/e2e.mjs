@@ -311,8 +311,32 @@ try {
   await shot(page, '11-settings');
   await page.click('[data-seg="theme:day"]'); await sleep(300);
   ok('шестерня → налаштування → тема «День»', await app(page, () => document.body.dataset.theme === 'day' && window.__app.S.theme === 'day'));
+  // прозорість плашок: за замовчуванням нижня панель і кнопки напівпрозорі, без розмиття
+  const alpha = sel => app(page, s => { const m = getComputedStyle(document.querySelector(s)).backgroundColor.match(/rgba?\(([^)]+)\)/); const p = m ? m[1].split(',').map(Number) : []; return p.length === 4 ? p[3] : 1; }, sel);
+  const aBottom = await alpha('#bottom'), aRail = await alpha('#bCompass'), aSpeed = await alpha('#speed');
+  ok('нижня панель, кнопки і швидкість прозорі (≤ 0,5)', aBottom <= 0.5 && aRail <= 0.5 && aSpeed <= 0.5, `низ ${aBottom}, кнопка ${aRail}, швидкість ${aSpeed}`);
+  ok('нижня панель без розмиття', await app(page, () => ['none', ''].includes(getComputedStyle(document.getElementById('bottom')).backdropFilter || 'none')));
+  await page.click('[data-seg="glass:low"]'); await sleep(200);
+  const aLow = await alpha('#bottom');
+  await page.click('[data-seg="glass:max"]'); await sleep(200);
+  const aMax = await alpha('#bottom');
+  ok('перемикач «Прозорість плашок» міняє щільність', aLow > 0.75 && aMax < 0.3, `слабка ${aLow}, максимум ${aMax}`);
+  await page.click('[data-seg="glass:high"]'); await sleep(200);
+  if (SHOTS) {
+    // знімок для очей: денна тема поверх намальованої «карти» з дорогами й підписами під нижньою панеллю
+    await page.click('#panelClose');
+    await app(page, () => {
+      const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='420' height='900'><rect width='420' height='900' fill='#f2efe9'/><rect x='250' y='420' width='170' height='300' fill='#cfe6c4'/><g stroke='#fff' stroke-width='9'><path d='M0 700 L420 640'/><path d='M0 780 L420 820'/><path d='M0 860 L420 880'/><path d='M60 0 L120 900'/></g><path d='M215 0 L205 900' stroke='#f6c85f' stroke-width='14'/><g font-family='sans-serif' font-size='13' fill='#555'><text x='20' y='695'>Новоселівська вулиця</text><text x='230' y='800'>Удянський вʼїзд</text><text x='30' y='850'>Шляхова вулиця</text><text x='225' y='875'>М-03</text></g></svg>`;
+      const st = document.createElement('style');
+      st.textContent = `#map{background:url("data:image/svg+xml,${encodeURIComponent(svg)}") center/cover}.maplibregl-canvas{opacity:0}`;
+      document.head.appendChild(st);
+    });
+    await sleep(200); await shot(page, '13-day-glass');
+    await page.click('#bSettings'); await page.waitForSelector('[data-seg="theme:night"]');
+  }
   await page.click('[data-seg="theme:night"]'); await sleep(300);
   ok('нічний режим', await app(page, () => document.body.dataset.theme === 'night'));
+  ok('вночі нижня панель теж прозора і темна', await app(page, () => { const c = getComputedStyle(document.getElementById('bottom')).backgroundColor; const p = c.match(/[\d.]+/g).map(Number); return p[0] < 60 && p[3] <= 0.5; }));
   await page.click('[data-tg="vibrate"]');
   ok('перемикач вібрації', await app(page, () => window.__app.S.vibrate === false));
   await page.click('#panelClose');

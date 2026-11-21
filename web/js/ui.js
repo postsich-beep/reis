@@ -13,7 +13,7 @@ import { offlineActive } from './offline.js';
 import { sdb, TYPES, F } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
-import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc } from './ui_base.js';
+import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
 import { t } from './i18n.js';
 
 /* =====================  ГОЛОВНИЙ ЕКРАН  ===================== */
@@ -465,7 +465,7 @@ definePanel('chat', {
 
 /* =====================  ЗВ'ЯЗКИ  ===================== */
 export function initUI() {
-  staticLabels(); layoutVars(); hud(); stripUpdate();
+  applyGlass(); staticLabels(); layoutVars(); hud(); stripUpdate();
   window.addEventListener('resize', layoutVars);
   setInterval(() => { hud(); if (currentPanel() === 'trip' && g.active) refresh('trip'); }, 1000);
   bus.on('pos', hud); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
@@ -473,7 +473,7 @@ export function initUI() {
   bus.on('chat', () => { refresh('chat'); micState(); });
   bus.on('trips', () => refresh('trip'));
   bus.on('view', railState);
-  bus.on('settings', k => { railState(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
+  bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
   bus.on('stopTap', onStopTap);
