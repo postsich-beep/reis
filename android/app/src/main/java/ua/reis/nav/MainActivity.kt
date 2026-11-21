@@ -75,7 +75,10 @@ class MainActivity : Activity() {
         web.webViewClient = object : WebViewClient() {
             override fun shouldInterceptRequest(view: WebView, request: WebResourceRequest): WebResourceResponse? {
                 val u = request.url
-                return if (u.host == WebStore.HOST) WebStore.serve(this@MainActivity, u.path ?: "/") else null
+                if (u.host != WebStore.HOST) return null
+                val path = u.path ?: "/"
+                if (path == "/offline/" + OfflineMap.NAME) return OfflineMap.serve(this@MainActivity, request.requestHeaders)
+                return WebStore.serve(this@MainActivity, path)
             }
 
             override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {

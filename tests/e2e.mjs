@@ -12,9 +12,18 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
 const SHOTS = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
+let rangeHits = 0;
 const server = createServer(async (rq, rs) => {
   try {
     const p = decodeURIComponent(new URL(rq.url, 'http://x').pathname);
+    if (p === '/offline/ukraine.pmtiles') {                     // як оболонка: файл карти шматками за заголовком Range
+      const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'tiny.pmtiles'));
+      const m = /bytes=(\d+)-(\d*)/.exec(rq.headers.range || '');
+      if (!m) { rs.writeHead(200, { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' }); rs.end(b); return; }
+      const s = +m[1], e = Math.min(m[2] ? +m[2] : b.length - 1, b.length - 1); rangeHits++;
+      rs.writeHead(206, { 'content-type': 'application/octet-stream', 'content-range': `bytes ${s}-${e}/${b.length}`, 'content-length': e - s + 1, 'accept-ranges': 'bytes' });
+      rs.end(b.subarray(s, e + 1)); return;
+    }
     const f = join(ROOT, p === '/' ? 'index.html' : p);
     const b = await readFile(f); rs.writeHead(200, { 'content-type': MIME[extname(f)] || 'application/octet-stream' }); rs.end(b);
   } catch (_) { rs.writeHead(404); rs.end('nf'); }
@@ -60,7 +69,7 @@ const results = [], routeReqs = []; let failed = 0;
 const ok = (name, cond, extra = '') => { results.push((cond ? 'PASS ' : 'FAIL ') + name + (extra ? '  — ' + extra : '')); if (!cond) failed++; };
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
-async function newPage(native) {
+async function newPage(native, opts = {}) {
   const ctx = await browser.newContext({ viewport: { width: 412, height: 892 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'uk-UA' });
   const page = await ctx.newPage();
   const errors = [];
@@ -84,7 +93,7 @@ async function newPage(native) {
     { type: 'node', id: 1, lat: camPt[0], lon: camPt[1], tags: { highway: 'speed_camera', maxspeed: '50' } },
     { type: 'node', id: 2, lat: stopPt[0], lon: stopPt[1], tags: { amenity: 'fuel', brand: 'OKKO', hgv: 'yes', shower: 'yes', toilets: 'yes', opening_hours: '24/7' } },
     { type: 'node', id: 3, lat: coords[turnIdx[3] + 60][0], lon: coords[turnIdx[3] + 60][1], tags: { amenity: 'fuel', name: 'АЗС' } }] }));
-  if (native) await page.addInitScript(({ tg, air }) => {
+  if (native) await page.addInitScript(({ tg, air, offline }) => {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
     window.ReisNative = {
@@ -98,9 +107,11 @@ async function newPage(native) {
         else status = 404;
         cb('http', { id, status, body });
       },
+      offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
+      offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {},
       keepAwake() {}, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n) { window.__nativeCalls.push('saveFile:' + n); }, openUrl() {}, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}
     };
-  }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD });
+  }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
   await page.goto(BASE);
   await page.waitForFunction(() => window.__app && document.getElementById('boot') === null, null, { timeout: 15000 });
   return { page, ctx, errors };
@@ -272,6 +283,22 @@ try {
   ok('жодної помилки JS за весь прохід', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('сценарій 1 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
+try {
+  const { page, ctx, errors } = await newPage(true, { offline: true });
+  const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);
+  ok('офлайн-карта: стиль Protomaps із файлу PMTiles завантажився', okSrc && rangeHits > 0, 'запитів шматками: ' + rangeHits);
+  ok('офлайн-карта: шари маршруту на місці', await app(page, () => !!window.__app.map.map.getLayer('route-line') && !!window.__app.map.map.getLayer('route-done')));
+  await page.click('#bSettings'); await page.waitForSelector('#offSec');
+  const offTxt = await page.textContent('#offSec');
+  ok('налаштування: розділ офлайн-карти показує стан і вибір карти', /У телефоні/.test(offTxt) && /Онлайн/.test(offTxt), offTxt.slice(0, 120));
+  await shot(page, '12-offline');
+  await page.click('[data-seg="mapMode:online"]'); await sleep(500);
+  ok('режим «Онлайн» повертає онлайн-карту', await app(page, () => !window.__app.map.map.getSource('protomaps')));
+  ok('прохід офлайн-карти без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
 try {

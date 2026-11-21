@@ -9,6 +9,7 @@ import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.
 import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme } from './map.js';
+import { offlineActive } from './offline.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc } from './ui_base.js';
 import { t } from './i18n.js';
@@ -248,7 +249,7 @@ async function goTrip(trip) {
   setFollow(true);
   plan.trip = null; plan.a = plan.v = plan.b = null;
   if (!trip.regions || !trip.regions.length) loadRegions(trip);
-  if (S.offline && P.online()) runOffline(trip.route);
+  if (S.offline && P.online() && !offlineActive()) runOffline(trip.route);
   pollAir(); pollTelegram(true);
 }
 function tripClicks(e) {

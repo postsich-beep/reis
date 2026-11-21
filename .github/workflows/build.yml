@@ -37,6 +37,17 @@ jobs:
           echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
           echo "name=${NAME}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
+      - name: Шрифти й значки для офлайн-карти (Protomaps)
+        run: |
+          git clone --depth 1 https://github.com/protomaps/basemaps-assets /tmp/bma
+          for f in "Noto Sans Regular" "Noto Sans Medium" "Noto Sans Italic"; do
+            mkdir -p "web/vendor/glyphs/$f"
+            for r in 0-255 256-511 1024-1279 8192-8447; do cp "/tmp/bma/fonts/$f/$r.pbf" "web/vendor/glyphs/$f/" || echo "немає $f/$r"; done
+          done
+          mkdir -p web/vendor/sprites
+          cp /tmp/bma/sprites/v4/light.json /tmp/bma/sprites/v4/light.png /tmp/bma/sprites/v4/light@2x.json /tmp/bma/sprites/v4/light@2x.png web/vendor/sprites/ || echo "значків немає"
+          du -sh web/vendor/glyphs web/vendor/sprites || true
+
       - name: Інтерфейс усередину APK
         run: |
           mkdir -p android/app/src/main/assets

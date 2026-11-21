@@ -1,0 +1,75 @@
+name: Офлайн-карта України
+
+# Вирізає Україну з щоденної збірки світової карти Protomaps (дані OpenStreetMap)
+# і кладе файл ukraine.pmtiles у реліз offline-map. Застосунок звідти його завантажує.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 1 * *'          # раз на місяць — свіжі дані
+  push:
+    branches: [main]
+    paths: ['.github/workflows/offline-map.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  map:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Програма pmtiles
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release download -R protomaps/go-pmtiles --pattern '*Linux_x86_64.tar.gz' -O pm.tgz
+          tar xzf pm.tgz pmtiles
+          sudo mv pmtiles /usr/local/bin/
+          pmtiles version || true
+
+      - name: Найсвіжіша збірка світової карти
+        run: |
+          for i in $(seq 0 20); do
+            d=$(date -u -d "-$i day" +%Y%m%d)
+            code=$(curl -s -o /dev/null -w "%{http_code}" -I "https://build.protomaps.com/$d.pmtiles")
+            echo "$d $code"
+            if [ "$code" = "200" ]; then echo "BUILD=$d" >> "$GITHUB_ENV"; break; fi
+          done
+          test -n "$(grep BUILD= "$GITHUB_ENV" || true)"
+
+      - name: Вирізати Україну
+        run: |
+          # межі України з невеликим запасом; до 14-го масштабу (вулиці й будинки, далі — збільшення)
+          pmtiles extract "https://build.protomaps.com/$BUILD.pmtiles" ukraine.pmtiles --bbox=22.1,44.3,40.25,52.4 --maxzoom=14
+          SIZE=$(stat -c %s ukraine.pmtiles)
+          echo "розмір: $SIZE"
+          if [ "$SIZE" -gt 1950000000 ]; then
+            echo "завеликий для релізу — беру масштаб до 13"
+            rm ukraine.pmtiles
+            pmtiles extract "https://build.protomaps.com/$BUILD.pmtiles" ukraine.pmtiles --bbox=22.1,44.3,40.25,52.4 --maxzoom=13
+            echo "MAXZOOM=13" >> "$GITHUB_ENV"
+          else
+            echo "MAXZOOM=14" >> "$GITHUB_ENV"
+          fi
+          pmtiles show ukraine.pmtiles | head -20 || true
+
+      - name: Опис карти
+        run: |
+          SIZE=$(stat -c %s ukraine.pmtiles)
+          echo "{\"date\": \"$BUILD\", \"size\": $SIZE, \"maxzoom\": $MAXZOOM}" > offline.json
+          cat offline.json
+
+      - name: Реліз offline-map
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: offline-map
+          name: Офлайн-карта України
+          make_latest: 'false'
+          body: |
+            Карта всієї України для застосунку «Рейс» (PMTiles, дані OpenStreetMap, збірка Protomaps).
+            Завантажується із застосунку: Налаштування → Офлайн-карта України.
+          files: |
+            ukraine.pmtiles
+            offline.json

@@ -184,6 +184,13 @@ export function appInfo() {
 }
 export function openLocationSettings() { if (N && typeof N.openLocationSettings === 'function') { try { N.openLocationSettings(); return true; } catch (_) {} } return false; }
 export function openAppSettings() { if (N && typeof N.openAppSettings === 'function') { try { N.openAppSettings(); return true; } catch (_) {} } return false; }
+/* ---------- офлайн-карта (лише в застосунку) ---------- */
+export const offlineSupported = () => !!N && typeof N.offlineStatus === 'function';
+export function offlineStatus() { if (!offlineSupported()) return null; try { return JSON.parse(N.offlineStatus()); } catch (_) { return null; } }
+export function offlineCheck() { if (offlineSupported()) { try { N.offlineCheck(); } catch (_) {} } }
+export function offlineDownload(wifiOnly) { if (offlineSupported()) { try { N.offlineDownload(!!wifiOnly); return true; } catch (_) {} } return false; }
+export function offlineCancel() { if (offlineSupported()) { try { N.offlineCancel(); } catch (_) {} } }
+export function offlineDelete() { if (offlineSupported()) { try { N.offlineDelete(); } catch (_) {} } }
 export function checkUpdate() { if (N) { try { N.checkUpdate(); return true; } catch (_) {} } return false; }
 export function applyWebUpdate() { if (N) { try { N.applyWebUpdate(); return true; } catch (_) {} } return false; }
 export function installApk() { if (N) { try { N.installApk(); return true; } catch (_) {} } return false; }

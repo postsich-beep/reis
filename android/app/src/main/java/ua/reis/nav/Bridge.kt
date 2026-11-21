@@ -306,6 +306,51 @@ class Bridge(private val act: MainActivity) {
         }
     }
 
+    /* ---------- офлайн-карта України ---------- */
+    private var offlineRemote: JSONObject? = null
+
+    @JavascriptInterface
+    fun offlineStatus(): String = OfflineMap.status(act).toString()
+
+    /** Що лежить у релізі offline-map (дата і розмір карти). Відповідь — подія offline. */
+    @JavascriptInterface
+    fun offlineCheck() {
+        io.execute {
+            val o = JSONObject()
+            var c: HttpURLConnection? = null
+            try {
+                if (BuildConfig.UPDATE_REPO.isEmpty()) throw IOException("norepo")
+                c = open(OfflineMap.url(BuildConfig.UPDATE_REPO, "offline.json"), 15000)
+                if (c.responseCode != 200) throw IOException("HTTP " + c.responseCode)
+                val r = JSONObject(String(readLimited(c, 65536), Charsets.UTF_8))
+                offlineRemote = r
+                o.put("remote", r)
+            } catch (e: Exception) {
+                o.put("error", e.message ?: e.javaClass.simpleName)
+            } finally {
+                try { c?.disconnect() } catch (_: Exception) {}
+            }
+            emit("offline", o)
+        }
+    }
+
+    @JavascriptInterface
+    fun offlineDownload(wifiOnly: Boolean) {
+        main.post {
+            try {
+                val r = offlineRemote
+                OfflineMap.start(act, BuildConfig.UPDATE_REPO, wifiOnly, r?.optString("date") ?: "", r?.optLong("size") ?: 0L)
+                emit("offline", JSONObject().put("started", true))
+            } catch (e: Exception) { emit("offline", JSONObject().put("error", e.javaClass.simpleName)) }
+        }
+    }
+
+    @JavascriptInterface
+    fun offlineCancel() { OfflineMap.cancel(act) }
+
+    @JavascriptInterface
+    fun offlineDelete() { OfflineMap.delete(act) }
+
     /* ---------- оновлення: версія на сторінці останнього релізу GitHub ---------- */
     private fun releaseUrl(file: String) = "https://github.com/" + BuildConfig.UPDATE_REPO + "/releases/latest/download/" + file
 

@@ -1,0 +1,8 @@
+Сторонні бібліотеки в папці vendor:
+
+maplibre-gl.js 5.6.0 — BSD-3-Clause, див. LICENSE.txt (MapLibre contributors)
+pmtiles.js 4.5.0 — BSD-3-Clause, © Protomaps LLC (https://github.com/protomaps/PMTiles)
+basemaps.js (@protomaps/basemaps 5.7.2) — BSD-3-Clause, © Protomaps LLC (https://github.com/protomaps/basemaps)
+glyphs/, sprites/ — з https://github.com/protomaps/basemaps-assets (шрифти Noto Sans — SIL Open Font License 1.1)
+
+Дані карти: © OpenStreetMap contributors (ODbL). Онлайн-тайли: OpenMapTiles, OpenFreeMap. Офлайн-збірка: Protomaps.

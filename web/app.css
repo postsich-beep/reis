@@ -89,7 +89,7 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #tripbar{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 2px}
 .tb-main{flex:1;min-width:0;display:flex;flex-direction:column}
 .tb-main b{font:800 34px/1 var(--f-num);font-variant-numeric:tabular-nums}
-.chip{flex:none;display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:var(--panel-2);font:700 15px/1 var(--f-num)}
+.chip{flex:none;display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;background:var(--panel-2);font:600 14px/1 var(--f-ui);white-space:nowrap}
 .chip i{width:10px;height:10px;border-radius:50%;background:var(--green)}
 .chip.weak i{background:var(--yellow)} .chip.lost{background:var(--red);color:#fff} .chip.lost i{background:#fff} .chip.none i{background:var(--line)}
 #bAcceptGps{width:100%;min-height:44px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px;margin-bottom:6px}

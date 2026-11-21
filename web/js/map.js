@@ -5,6 +5,7 @@ import { g } from './guide.js';
 import { poi } from './poi.js';
 import { feed } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
+import { offlineActive, offlineStyle } from './offline.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -66,9 +67,10 @@ const EMPTY = { type: 'FeatureCollection', features: [] };
 export function initMap() {
   maplibregl.addProtocol('fc', cacheProtocol);
   map = new maplibregl.Map({
-    container: 'map', style: S.styleUrl, center: [31.3, 49.0], zoom: 5.4,
+    container: 'map', style: currentStyle(), center: [31.3, 49.0], zoom: 5.4,
     attributionControl: false, maxPitch: 60, fadeDuration: 120,
-    transformRequest: url => /^https?:\/\//.test(url) ? { url: 'fc://' + url } : undefined
+    // мережеві запити карти йдуть через кеш у телефоні; власні файли застосунку — напряму
+    transformRequest: url => /^https?:\/\//.test(url) && !url.startsWith(location.origin) ? { url: 'fc://' + url } : undefined
   });
   const seenErr = new Set();
   map.on('error', e => {
@@ -248,6 +250,9 @@ export function previewRoute(coords) {
   doneD = -1; setDone(EMPTY);
   if (coords) showRoute(coords);
 }
+// Офлайн-карта України, якщо завантажена; інакше онлайн-стиль, вибраний у налаштуваннях.
+export function currentStyle() { try { if (offlineActive()) return offlineStyle(); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
+export function applyMapSource() { setMapStyle(currentStyle()); bus.emit('mapSource', offlineActive()); }
 export function setMapStyle(url) {
   if (!map || !url) return;
   view.blank = false; doneD = -1;

@@ -5,7 +5,8 @@ import { pos, nudge, acceptPending, debugState } from './nav.js';
 import { g, say } from './guide.js';
 import { feed, resetLearning, clearFeed, tgAvailable, addDefaultChannels } from './feed.js';
 import { OBLASTS, oblastName } from './route.js';
-import { cacheInfo, clearCache, cacheStats, setMapStyle, applyTheme, setFollow } from './map.js';
+import { cacheInfo, clearCache, cacheStats, setMapStyle, applyTheme, setFollow, applyMapSource } from './map.js';
+import { off, offlineActive, refreshStatus } from './offline.js';
 import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } from './sim.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
@@ -18,7 +19,7 @@ const TG = [
   ['sec', 'labWatch'], ['tg'], ['air'], ['weather'], ['cams'], ['stops'], ['drive'], ['aiFilter'],
   ['sec', 'labPos'], ['spoof'], ['offline'], ['rec']
 ];
-const SOON = ['obd', 'camera', 'mesh', 'localAi', 'fullMap', 'traffic'];
+const SOON = ['obd', 'camera', 'mesh', 'localAi', 'traffic'];
 function simHtml() {
   const can = !!g.idx;
   return `<div class="card"><div class="muted">${can ? t('simHint') : t('simNeedTrip')}</div>
@@ -68,6 +69,38 @@ definePanel('lab', {
 const STYLES = [['liberty', 'https://tiles.openfreemap.org/styles/liberty'], ['bright', 'https://tiles.openfreemap.org/styles/bright'], ['positron', 'https://tiles.openfreemap.org/styles/positron']];
 const RATES = [['slow', 0.85], ['normal', 1], ['fast', 1.2]];
 const seg = (key, opts) => `<div class="seg">${opts.map(([v, label, on]) => `<button data-seg="${key}:${v}" class="${on ? 'on' : ''}">${esc(label)}</button>`).join('')}</div>`;
+const GB = b => b >= 1e9 ? (b / 1e9).toFixed(2).replace('.', ',') + ' ' + t('gb') : Math.round(b / 1e6) + ' ' + t('mb');
+const fmtDate = d => /^\d{8}$/.test(d || '') ? d.slice(6, 8) + '.' + d.slice(4, 6) + '.' + d.slice(0, 4) : (d || '');
+function offlineHtml() {
+  if (!off.supported) return `<div class="muted">${t('offNeedApk')}</div>`;
+  const dl = off.dl || {}, busy = ['running', 'pending', 'paused'].includes(dl.state), r = off.remote;
+  const lines = [];
+  lines.push(off.installed ? t('offInstalled', GB(off.size), fmtDate(off.date)) : t('offNotInstalled'));
+  if (r) lines.push(t('offRemote', GB(r.size || 0), fmtDate(r.date)));
+  else if (off.remoteErr) lines.push(t('offRemoteErr'));
+  else lines.push(t('offChecking'));
+  let h = `<div class="card"><div>${lines.map(esc).join('<br>')}</div>`;
+  if (busy) {
+    const pct = dl.total > 0 ? Math.round(dl.done / dl.total * 100) : 0;
+    const why = dl.state === 'paused' ? (dl.reason === 3 ? t('offWaitWifi') : dl.reason === 2 ? t('offWaitNet') : t('offPaused')) : dl.state === 'pending' ? t('offPending') : '';
+    h += `<div class="muted" style="margin-top:8px">${t('offProgress2', pct, GB(dl.done || 0), GB(dl.total || 0))}${why ? ' · ' + why : ''}</div><div class="prog"><i style="width:${pct}%"></i></div>
+      <div class="btns"><button class="btn sm wide" data-act="offCancel">${t('offCancel')}</button></div>`;
+  } else {
+    if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
+    const newer = r && off.installed && String(r.date) > String(off.date);
+    const btns = [];
+    if (!off.installed && r) btns.push(`<button class="btn pri" data-act="offDl">${t('offDownload', GB(r.size || 0))}</button>`);
+    if (newer) btns.push(`<button class="btn pri" data-act="offDl">${t('offUpdate')}</button>`);
+    if (off.installed) btns.push(`<button class="btn" data-act="offDel">${t('delete')}</button>`);
+    if (btns.length) h += `<div class="btns">${btns.join('')}</div>`;
+    if (r && off.free && off.free < (r.size || 0) + 3e8) h += `<div class="muted" style="margin-top:6px;color:var(--red)">${t('offNoSpace', GB(off.free))}</div>`;
+  }
+  h += '</div>';
+  h += `<div class="list" style="margin-top:8px">${toggleRow('offlineWifi', t('set_offlineWifi'), t('setd_offlineWifi'), S.offlineWifi)}</div>`;
+  if (off.installed) h += `<div class="muted" style="margin:10px 2px 6px">${t('setMapMode')}</div>` + seg('mapMode', [['auto', t('mapAuto'), S.mapMode === 'auto'], ['online', t('mapOnline'), S.mapMode === 'online'], ['offline', t('mapOffline'), S.mapMode === 'offline']]);
+  h += `<div class="muted" style="margin-top:8px">${t('offRouteNote')}</div>`;
+  return h;
+}
 function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}" value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
@@ -77,8 +110,11 @@ function settingsHtml() {
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
   <div class="muted" style="margin:-4px 2px 10px">${t('themeHint')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setMapStyle')}</div>
-  ${seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
+  ${offlineActive() ? `<div class="muted" style="margin:0 2px 10px">${t('styleOffNote')}</div>` : seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
   <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}</div>
+
+  <div class="sec">${t('secOffline')}</div>
+  <div id="offSec">${offlineHtml()}</div>
 
   <div class="sec">${t('secSound')}</div>
   <div class="list">${tog('voice')}${tog('vibrate')}</div>
@@ -135,7 +171,8 @@ definePanel('settings', {
         if (k === 'theme') { S.theme = v; applyTheme(); }
         else if (k === 'lang') S.lang = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
-        else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; setMapStyle(u); }
+        else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
+        else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }
         const st = body.scrollTop; body.innerHTML = settingsHtml(); body.scrollTop = st;
         return;
       }
@@ -146,6 +183,9 @@ definePanel('settings', {
       else if (a === 'appset') P.openAppSettings();
       else if (a === 'locset') P.openLocationSettings();
       else if (a === 'about') openPanel('about');
+      else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
+      else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
+      else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
     };
     body.onchange = e => {
       const id = e.target.id || '', v = e.target.value;
@@ -157,7 +197,7 @@ definePanel('settings', {
         const k = id.slice(2);
         if (['aheadH', 'stopKm'].includes(k)) { const n = parseFloat(String(v).replace(',', '.')); if (n > 0) S[k] = n; }
         else S[k] = String(v).trim();
-        if (k === 'styleUrl') setMapStyle(S.styleUrl);
+        if (k === 'styleUrl' && !offlineActive()) setMapStyle(S.styleUrl);
       }
     };
   }
@@ -286,6 +326,8 @@ definePanel('about', {
   }
 });
 export function initLab() {
+  bus.on('offline', () => { const el = $('offSec'); if (el) el.innerHTML = offlineHtml(); });
+  bus.on('settings', k => { if (k === 'lang' && offlineActive()) applyMapSource(); });
   bus.on('sim', () => refresh('lab'));
   bus.on('pos', () => refresh('gps'));
   bus.on('log', () => refresh('diag'));

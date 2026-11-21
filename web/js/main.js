@@ -8,6 +8,7 @@ import * as feed from './feed.js';
 import * as track from './track.js';
 import * as sim from './sim.js';
 import * as weather from './weather.js';
+import * as offline from './offline.js';
 import * as mapM from './map.js';
 import * as route from './route.js';
 import { initUI } from './ui.js';
@@ -16,7 +17,9 @@ import { initLab } from './ui_lab.js';
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
   document.documentElement.lang = S.lang;
+  offline.init();
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
+  bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   nav.start(); guide.init(); poi.init(); track.init(); weather.init();
   initUI(); initLab();
   await route.loadTrips();
@@ -26,5 +29,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, nav, guide, poi, feed, track, sim, map: mapM, route, weather };   // для діагностики й автотестів
+window.__app = { bus, S, P, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));
