@@ -1,0 +1,111 @@
+name: Збірка і реліз
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  apk:
+    name: APK і реліз
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Номер версії
+        id: v
+        run: |
+          WEB=$(python3 -c "import json;print(json.load(open('web/version.json'))['web'])")
+          NAME=$(python3 -c "import json;print(json.load(open('web/version.json'))['name'])")
+          echo "web=$WEB" >> "$GITHUB_OUTPUT"
+          echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
+          echo "name=${NAME}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
+
+      - name: Інтерфейс усередину APK
+        run: |
+          mkdir -p android/app/src/main/assets
+          rm -rf android/app/src/main/assets/web
+          cp -r web android/app/src/main/assets/web
+
+      - name: Збірка APK
+        working-directory: android
+        run: >
+          gradle --no-daemon :app:assembleRelease
+          -PvCode=${{ steps.v.outputs.code }}
+          -PvName=${{ steps.v.outputs.name }}
+          -PupdateRepo=${{ github.repository }}
+
+      - name: Файли релізу
+        run: |
+          mkdir -p out
+          cp android/app/build/outputs/apk/release/app-release.apk out/reis.apk
+          (cd web && zip -qr ../out/web.zip .)
+          echo "{\"apkCode\": ${{ steps.v.outputs.code }}, \"apkName\": \"${{ steps.v.outputs.name }}\", \"web\": ${{ steps.v.outputs.web }}}" > out/version.json
+          cat out/version.json
+          ls -la out
+
+      - name: Реліз
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.name }}
+          name: Рейс ${{ steps.v.outputs.name }}
+          body: |
+            Установка: завантажте **reis.apk** на телефон і відкрийте файл.
+            Оновлення ставиться поверх попередньої версії, налаштування зберігаються.
+          make_latest: 'true'
+          files: |
+            out/reis.apk
+            out/web.zip
+            out/version.json
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reis-apk
+          path: out/reis.apk
+
+  tests:
+    name: Перевірка інтерфейсу
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm install --no-save playwright-core@1.65.1
+      - run: npx playwright-core install --with-deps chromium
+      - run: node tests/e2e.mjs
+
+  pages:
+    name: Браузерна версія (GitHub Pages)
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: web
+      - id: deploy
+        uses: actions/deploy-pages@v4

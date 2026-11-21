@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Рейс</string>
+    <string name="notif_nav_channel">Навігація</string>
+    <string name="notif_alert_channel">Події на маршруті</string>
+    <string name="notif_nav_title">Рейс працює</string>
+    <string name="notif_nav_text">Стежу за місцем і подіями на шляху</string>
+</resources>

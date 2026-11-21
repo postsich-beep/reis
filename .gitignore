@@ -1,0 +1,10 @@
+node_modules
+out/
+shots/
+android/.gradle/
+android/build/
+android/app/build/
+android/app/src/main/assets/web/
+android/local.properties
+*.iml
+.idea/

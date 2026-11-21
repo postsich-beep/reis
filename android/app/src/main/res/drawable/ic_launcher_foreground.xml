@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp" android:height="108dp"
+    android:viewportWidth="108" android:viewportHeight="108">
+    <!-- дорога з поворотом -->
+    <path android:pathData="M38,80 L38,58 Q38,46 50,46 L72,46"
+        android:strokeColor="#3A444E" android:strokeWidth="11" android:strokeLineCap="round" android:strokeLineJoin="round" />
+    <path android:pathData="M38,80 L38,58 Q38,46 50,46 L72,46"
+        android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineCap="round" />
+    <!-- стрілка навігатора -->
+    <path android:pathData="M61,26 L80,58 L62,52 L50,66 Z" android:fillColor="#F5A300" />
+</vector>
