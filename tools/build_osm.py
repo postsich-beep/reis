@@ -6,11 +6,13 @@
   python3 tools/build_osm.py filtered.osm.pbf web/data/stops.json web/data/places.json web/data/hazards.json
 Формат піт-стопів і населених пунктів той самий, що й раніше (див. build_stops.py і build_places.py).
 hazards.json — проблемні для фури ділянки доріг:
-  {"v": 1, "date": "YYYYMMDD", "groups": [[kind, value, name, length_m, bridge], ...], "pts": [[lat, lon, bearing, group], ...]}
+  {"v": 2, "date": "YYYYMMDD", "groups": [[kind, value, name, length_m, bridge], ...], "pts": [dlat, dlon, bearing/5, dgroup, ...]}
+  pts — плаский масив по 4 числа на точку; широта й довгота в 1e-5 градуса як різниця з попередньою точкою.
   kind: w — обмеження маси (т), a — навантаження на вісь (т), h — висота проїзду (м),
         g — вантажівкам заборонено (0) або лише під'їзд (1), u — ґрунт / щебінь на дорозі з номером,
         s — погане покриття за OSM (smoothness)
-  pts — точки вздовж ділянки кожні 150 м з напрямком дороги, щоб не плутати з дорогою, що перетинає маршрут.
+  Точки йдуть уздовж ділянки (обмеження — кожні 150 м, покриття — кожні 300 м) з напрямком дороги,
+  щоб не плутати з дорогою, що перетинає маршрут. Ґрунт і покриття — лише на дорогах від третинних і вище.
 """
 import datetime, json, math, os, re, sys
 from collections import Counter
@@ -31,10 +33,11 @@ KX, KY = 111320 * 0.66, 111320                    # метри на градус
 
 VEH = {'motorway', 'motorway_link', 'trunk', 'trunk_link', 'primary', 'primary_link', 'secondary', 'secondary_link',
        'tertiary', 'tertiary_link', 'unclassified', 'residential', 'living_street', 'road'}
-ROUGH_CLASSES = {'trunk', 'primary', 'secondary', 'tertiary', 'unclassified'}
+ROUGH_CLASSES = {'trunk', 'primary', 'secondary', 'tertiary'}
 UNPAVED = ['unpaved', 'dirt', 'ground', 'gravel', 'fine_gravel', 'compacted', 'sand', 'earth', 'grass', 'mud', 'pebblestone', 'rock', 'clay']
 BAD_SMOOTH = ['bad', 'very_bad', 'horrible', 'very_horrible', 'impassable']
 SAMPLE_M = 150
+SAMPLE_SURF_M = 300
 
 
 def num(v):
@@ -76,8 +79,8 @@ def hazards_of(t):
     return out
 
 
-def samples(pts):
-    """Точки вздовж лінії кожні SAMPLE_M метрів (для коротких — середина) з напрямком дороги."""
+def samples(pts, step=SAMPLE_M):
+    """Точки вздовж лінії кожні step метрів (для коротких — середина) з напрямком дороги."""
     seg = []
     for (la1, lo1), (la2, lo2) in zip(pts, pts[1:]):
         kx = 111320 * math.cos(math.radians(la1))
@@ -86,7 +89,7 @@ def samples(pts):
     total = sum(x[4] for x in seg)
     if not seg or total <= 0:
         return [], 0
-    marks = [total / 2] if total < SAMPLE_M else [i * SAMPLE_M for i in range(int(total // SAMPLE_M) + 1)]
+    marks = [total / 2] if total < step else [i * step for i in range(int(total // step) + 1)]
     out, acc, i = [], 0.0, 0
     for m in marks:
         while i < len(seg) - 1 and acc + seg[i][4] < m:
@@ -135,9 +138,13 @@ class Reader(osmium.SimpleHandler):
         if not pts:
             return
         if hz and len(pts) >= 2:
-            sm, length = samples(pts)
             name = (t.get('ref') or t.get('name:uk') or t.get('name') or '').strip()[:40]
+            cache = {}
             for k, v in hz:
+                step = SAMPLE_SURF_M if k in ('u', 's') else SAMPLE_M
+                if step not in cache:
+                    cache[step] = samples(pts, step)
+                sm, length = cache[step]
                 gid = len(self.hz_groups)
                 self.hz_groups.append([k, v, name, int(length), 1 if t.get('bridge') not in (None, 'no') else 0])
                 self.hz_pts.extend([p[0], p[1], p[2], gid] for p in sm)
@@ -219,8 +226,13 @@ def main(pbf, stops_out, places_out, hazards_out=None):
     pts = [[la, lo, brg, remap[gid]] for la, lo, brg, gid in r.hz_pts if gid in remap]
     print('проблемні ділянки:', len(groups), dict(Counter(g[0] for g in groups)), 'точок', len(pts), file=sys.stderr)
     if hazards_out and len(groups) >= int(os.environ.get('REIS_MIN_HAZARDS', 500)):
+        flat, pla, plo, pg = [], 0, 0, 0
+        for la, lo, brg, gid in pts:
+            a, b = round(la * 1e5), round(lo * 1e5)
+            flat += [a - pla, b - plo, brg // 5, gid - pg]
+            pla, plo, pg = a, b, gid
         with open(hazards_out, 'w', encoding='utf-8') as fh:
-            json.dump({'v': 1, 'date': date, 'groups': groups, 'pts': pts}, fh, ensure_ascii=False, separators=(',', ':'))
+            json.dump({'v': 2, 'date': date, 'groups': groups, 'pts': flat}, fh, ensure_ascii=False, separators=(',', ':'))
         print('hazards.json', os.path.getsize(hazards_out) // 1024, 'КБ', file=sys.stderr)
     if len(rows) >= int(os.environ.get('REIS_MIN_STOPS', 3000)):
         with open(stops_out, 'w', encoding='utf-8') as fh:
