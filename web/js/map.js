@@ -6,6 +6,7 @@ import { poi } from './poi.js';
 import { feed } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { offlineActive, offlineStyle } from './offline.js';
+import { sdb, TYPES } from './stopsdb.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -60,6 +61,8 @@ async function fetchToCache(url) {                    // для завантаж
 }
 
 /* ---------- створення карти ---------- */
+let previewCoords = null;
+const lineOf = coords => ({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } });
 let puck = null, puckEl = null, wps = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
 const evMarks = new Map();
 const EMPTY = { type: 'FeatureCollection', features: [] };
@@ -78,6 +81,8 @@ export function initMap() {
     if (!seenErr.has(m) && seenErr.size < 20) { seenErr.add(m); log('warn', 'карта: ' + m); }
   });
   map.on('style.load', addLayers);
+  // запасна страховка: якщо стиль змінився, а наших шарів немає — повертаємо їх
+  map.on('styledata', () => { if (map.isStyleLoaded() && !map.getSource('route')) addLayers(); });
   // Стиль не завантажився (немає мережі й кешу) — показуємо хоча б маршрут на порожньому тлі.
   styleTimer = setTimeout(() => { if (!map.isStyleLoaded() && !map.getSource('route')) { view.blank = true; map.setStyle(BLANK); bus.emit('mapBlank', true); } }, 12000);
   map.on('movestart', e => { if (e.originalEvent) { view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); } });
@@ -91,6 +96,8 @@ export function initMap() {
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
+  bus.on('stopsdb', drawStops);
+  bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   setInterval(drawEvents, 60000);
   bus.on('settings', k => { if (k === 'theme') applyTheme(); if (k === 'view3d') follow(true); });
   setInterval(() => {
@@ -108,6 +115,7 @@ function addLayers() {
   map.addSource('route', { type: 'geojson', data: EMPTY });
   map.addSource('route-done', { type: 'geojson', data: EMPTY });
   map.addSource('poi', { type: 'geojson', data: EMPTY });
+  map.addSource('stops', { type: 'geojson', data: EMPTY });
   map.addSource('acc', { type: 'geojson', data: EMPTY });
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2f6bff', 'line-width': w(3, 6, 12) } });
@@ -115,14 +123,28 @@ function addLayers() {
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
   // похибка позиції — лише тонкий пунктирний контур, без заливки
   map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
+  // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
+  const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, '#1f2937'];
+  const stopPaint = r => ({
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, r, 9, r + 1.8, 13, r + 4.5, 16, r + 7],
+    'circle-color': color, 'circle-stroke-color': ['match', ['get', 't'], 'c', '#e5484d', '#ffffff'],
+    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 0.8, 12, 2]
+  });
+  map.addLayer({ id: 'stops-major', type: 'circle', source: 'stops', minzoom: 5, maxzoom: 9.5, filter: ['>=', ['get', 'r'], 2], paint: stopPaint(2.2) });
+  map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, paint: stopPaint(2.6) });
   map.addLayer({
     id: 'poi-dot', type: 'circle', source: 'poi', minzoom: 8,
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 13, 7, 16, 10],
-      'circle-color': ['match', ['get', 'k'], 'cam', '#e5484d', '#2f9e62'], 'circle-stroke-color': '#ffffff', 'circle-stroke-width': 2
+      'circle-color': '#1f2937', 'circle-stroke-color': '#e5484d', 'circle-stroke-width': 2.5
     }
   });
-  doneD = -1; drawRoute(); drawPoi();
+  for (const id of ['stops-major', 'stops-all']) {
+    map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
+    map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
+    map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
+  }
+  doneD = -1; drawRoute(); drawPoi(); drawStops();
 }
 
 /* ---------- день / ніч ---------- */
@@ -178,7 +200,7 @@ function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
   doneD = -1; setDone(EMPTY);
-  if (!g.route) { src.setData(EMPTY); return; }
+  if (!g.route) { src.setData(previewCoords ? lineOf(previewCoords) : EMPTY); return; }
   src.setData({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: g.route.coords.map(c => [c[1], c[0]]) } });
   const tr = g.trip; if (!tr) return;
   const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
@@ -248,7 +270,8 @@ export function showRoute(coords) {
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
 export function previewRoute(coords) {
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
-  src.setData(coords ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } } : EMPTY);
+  previewCoords = coords || null;
+  src.setData(coords ? lineOf(coords) : EMPTY);
   doneD = -1; setDone(EMPTY);
   if (coords) showRoute(coords);
 }
@@ -258,16 +281,26 @@ export function applyMapSource() { setMapStyle(currentStyle()); bus.emit('mapSou
 export function setMapStyle(url) {
   if (!map || !url) return;
   view.blank = false; doneD = -1;
-  try { map.setStyle(url); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
+  // diff: false — повне перезавантаження стилю, інакше бібліотека «порівнює» стилі й мовчки викидає наші шари маршруту
+  try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
 export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
 
 function drawPoi() {
   const src = map && map.getSource && map.getSource('poi'); if (!src) return;
   const f = [];
-  if (S.cams) for (const c of poi.cams) f.push({ type: 'Feature', properties: { k: 'cam' }, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } });
-  if (S.stops) for (const s of poi.stops) if (s.score >= 2) f.push({ type: 'Feature', properties: { k: 'stop' }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } });
+  // камери вздовж маршруту; стоянки малює загальний шар бази (або цей, якщо бази ще немає)
+  if (S.cams && !(sdb.ready && S.mapStops)) for (const c of poi.cams) f.push({ type: 'Feature', properties: { k: 'cam' }, geometry: { type: 'Point', coordinates: [c.lon, c.lat] } });
+  if (S.stops && !sdb.ready) for (const s of poi.stops) if (s.score >= 2) f.push({ type: 'Feature', properties: { k: 'stop' }, geometry: { type: 'Point', coordinates: [s.lon, s.lat] } });
   src.setData({ type: 'FeatureCollection', features: f });
+}
+export function drawStops() {
+  const src = map && map.getSource && map.getSource('stops'); if (!src) return;
+  if (!sdb.ready || !S.mapStops) { src.setData(EMPTY); drawPoi(); return; }
+  const on = S.mapStopTypes || {};
+  const want = t => t === 'c' ? S.cams && on.cam !== false : t === 'e' ? on.food !== false : t === 'f' ? on.fuel !== false : t === 'm' ? on.motel !== false : on.park !== false;
+  src.setData({ type: 'FeatureCollection', features: sdb.geo.features.filter(f => want(f.properties.t)) });
+  drawPoi();
 }
 
 /* ---------- довге натискання: вибір точки на карті ---------- */

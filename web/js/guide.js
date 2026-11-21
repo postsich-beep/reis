@@ -77,6 +77,8 @@ async function reroute(lead = false) {
   } catch (e) { log('warn', 'перерахунок: ' + e.message); }
   g.rerouting = false; bus.emit('guide', g);
 }
+// Заїхати по дорозі: точка стає проміжною, маршрут перебудовується від поточного місця.
+export function setVia(p) { if (!g.trip) return; g.trip.v = p; g.passedV = false; rerouteNow(); }
 export function rerouteNow() { lastReroute = 0; if (pos.lat != null && online()) reroute(); }
 
 function announce() {

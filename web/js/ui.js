@@ -2,7 +2,7 @@
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView } from './nav.js';
-import { g, startTrip, stopTrip, rerouteNow, say } from './guide.js';
+import { g, startTrip, stopTrip, rerouteNow, say, setVia } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
@@ -10,6 +10,7 @@ import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme } from './map.js';
 import { offlineActive } from './offline.js';
+import { sdb, TYPES, F } from './stopsdb.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc } from './ui_base.js';
 import { t } from './i18n.js';
@@ -294,7 +295,7 @@ definePanel('trip', {
     const active = g.trip && (g.active || g.arrived);
     body.innerHTML = active ? tripActiveHtml() : planHtml();
     body.onclick = tripClicks; body.oninput = tripInput;
-    $('panel').classList.remove('half');
+    $('panel').classList.toggle('half', !active && !!plan.trip);     // маршрут побудовано — панель нижче, лінію видно на карті
   },
   update(body) {
     const active = g.trip && (g.active || g.arrived);
@@ -305,6 +306,7 @@ definePanel('trip', {
     sum.innerHTML = plan.trip ? planSumHtml() : ''; sv.innerHTML = savedHtml(); er.textContent = plan.err;
     if (bb) { bb.disabled = plan.busy; bb.textContent = plan.busy ? t('building') : t('build'); }
     if (plan.trip && !sum.dataset.shown) { sum.dataset.shown = '1'; body.scrollTop = 0; } else if (!plan.trip) delete sum.dataset.shown;
+    $('panel').classList.toggle('half', !!plan.trip);
   },
   close() { if (plan.trip && !g.active) { /* залишаємо попередній перегляд на карті */ } }
 });
@@ -324,6 +326,32 @@ function onMapPick(p) {
     plan[k] = { lat: p.lat, lon: p.lon, label: p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
     reverse(p.lat, p.lon).then(r => { if (r && plan[k]) { plan[k].label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan[k].label; const i = $('in_' + k); if (i) i.value = plan[k].label; } }).catch(() => {});
     openPanel('trip');
+  };
+}
+
+/* картка піт-стопу: торкання кольорової точки на карті */
+const STOP_T = { e: 'stop_food', f: 'stop_fuel', s: 'stop_services', p: 'stop_parking', m: 'stop_motel', c: 'camera' };
+function onStopTap(x) {
+  const r = sdb.rows[x.i]; if (!r) return;
+  const [lat, lon, ty, f, name, extra] = r;
+  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && t('f_food'), f & F.WC && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
+  const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, { lat, lon })) + ' ' + t('fromYou') : '';
+  const title = ty === 'c' ? t('camera') + (extra ? ' · ' + extra + ' ' + t('kmh') : '') : (name || t(STOP_T[ty]));
+  const p = { lat, lon, label: name || t(STOP_T[ty]) };
+  const box = $('pick'); box.hidden = false; showPick(null);
+  const btns = ty === 'c' ? '' : g.active
+    ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
+    : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
+  box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}"></span><div class="grow"><div class="t">${esc(title)}</div>
+    <div class="muted">${esc((name ? t(STOP_T[ty]) : '') + (name && feats.length ? ' · ' : '') + feats.join(', '))}${dist}</div></div></div>
+    <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
+  box.onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    box.hidden = true;
+    const k = b.dataset.k;
+    if (k === 'x') return;
+    if (k === 'via') { setVia(p); toast(t('stopViaOk', p.label), 'green', 5000); return; }
+    plan[k] = p; openPanel('trip');
   };
 }
 
@@ -424,6 +452,7 @@ export function initUI() {
   bus.on('settings', k => { railState(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
+  bus.on('stopTap', onStopTap);
   bus.on('evTap', id => {
     if (id.startsWith('air:')) { toast(t('airOn', oblastName(id.slice(4))), 'yellow', 7000, () => openPanel('feed')); return; }
     const it = feed.items.find(x => x.id === id); if (!it) return;

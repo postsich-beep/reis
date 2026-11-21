@@ -205,6 +205,11 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 .puck svg{width:100%;height:100%;filter:drop-shadow(0 2px 4px rgba(0,0,0,.4))}
 .puck-halo{fill:#fff}.puck-body{fill:var(--route)}
 .puck.dr .puck-body{fill:var(--amber)}.puck.dr .puck-halo{fill:#fff;stroke:#b57900;stroke-width:2;stroke-dasharray:4 3}
+.sdot{flex:none;width:18px;height:18px;border-radius:50%;border:2px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.25)}
+.legend{display:flex;flex-wrap:wrap;gap:6px}
+.legend button{display:flex;align-items:center;gap:6px;padding:8px 12px;border-radius:999px;background:var(--panel-2);font-size:14px;border:2px solid transparent}
+.legend button.off{opacity:.4}
+.legend .sdot{width:14px;height:14px}
 .evm{width:30px;height:30px;padding:0;border-radius:50%;border:3px solid #fff;box-shadow:0 2px 6px rgba(0,0,0,.35);display:grid;place-items:center;cursor:pointer}
 .evm svg{width:18px;height:18px}
 .evm.red{background:var(--red)}.evm.yellow{background:var(--yellow)}.evm.green{background:var(--green)}

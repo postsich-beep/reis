@@ -7,6 +7,8 @@ import { feed, resetLearning, clearFeed, tgAvailable, addDefaultChannels } from 
 import { OBLASTS, oblastName } from './route.js';
 import { cacheInfo, clearCache, cacheStats, setMapStyle, applyTheme, setFollow, applyMapSource } from './map.js';
 import { off, offlineActive, refreshStatus } from './offline.js';
+import { sdb, TYPES } from './stopsdb.js';
+import { drawStops } from './map.js';
 import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } from './sim.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
@@ -101,6 +103,15 @@ function offlineHtml() {
   h += `<div class="muted" style="margin-top:8px">${t('offRouteNote')}</div>`;
   return h;
 }
+const LEG = [['food', 'e', 'legFood'], ['fuel', 'f', 'legFuel'], ['park', 'p', 'legPark'], ['motel', 'm', 'legMotel'], ['cam', 'c', 'legCam']];
+function pointsHtml() {
+  const on = S.mapStopTypes || {};
+  const info = sdb.ready ? t('dbInfo', sdb.count.toLocaleString('uk-UA'), fmtDate(sdb.date)) : t('dbNone');
+  return `<div class="list">${toggleRow('mapStops', t('set_mapStops'), info, S.mapStops)}</div>
+    <div class="legend" style="margin-top:10px">${LEG.map(([k, ty, lbl]) => `<button data-leg="${k}" class="${on[k] === false ? 'off' : ''}"><span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ''}"></span>${t(lbl)}</button>`).join('')}
+      <button disabled><span class="sdot" style="background:var(--red)"></span>${t('legEvent')}</button></div>
+    <div class="muted" style="margin-top:6px">${t('legHint')}</div>`;
+}
 function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}" value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
@@ -112,6 +123,9 @@ function settingsHtml() {
   <div class="muted" style="margin:0 2px 6px">${t('setMapStyle')}</div>
   ${offlineActive() ? `<div class="muted" style="margin:0 2px 10px">${t('styleOffNote')}</div>` : seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
   <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}</div>
+
+  <div class="sec">${t('secPoints')}</div>
+  <div id="ptsSec">${pointsHtml()}</div>
 
   <div class="sec">${t('secOffline')}</div>
   <div id="offSec">${offlineHtml()}</div>
@@ -163,9 +177,14 @@ definePanel('settings', {
         if (k === 'view3d' || k === 'autoCenter') setFollow(true);
         if (k === 'voice' && !S.voice) P.stopSpeak();
         if (k === 'vibrate' && S.vibrate) P.vibrate(120);
+        if (k === 'mapStops') drawStops();
         return;
       }
       if (!b) return;
+      if (b.dataset.leg) {
+        const m = { ...(S.mapStopTypes || {}) }; m[b.dataset.leg] = m[b.dataset.leg] === false; S.mapStopTypes = m;
+        $('ptsSec').innerHTML = pointsHtml(); return;
+      }
       if (b.dataset.seg) {
         const [k, v] = b.dataset.seg.split(':');
         if (k === 'theme') { S.theme = v; applyTheme(); }
@@ -327,6 +346,7 @@ definePanel('about', {
   }
 });
 export function initLab() {
+  bus.on('stopsdb', () => { const el = $('ptsSec'); if (el) el.innerHTML = pointsHtml(); });
   bus.on('offline', () => { const el = $('offSec'); if (el) el.innerHTML = offlineHtml(); });
   bus.on('settings', k => { if (k === 'lang' && offlineActive()) applyMapSource(); });
   bus.on('sim', () => refresh('lab'));

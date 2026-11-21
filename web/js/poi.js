@@ -4,6 +4,7 @@ import { http, online } from './platform.js';
 import { pos } from './nav.js';
 import { g, say, distWords } from './guide.js';
 import { t } from './i18n.js';
+import { sdb, alongRoute, score as dbScore, F } from './stopsdb.js';
 
 const OVERPASS = ['https://overpass-api.de/api/interpreter', 'https://overpass.private.coffee/api/interpreter', 'https://overpass.kumi.systems/api/interpreter'];
 export const poi = { cams: [], stops: [], loading: false, nextCam: null, drive: 0, driveWarn: 0 };
@@ -51,6 +52,7 @@ let rawCams = new Map(), rawStops = new Map(), refetchTimer = null;
 export async function fetchForRoute(idx, force) {
   if (!idx) return;
   reproject(idx);                                          // одразу показуємо те, що вже знаємо
+  if (sdb.ready) return;                                   // уся Україна вже в телефоні — сервер не потрібен
   if (poi.loading || !online()) return;
   if (!force && Date.now() - lastFetch < 60000) {          // частий перерахунок — не смикаємо сервер
     clearTimeout(refetchTimer); refetchTimer = setTimeout(() => { if (g.idx) fetchForRoute(g.idx, true); }, 61000);
@@ -81,7 +83,19 @@ export async function fetchForRoute(idx, force) {
 }
 
 // Прив'язка об'єктів до поточного маршруту: відстань уздовж і відхилення вбік.
+const KIND = { f: 'fuel', s: 'services', p: 'parking', m: 'motel', e: 'food' };
+function fromDb(x) {
+  const [lat, lon, t, f, name, extra] = x.r;
+  if (t === 'c') return { id: 'db' + x.i, lat, lon, d: x.d, off: x.off, max: extra || null };
+  return { id: 'db' + x.i, lat, lon, d: x.d, off: x.off, name, kind: KIND[t] || 'fuel', hgv: !!(f & F.HGV), shower: !!(f & F.SHOWER), food: !!(f & F.FOOD),
+    wc: !!(f & F.WC), h24: !!(f & F.H24), score: dbScore(x.r) };
+}
 function reproject(idx) {
+  if (sdb.ready) {
+    poi.cams = alongRoute(idx, ['c'], 200).map(fromDb);
+    poi.stops = alongRoute(idx, ['f', 's', 'p', 'm'], 1200).map(fromDb);
+    bus.emit('poi', poi); return;
+  }
   const fit = (pool, maxOff) => [...pool.values()].map(x => { const l = idx.locate(x, null); return l ? { ...x, d: l.d, off: l.off } : null; })
     .filter(x => x && x.off <= maxOff).sort((a, b) => a.d - b.d);
   poi.cams = fit(rawCams, 200); poi.stops = fit(rawStops, 1200);
@@ -140,6 +154,7 @@ export function resetDrive() { dState.drive = 0; dState.stand = 0; poi.drive = 0
 
 export function init() {
   bus.on('guide', check);
+  bus.on('stopsdb', () => { if (g.idx) reproject(g.idx); });
   bus.on('route', () => {
     camSaid = new Set();
     if (!g.idx) { poi.cams = []; poi.stops = []; poi.nextCam = null; bus.emit('poi', poi); return; }

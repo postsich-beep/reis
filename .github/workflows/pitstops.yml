@@ -1,0 +1,49 @@
+name: Піт-стопи для фур
+
+# Раз на місяць збирає з OpenStreetMap усі АЗС, стоянки й зони відпочинку для фур,
+# мотелі, камери швидкості та кафе біля трас по Україні у web/data/stops.json
+# і запускає збірку застосунку з новими даними.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '41 2 2 * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/pitstops.yml', 'tools/build_stops.py']
+
+permissions:
+  contents: write
+  actions: write
+
+concurrency:
+  group: pitstops
+  cancel-in-progress: false
+
+jobs:
+  stops:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Зібрати базу з OpenStreetMap
+        run: |
+          mkdir -p web/data
+          python3 tools/build_stops.py web/data/stops.json
+          ls -la web/data/stops.json
+
+      - name: Зберегти в репозиторій і перезібрати застосунок
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add web/data/stops.json
+          if git diff --cached --quiet; then echo "без змін"; exit 0; fi
+          # нова версія інтерфейсу — щоб телефони підтягнули базу оновленням «повітрям»
+          python3 -c "import json;p='web/version.json';v=json.load(open(p));v['web']+=1;json.dump(v,open(p,'w'))"
+          git add web/version.json
+          git commit -m "Піт-стопи: оновлення бази з OpenStreetMap"
+          git pull --rebase origin main
+          git push origin HEAD:main
+          gh workflow run build.yml --ref main

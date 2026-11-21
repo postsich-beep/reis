@@ -9,6 +9,7 @@ import * as track from './track.js';
 import * as sim from './sim.js';
 import * as weather from './weather.js';
 import * as offline from './offline.js';
+import * as stopsdb from './stopsdb.js';
 import * as mapM from './map.js';
 import * as route from './route.js';
 import { initUI } from './ui.js';
@@ -24,10 +25,11 @@ async function boot() {
   initUI(); initLab();
   await route.loadTrips();
   await feed.init();
+  stopsdb.load();
   P.nativeReady(); P.startLocation(); P.keepAwake(S.keepAwake !== false);
   const b = document.getElementById('boot');
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline };   // для діагностики й автотестів
+window.__app = { bus, S, P, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));
