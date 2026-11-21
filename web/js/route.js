@@ -28,18 +28,18 @@ export async function reverse(lat, lon) {
 
 /* ---------- області України ---------- */
 export const OBLASTS = [
-  ['vinnytsia', 'Вінницька', 'Винницкая', 'вінни|винниц|vinny'], ['volyn', 'Волинська', 'Волынская', 'волин|волын|volyn'],
-  ['dnipro', 'Дніпропетровська', 'Днепропетровская', 'дніпроп|днепроп|dnipro'], ['donetsk', 'Донецька', 'Донецкая', 'донец|donet'],
+  ['vinnytsia', 'Вінницька', 'Винницкая', 'вінни|винниц|vinny|вінничч'], ['volyn', 'Волинська', 'Волынская', 'волин|волын|volyn'],
+  ['dnipro', 'Дніпропетровська', 'Днепропетровская', 'дніпроп|днепроп|dnipro|дніпровщ|дніпр(о|і|а)(\\s|,|\\.|$)'], ['donetsk', 'Донецька', 'Донецкая', 'донец|донеч|donet'],
   ['zhytomyr', 'Житомирська', 'Житомирская', 'житомир|zhytomyr'], ['zakarpattia', 'Закарпатська', 'Закарпатская', 'закарпат|zakarpat'],
-  ['zaporizhzhia', 'Запорізька', 'Запорожская', 'запоріз|запорож|zapori'], ['ivano-frankivsk', 'Івано-Франківська', 'Ивано-Франковская', 'франків|франков|frankiv'],
-  ['kyiv', 'Київська', 'Киевская', 'київ|киев|kyiv|kiev'], ['kirovohrad', 'Кіровоградська', 'Кировоградская', 'кіровоград|кировоград|kirovo'],
+  ['zaporizhzhia', 'Запорізька', 'Запорожская', 'запоріз|запоріж|запорож|zapori'], ['ivano-frankivsk', 'Івано-Франківська', 'Ивано-Франковская', 'франків|франков|frankiv|прикарпат'],
+  ['kyiv', 'Київська', 'Киевская', 'київ|киев|kyiv|kiev'], ['kirovohrad', 'Кіровоградська', 'Кировоградская', 'кіровоград|кировоград|kirovo|кропивниц'],
   ['luhansk', 'Луганська', 'Луганская', 'луган|luhan'], ['lviv', 'Львівська', 'Львовская', 'львів|львов|lviv'],
   ['mykolaiv', 'Миколаївська', 'Николаевская', 'миколаїв|николаев|mykola'], ['odesa', 'Одеська', 'Одесская', 'одес|odes'],
-  ['poltava', 'Полтавська', 'Полтавская', 'полтав|poltav'], ['rivne', 'Рівненська', 'Ровенская', 'рівнен|ровен|rivne'],
-  ['sumy', 'Сумська', 'Сумская', 'сумськ|сумск|sumy|sumsk'], ['ternopil', 'Тернопільська', 'Тернопольская', 'терноп|ternop'],
+  ['poltava', 'Полтавська', 'Полтавская', 'полтав|poltav'], ['rivne', 'Рівненська', 'Ровенская', 'рівнен|ровен|rivne|рівне|рівного'],
+  ['sumy', 'Сумська', 'Сумская', 'сумськ|сумск|sumy|sumsk|сумщ|суми|сумах'], ['ternopil', 'Тернопільська', 'Тернопольская', 'терноп|ternop'],
   ['kharkiv', 'Харківська', 'Харьковская', 'харків|харьков|khark'], ['kherson', 'Херсонська', 'Херсонская', 'херсон|kherson'],
-  ['khmelnytskyi', 'Хмельницька', 'Хмельницкая', 'хмельн|khmel'], ['cherkasy', 'Черкаська', 'Черкасская', 'черкас|cherkas'],
-  ['chernivtsi', 'Чернівецька', 'Черновицкая', 'чернівец|черновиц|chernivts'], ['chernihiv', 'Чернігівська', 'Черниговская', 'чернігів|чернигов|chernihiv'],
+  ['khmelnytskyi', 'Хмельницька', 'Хмельницкая', 'хмельн|khmel'], ['cherkasy', 'Черкаська', 'Черкасская', 'черкас|черкащ|cherkas'],
+  ['chernivtsi', 'Чернівецька', 'Черновицкая', 'чернівец|черновиц|chernivts|буковин'], ['chernihiv', 'Чернігівська', 'Черниговская', 'чернігів|чернигов|chernihiv'],
   ['crimea', 'АР Крим', 'АР Крым', 'крим|крым|crimea']
 ].map(([id, uk, ru, re]) => ({ id, uk, ru, re: new RegExp(re, 'i') }));
 export const oblastOf = s => { if (!s) return null; const o = OBLASTS.find(o => o.re.test(s)); return o ? o.id : null; };
@@ -51,14 +51,14 @@ function truckOptions() {
   return { height: +t.height, width: +t.width, length: +t.length, weight: +t.weight, axle_load: +t.axle, hazmat: !!t.hazmat };
 }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
-export async function requestRoute(pts, heading) {
+export async function requestRoute(pts, heading, costing = 'truck') {
   const locations = pts.map((p, i) => {
     const l = { lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6), type: (i === 0 || i === pts.length - 1) ? 'break' : 'through' };
     if (i === 0 && heading != null) { l.heading = Math.round(heading); l.heading_tolerance = 60; }
     return l;
   });
   const body = {
-    locations, costing: 'truck', costing_options: { truck: truckOptions() },
+    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions() } : {},
     units: 'kilometers', language: S.lang === 'ru' ? 'ru-RU' : 'uk-UA', directions_type: 'instructions'
   };
   // GET із параметром json — «простий» запит, сервер відповідає сторінкам без попередньої перевірки CORS.
@@ -133,7 +133,17 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   if (from && !skipA) pts.push(trip.a);
   if (trip.v && !skipVia) pts.push(trip.v);
   pts.push(trip.b);
-  const r = await requestRoute(pts, heading);
+  const costing = trip.costing || 'truck';
+  const r = await requestRoute(pts, heading, costing);
+  r.costing = costing;
+  // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
+  // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.
+  const straight = hav(pts[0], pts[pts.length - 1]);
+  r.detour = straight > 30000 ? r.dist / (straight * 1.3) : 1;
+  if (costing === 'truck' && !from && r.detour > 1.4) {
+    try { const alt = await requestRoute(pts, heading, 'auto'); if (alt.dist < r.dist * 0.75) { alt.costing = 'auto'; r.alt = alt; } }
+    catch (e) { log('warn', 'запасний маршрут: ' + e.message); }
+  }
   const idx = new RouteIndex(r.coords);
   const at = p => { const loc = idx.locate(p, null); return loc && loc.off < 400 ? loc.d : null; };
   r.aD = from && !skipA ? at(trip.a) : null;            // де на маршруті точка А і проміжна

@@ -20,7 +20,7 @@ async function boot() {
   initUI(); initLab();
   await route.loadTrips();
   await feed.init();
-  P.nativeReady(); P.startLocation(); P.keepAwake(true);
+  P.nativeReady(); P.startLocation(); P.keepAwake(S.keepAwake !== false);
   const b = document.getElementById('boot');
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

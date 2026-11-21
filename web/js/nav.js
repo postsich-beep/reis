@@ -2,20 +2,20 @@
 import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.js';
 
 export const pos = {
-  mode: 'none',            // 'none' — ще немає позиції, 'gps' — довіряємо GPS, 'dr' — рахуємо самі
+  mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
   lat: null, lon: null, hdg: 0, spd: 0, acc: null,
   raw: null,               // остання прийнята точка GPS
   lostSince: 0, reason: '', drDist: 0, accRef: 0, accBase: 15,
   pending: null,           // GPS повернувся, але показує іншу точку: чекаємо рішення водія
   rd: null, onRoute: false, off: 0,   // положення вздовж маршруту
-  sats: null, sim: false
+  sats: null, sim: false, approxSrc: '', approxAge: 0
 };
 
 let route = null, routeInUA = true;
 let lastFixT = 0, lastTick = Date.now(), vCruise = 0, net = null, compass = null;
 let yawNow = null, yawRef = null, hdgRef = null;
 let moving = true, stillT = 0, varStop = null, varMove = null;
-let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0;
+let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0, approxT = 0;
 
 const ema = (o, v, k = 0.1) => o == null ? v : o + (v - o) * k;
 
@@ -64,6 +64,23 @@ function accept(f) {
   bus.emit('pos', pos);
 }
 
+// Поки GPS не знайшов супутників: показуємо приблизне місце за вишками й Wi-Fi або останнє відоме.
+function approx(f) {
+  if (pos.mode !== 'none' && pos.mode !== 'approx') return;
+  if (f.prov === 'last' && pos.mode !== 'none') return;
+  const age = f.age > 0 ? f.age : 0;
+  if (age > 7 * 86400) return;
+  let acc = Math.round(f.acc || 1500); if (age > 600) acc = Math.max(acc, 1000);
+  if (pos.mode === 'approx' && pos.acc != null && acc > pos.acc * 2 && Date.now() - approxT < 60000) return;   // свіжу кращу точку не міняємо на гіршу
+  approxT = Date.now();
+  pos.mode = 'approx'; pos.lat = f.lat; pos.lon = f.lon; pos.acc = acc;
+  pos.spd = f.spd > 0 ? f.spd : 0;
+  if (f.brg != null) pos.hdg = f.brg; else if (compass != null) pos.hdg = compass;
+  pos.approxSrc = f.prov; pos.approxAge = age;
+  matchRoute(pos, pos.spd);
+  bus.emit('pos', pos);
+}
+
 function enterDR(reason) {
   if (pos.lat == null || pos.mode === 'dr') return;
   pos.mode = 'dr'; pos.reason = reason; pos.lostSince = Date.now();
@@ -87,7 +104,11 @@ function exitDR(f) {
 function onGps(f) {
   if (simOn && !f.sim) return;
   const now = Date.now();
-  if (f.prov === 'network') { net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now }; return; }
+  if (f.prov === 'network' || f.prov === 'fused' || f.prov === 'last') {
+    if (f.prov === 'network') net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now };
+    approx(f);
+    return;
+  }
   let bad = '';
   if (f.acc != null && f.acc > 120) bad = 'weak';
   if (S.spoof) {
@@ -114,7 +135,7 @@ function onGps(f) {
   }
 
   if (bad) {
-    if (pos.mode === 'none' && bad === 'weak') { accept(f); return; }   // краще неточна точка, ніж жодної
+    if ((pos.mode === 'none' || pos.mode === 'approx') && bad === 'weak') { accept(f); return; }   // неточний GPS кращий за вишки
     badRun++;
     if (pos.mode === 'gps' && badRun >= (bad === 'weak' ? 4 : 2)) enterDR(bad === 'weak' ? 'weak' : 'spoof');
     return;

@@ -165,7 +165,7 @@ export async function keepAwake(on) {
     else if (!on && wakeLock) { await wakeLock.release(); wakeLock = null; }
   } catch (_) {}
 }
-document.addEventListener('visibilitychange', () => { if (!document.hidden && !N && !wakeLock) keepAwake(true); });
+document.addEventListener('visibilitychange', () => { if (!document.hidden && !N && !wakeLock && S.keepAwake !== false) keepAwake(true); });
 
 export function saveText(name, mime, text) {
   if (N) { try { N.saveFile(name, mime, text); return true; } catch (e) { log('err', 'saveFile ' + e); return false; } }
@@ -177,11 +177,13 @@ export function saveText(name, mime, text) {
 }
 export function openUrl(url) { if (N) { try { N.openUrl(url); return; } catch (_) {} } window.open(url, '_blank', 'noopener'); }
 export function notify(title, text) { if (N) { try { N.postNotice(String(title), String(text)); } catch (_) {} } }
-export function vibrate(ms) { if (N) { try { N.vibrate(ms); return; } catch (_) {} } if (navigator.vibrate) navigator.vibrate(ms); }
+export function vibrate(ms) { if (S.vibrate === false) return; if (N) { try { N.vibrate(ms); return; } catch (_) {} } if (navigator.vibrate) navigator.vibrate(ms); }
 export function appInfo() {
   if (N) { try { return JSON.parse(N.info()); } catch (_) {} }
   return { app: 'web', code: 0, native: false };
 }
+export function openLocationSettings() { if (N && typeof N.openLocationSettings === 'function') { try { N.openLocationSettings(); return true; } catch (_) {} } return false; }
+export function openAppSettings() { if (N && typeof N.openAppSettings === 'function') { try { N.openAppSettings(); return true; } catch (_) {} } return false; }
 export function checkUpdate() { if (N) { try { N.checkUpdate(); return true; } catch (_) {} } return false; }
 export function applyWebUpdate() { if (N) { try { N.applyWebUpdate(); return true; } catch (_) {} } return false; }
 export function installApk() { if (N) { try { N.installApk(); return true; } catch (_) {} } return false; }

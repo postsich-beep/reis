@@ -22,9 +22,8 @@ function layoutVars() {
 
 function staticLabels() {
   $('spdUnit').textContent = t('kmh');
-  $('lostTitle').textContent = t('lostTitle');
-  $('bBack100').innerHTML = ICON.down + '100 ' + t('m');
-  $('bFwd100').innerHTML = ICON.up + '100 ' + t('m');
+  $('bBack100').innerHTML = ICON.down + '100'; $('bBack100').setAttribute('aria-label', t('back100'));
+  $('bFwd100').innerHTML = ICON.up + '100'; $('bFwd100').setAttribute('aria-label', t('fwd100'));
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
@@ -38,7 +37,7 @@ function staticLabels() {
 function railState() {
   $('bCompass').innerHTML = view.north ? ICON.north : ICON.head; $('bCompass').classList.toggle('on', view.north);
   $('b3d').classList.toggle('on', !!S.view3d); $('b3d').textContent = S.view3d ? '3D' : '2D';
-  $('bTheme').innerHTML = S.theme === 'auto' ? ICON.auto : S.theme === 'night' ? ICON.moon : ICON.sun;
+  $('bSettings').innerHTML = ICON.gear; $('bSettings').setAttribute('aria-label', t('settings'));
   $('bVoice').innerHTML = S.voice ? ICON.vol : ICON.mute; $('bVoice').classList.toggle('off', !S.voice);
   $('bRec').classList.toggle('on', !!S.rec);
   $('bCenter').classList.toggle('need', !view.follow);
@@ -46,6 +45,10 @@ function railState() {
 
 const WHY = { timeout: 'whyTimeout', spoof: 'whySpoof', weak: 'whyWeak', manual: 'whyManual' };
 let lostShown = null;
+export const lostReason = () => t(WHY[pos.reason] || 'whyTimeout') + ' ' + (pos.onRoute ? t('drRoute') : t('drFree'));
+export const locState = { known: false, enabled: null, gps: null, fine: null, listening: false, error: '' };
+let searchSince = Date.now(), indoorHinted = false, offWarned = false;
+const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace('.', ',') + ' ' + t('km') : a + ' ' + t('m');
 function hud() {
   // швидкість
   const kmh = pos.spd * 3.6, sp = $('speed');
@@ -58,20 +61,30 @@ function hud() {
 
   // стан GPS
   const chip = $('gpsChip');
-  if (pos.mode === 'dr') { chip.className = 'chip lost'; $('gpsText').textContent = 'GPS ✕'; }
-  else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + pos.acc + ' ' + t('m') : 'GPS'; }
+  const off = locState.enabled === false && !pos.sim;
+  if (off) { chip.className = 'chip lost'; $('gpsText').textContent = t('locOffChip'); }
+  else if (pos.mode === 'dr') { chip.className = 'chip lost'; $('gpsText').textContent = 'GPS ✕'; }
+  else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
+  else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
   else { chip.className = 'chip none'; $('gpsText').textContent = t('gpsWait'); }
+  // GPS шукає вже хвилину, а геолокація ввімкнена — швидше за все, телефон у приміщенні
+  if (pos.mode === 'gps' || pos.mode === 'dr' || pos.sim) searchSince = Date.now();
+  else if (!indoorHinted && !off && Date.now() - searchSince > 60000) { indoorHinted = true; toast(t('gpsIndoor'), 'yellow', 12000, () => openPanel('gps')); }
 
   // режим втрати сигналу
   const lost = pos.mode === 'dr';
-  if (lost !== lostShown) { $('lost').hidden = !lost; lostShown = lost; document.body.classList.toggle('lost', lost); requestAnimationFrame(layoutVars); }
+  if (lost !== lostShown) {
+    lostShown = lost;
+    $('nudge').hidden = !lost; $('lostLine').hidden = !lost; $('gpsChip').hidden = lost;
+    if (!lost) $('bAcceptGps').hidden = true;
+    requestAnimationFrame(layoutVars);
+  }
   if (lost) {
-    $('lostTime').textContent = fmtMS((Date.now() - pos.lostSince) / 1000);
-    $('lostAcc').textContent = t('lostCalc', pos.acc == null ? '?' : pos.acc);
-    $('lostWhy').textContent = t(WHY[pos.reason] || 'whyTimeout') + ' ' + (pos.onRoute ? t('drRoute') : t('drFree'));
-    const b = $('bAcceptGps');
-    b.hidden = !pos.pending;
-    if (pos.pending) b.textContent = pos.reason === 'manual' ? t('backToGps') : t('acceptGps', fmtDist(pos.pending.d));
+    $('lostLine').textContent = 'GPS ✕ ' + fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ±' + accText(pos.acc)
+      + (pos.reason === 'spoof' ? ' · ' + t('spoofShort') : pos.reason === 'manual' ? ' · ' + t('manualShort') : '');
+    const b = $('bAcceptGps'), show = !!pos.pending;
+    if (b.hidden === show) { b.hidden = !show; requestAnimationFrame(layoutVars); }
+    if (show) b.textContent = pos.reason === 'manual' ? t('backToGps') : t('acceptGps', fmtDist(pos.pending.d));
   }
 
   // картка маневру
@@ -183,8 +196,14 @@ function planHtml() {
     <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
     <div class="sec">${t('savedSec')}</div><div id="savedBox">${savedHtml()}</div>`;
 }
+function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
 function planSumHtml() {
-  return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600;margin-bottom:10px">${esc(tripTitle(plan.trip))}</div>${summaryHtml(plan.trip)}${offlineHtml()}</div>
+  const tr = plan.trip, r = tr.route, alt = r.alt;
+  const warn = alt ? `<div class="card" style="margin-top:8px;border:2px solid var(--yellow)"><div style="font-weight:600">${t('detourTitle', fmtDist(r.dist), fmtDist(alt.dist))}</div>
+      <div class="muted" style="margin-top:4px">${t('detourText')}</div>
+      <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
+    : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
+  return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>`;
 }
 function showSugg(k, list) {
@@ -221,7 +240,7 @@ async function goTrip(trip) {
   saveTrip(trip);
   restorePoi(trip.cams, trip.stops);
   closePanel(); showPick(null);
-  P.keepAwake(true);
+  P.keepAwake(S.keepAwake !== false);
   await startTrip(trip);
   setRouteContext(trip.regions, trip.towns);
   setFollow(true);
@@ -235,6 +254,11 @@ function tripClicks(e) {
   const d = b.dataset;
   if (d.act === 'build') doBuild();
   else if (d.act === 'go' && plan.trip) goTrip(plan.trip);
+  else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
+    const tr = plan.trip, alt = tr.route.alt;
+    alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
+    previewRoute(alt.coords); refresh('trip'); loadRegions(tr);
+  }
   else if (d.act === 'save' && plan.trip) { saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); openPanel('trip'); }
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
@@ -399,7 +423,14 @@ export function initUI() {
   bus.on('arrived', () => { toast(t('arrived'), 'green', 8000); });
   bus.on('mapBlank', () => toast(t('mapBlank'), 'yellow', 9000));
   bus.on('native:ttsLang', d => { if (d && !d.ok) toast(t('ttsNoVoice'), 'yellow', 12000); });
-  bus.on('native:perm', d => { if (d && d.loc === false) toast(t('permLoc'), 'red', 15000); });
+  bus.on('native:perm', d => { if (d && d.loc === false) toast(t('permLoc'), 'red', 15000, () => P.openAppSettings()); });
+  bus.on('native:locstate', d => {
+    if (!d) return;
+    Object.assign(locState, { known: true, enabled: d.enabled, gps: d.gps, fine: d.fine, listening: !!d.listening, error: d.error || '' });
+    if (d.enabled === false && !offWarned) { offWarned = true; P.vibrate(200); toast(t('locOffToast'), 'red', 20000, () => { if (!P.openLocationSettings()) openPanel('gps'); }); }
+    if (d.enabled) { offWarned = false; }
+    hud(); refresh('gps');
+  });
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
@@ -412,7 +443,7 @@ export function initUI() {
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => { b.onclick = () => currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel); });
   $('bCompass').onclick = () => { view.north = !view.north; setFollow(true); railState(); };
   $('b3d').onclick = () => { S.view3d = !S.view3d; setFollow(true); };
-  $('bTheme').onclick = () => { S.theme = S.theme === 'auto' ? 'day' : S.theme === 'day' ? 'night' : 'auto'; applyTheme(); toast(t('theme_' + S.theme), '', 1800); };
+  $('bSettings').onclick = () => currentPanel() === 'settings' ? closePanel() : openPanel('settings');
   $('bVoice').onclick = () => { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); };
   $('bRec').onclick = () => {
     S.rec = !S.rec;
@@ -425,6 +456,7 @@ export function initUI() {
   $('bFwd100').onclick = () => nudge(100); $('bBack100').onclick = () => nudge(-100);
   $('bAcceptGps').onclick = acceptPending;
   $('gpsChip').onclick = () => openPanel('gps');
+  $('lostLine').onclick = () => openPanel('gps');
 
   // мікрофон: коротке натискання — голосове повідомлення, довге — жива розмова
   let lp = null, long = false;

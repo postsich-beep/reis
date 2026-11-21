@@ -14,6 +14,7 @@ import android.os.Looper
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
+import android.provider.Settings
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
@@ -82,6 +83,20 @@ class Bridge(private val act: MainActivity) {
     fun openUrl(url: String) {
         if (!url.startsWith("https://")) return
         main.post { try { act.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url))) } catch (_: Exception) {} }
+    }
+
+    /** Системні налаштування геолокації (кнопка «Увімкнути геолокацію»). */
+    @JavascriptInterface
+    fun openLocationSettings() {
+        main.post { try { act.startActivity(Intent(Settings.ACTION_LOCATION_SOURCE_SETTINGS)) } catch (_: Exception) {} }
+    }
+
+    /** Сторінка застосунку в налаштуваннях: дозволи, батарея, автозапуск. */
+    @JavascriptInterface
+    fun openAppSettings() {
+        main.post {
+            try { act.startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.parse("package:" + act.packageName))) } catch (_: Exception) {}
+        }
     }
 
     @JavascriptInterface

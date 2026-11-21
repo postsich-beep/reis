@@ -28,9 +28,9 @@
 <div id="toasts"></div>
 
 <nav id="rail">
+  <button class="rb" id="bSettings"></button>
   <button class="rb" id="bCompass"></button>
   <button class="rb" id="b3d">3D</button>
-  <button class="rb" id="bTheme"></button>
   <button class="rb" id="bVoice"></button>
   <button class="rb rec" id="bRec">REC</button>
 </nav>
@@ -45,14 +45,14 @@
 <div id="pick" hidden></div>
 
 <footer id="bottom">
-  <div id="lost" hidden>
-    <div class="lost-head"><b id="lostTitle"></b><span class="t" id="lostTime"></span><span id="lostAcc"></span><span class="why" id="lostWhy"></span></div>
-    <div class="lost-btns"><button id="bBack100"></button><button id="bFwd100"></button></div>
-    <button id="bAcceptGps" hidden></button>
-  </div>
+  <button id="bAcceptGps" hidden></button>
   <div id="tripbar">
-    <div class="tb-main"><b id="eta"></b><span id="remain"></span></div>
+    <div class="tb-main">
+      <div class="tb-row"><b id="eta"></b><span id="remain"></span></div>
+      <button class="tb-lost" id="lostLine" hidden></button>
+    </div>
     <button class="chip none" id="gpsChip"><i></i><span id="gpsText">GPS</span></button>
+    <div class="nudge" id="nudge" hidden><button id="bFwd100"></button><button id="bBack100"></button></div>
   </div>
   <div id="tabs">
     <button data-panel="trip"></button>

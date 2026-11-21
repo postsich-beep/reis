@@ -67,6 +67,9 @@ class NavService : Service(), SensorEventListener {
     private val rot = FloatArray(9)
     private val ori = FloatArray(3)
     private var lastGnssMs = 0L
+    private var tick = 0
+    private var gpsRequested = false
+    private var locError = ""
 
     private fun emit(type: String, o: JSONObject) { MainActivity.instance?.emit(type, o.toString()) }
 
@@ -85,14 +88,47 @@ class NavService : Service(), SensorEventListener {
 
     private open inner class Listener(val prov: String) : LocationListener {
         override fun onLocationChanged(location: Location) { emit("loc", locJson(location, prov)) }
-        override fun onProviderEnabled(provider: String) {}
-        override fun onProviderDisabled(provider: String) {}
+        override fun onProviderEnabled(provider: String) { emitState() }
+        override fun onProviderDisabled(provider: String) { emitState() }
         @Deprecated("Deprecated in Java")
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
     private val gpsListener = Listener("gps")
     private val netListener = Listener("network")
+    private val fusedListener = Listener("fused")
+
+    private fun has(p: String) = checkSelfPermission(p) == PackageManager.PERMISSION_GRANTED
+
+    private fun enabled(p: String) = try { lm.isProviderEnabled(p) } catch (_: Exception) { false }
+
+    /** Стан геолокації телефона: інтерфейс показує, що саме заважає (вимкнено, немає дозволу тощо). */
+    private fun emitState() {
+        val gps = enabled(LocationManager.GPS_PROVIDER)
+        val net = enabled(LocationManager.NETWORK_PROVIDER)
+        val on = if (Build.VERSION.SDK_INT >= 28) (try { lm.isLocationEnabled } catch (_: Exception) { gps || net }) else (gps || net)
+        val o = JSONObject().put("enabled", on).put("gps", gps).put("network", net)
+            .put("fine", has(Manifest.permission.ACCESS_FINE_LOCATION)).put("coarse", has(Manifest.permission.ACCESS_COARSE_LOCATION))
+            .put("listening", gpsRequested)
+        if (locError.isNotEmpty()) o.put("error", locError)
+        emit("locstate", o)
+    }
+
+    /** Останнє відоме місце: щоб одразу після запуску показати хоча б приблизну точку. */
+    @SuppressLint("MissingPermission")
+    private fun emitLastKnown() {
+        if (!has(Manifest.permission.ACCESS_COARSE_LOCATION) && !has(Manifest.permission.ACCESS_FINE_LOCATION)) return
+        var best: Location? = null
+        val names = arrayListOf(LocationManager.GPS_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.PASSIVE_PROVIDER)
+        if (Build.VERSION.SDK_INT >= 31) names.add(LocationManager.FUSED_PROVIDER)
+        for (n in names) {
+            val l = try { lm.getLastKnownLocation(n) } catch (_: Exception) { null } ?: continue
+            if (best == null || l.time > best.time) best = l
+        }
+        val b = best ?: return
+        val o = locJson(b, "last").put("age", (System.currentTimeMillis() - b.time) / 1000)
+        emit("loc", o)
+    }
 
     private val gnssCallback = object : GnssStatus.Callback() {
         override fun onSatelliteStatusChanged(status: GnssStatus) {
@@ -119,6 +155,7 @@ class NavService : Service(), SensorEventListener {
             }
             accSum = 0.0; accSq = 0.0; accN = 0
             if (hasGyro) o.put("yaw", yawCw)
+            if (++tick % 5 == 0) emitState()
             heading?.let { if (it.isFinite()) o.put("hdg", it.toDouble()) }
             pressure?.let { if (it.isFinite()) o.put("press", it.toDouble()) }
             if (o.length() > 0) emit("sens", o)
@@ -152,6 +189,9 @@ class NavService : Service(), SensorEventListener {
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "reis:nav").also { it.setReferenceCounted(false); it.acquire() }
             handler.postDelayed(ticker, 1000)
+        } else {
+            emitState()
+            emitLastKnown()
         }
         return START_STICKY
     }
@@ -169,22 +209,36 @@ class NavService : Service(), SensorEventListener {
     }
 
     @SuppressLint("MissingPermission")
-    @Suppress("DEPRECATION")
     private fun startLocation() {
-        if (checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) return
+        val fine = has(Manifest.permission.ACCESS_FINE_LOCATION)
+        val coarse = has(Manifest.permission.ACCESS_COARSE_LOCATION)
         val providers = try { lm.allProviders } catch (_: Exception) { emptyList<String>() }
-        try {
-            if (providers.contains(LocationManager.GPS_PROVIDER))
-                lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, gpsListener, Looper.getMainLooper())
-        } catch (e: Exception) { Log.w("Reis", "gps provider", e) }
-        try {
-            // Мережеве місце (вишки, Wi-Fi) — звірка для детектора підміни GPS.
-            if (providers.contains(LocationManager.NETWORK_PROVIDER))
-                lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 15000L, 0f, netListener, Looper.getMainLooper())
-        } catch (e: Exception) { Log.w("Reis", "network provider", e) }
-        try {
-            lm.registerGnssStatusCallback(gnssCallback, handler)
-        } catch (e: Exception) { Log.w("Reis", "gnss status", e) }
+        locError = ""
+        if (fine) {
+            try {
+                if (providers.contains(LocationManager.GPS_PROVIDER)) {
+                    lm.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, gpsListener, Looper.getMainLooper())
+                    gpsRequested = true
+                } else locError = "no gps provider"
+            } catch (e: Exception) { locError = "gps: " + e.javaClass.simpleName; Log.w("Reis", "gps provider", e) }
+            try {
+                // Злите місце (GPS + вишки + Wi-Fi) від Android 12: швидка приблизна точка в приміщенні.
+                if (Build.VERSION.SDK_INT >= 31 && providers.contains(LocationManager.FUSED_PROVIDER))
+                    lm.requestLocationUpdates(LocationManager.FUSED_PROVIDER, 2000L, 0f, fusedListener, Looper.getMainLooper())
+            } catch (e: Exception) { Log.w("Reis", "fused provider", e) }
+            try {
+                lm.registerGnssStatusCallback(gnssCallback, handler)
+            } catch (e: Exception) { Log.w("Reis", "gnss status", e) }
+        }
+        if (fine || coarse) {
+            try {
+                // Мережеве місце (вишки, Wi-Fi) — звірка для детектора підміни GPS.
+                if (providers.contains(LocationManager.NETWORK_PROVIDER))
+                    lm.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 10000L, 0f, netListener, Looper.getMainLooper())
+            } catch (e: Exception) { Log.w("Reis", "network provider", e) }
+        }
+        emitState()
+        emitLastKnown()
     }
 
     private fun startSensors() {
@@ -233,6 +287,7 @@ class NavService : Service(), SensorEventListener {
         handler.removeCallbacks(ticker)
         try { lm.removeUpdates(gpsListener) } catch (_: Exception) {}
         try { lm.removeUpdates(netListener) } catch (_: Exception) {}
+        try { lm.removeUpdates(fusedListener) } catch (_: Exception) {}
         try { lm.unregisterGnssStatusCallback(gnssCallback) } catch (_: Exception) {}
         try { sm.unregisterListener(this) } catch (_: Exception) {}
         try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}

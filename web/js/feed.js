@@ -3,7 +3,7 @@ import { bus, log, S, db, uid, fmtDur, sleep } from './core.js';
 import { http, isNative, online, notify, vibrate } from './platform.js';
 import { pos } from './nav.js';
 import { g, say } from './guide.js';
-import { oblastOf, oblastName, reverse } from './route.js';
+import { oblastOf, oblastName, reverse, OBLASTS } from './route.js';
 import { askClaude, hasKey } from './ai.js';
 import { t } from './i18n.js';
 
@@ -19,7 +19,7 @@ try { W = JSON.parse(localStorage.getItem('reis.weights') || '{}'); } catch (_) 
 const RED = [
   [/перекри|перекры|перекро|рух (заблок|закрит|зупин)|движение (заблок|закрыт|останов)|закрит[оа]? (рух|проїзд)|закрыт[оа]? (движен|проезд)/, 3],
   [/(^|[^а-яіїєґ])дтп([^а-яіїєґ]|$)|аварі[яїю]|авари[яию]|зіткнен|столкновен|перекинул|опрокинул|перевернул/, 3],
-  [/вибух|взрыв|приліт|прилет|обстріл|обстрел|влучан|попадани|ракетн|шахед/, 3],
+  [/вибух|взрыв|приліт|прилет|обстріл|обстрел|влучан|попадани/, 3],
   [/зруйнован|разрушен|пошкоджен\S* (міст|дорог)|поврежден\S* (мост|дорог)|обвал|провал/, 3],
   [/теракт|замінуван|заминирован|мінн\S+ небезпек|минн\S+ опасн/, 3],
   [/проїзд (неможлив|заборон)|проезд (невозмож|запрещ)|рух заборон|движение запрещ/, 3],
@@ -33,6 +33,7 @@ const YELLOW = [
   [/ремонт\S* (робот|работ|дорог|мост|міст)|реверсивн/, 2],
   [/ожеледиц|гололед|гололёд|слизьк|скользк|туман|снігопад|снегопад|замет|занос|хуртовин|метель|злив|ливень/, 2],
   [/блокпост|перевірк\S+ документ|проверк\S+ документ|комендантськ|комендантск/, 1.5],
+  [/бпла|дрон|шахед|балістик|баллистик|ракет|крилат|крылат/, 2],
   [/тривог|тревог|загроз|угроз/, 1.5],
   [/обережно|осторожно|будьте уважн|будьте вниматель/, 1]
 ];
@@ -44,7 +45,7 @@ const GREEN = [
 ];
 const UNSURE = /можлив|возможн|попередньо|предварительно|ймовірно|вероятно|за неперевірен|по непроверен|уточнюєть|уточняет|нібито|якобы/;
 const ROAD = /дорог|трас|шосе|шоссе|автодор|міст|мост|рух|движен|проїзд|проезд|вулиц|улиц|перехрест|перекрест|розв['’ʼ]язк|развязк|кільцев|кольцев|об['’ʼ]їзд|объезд|блокпост|кпп|пункт\S* пропуск|в['’ʼ]їзд|въезд|виїзд|выезд|фур|вантаж|грузов|затор|пробк|дтп|[мнртmhpt][-– ]?\d{2}(\D|$)|(^|\s)e\s?\d{2,3}/;
-const HARD = /вибух|взрыв|приліт|прилет|обстріл|обстрел|теракт|ракетн|шахед/;
+const HARD = /вибух|взрыв|приліт|прилет|обстріл|обстрел|теракт|ракет|шахед|бпла|дрон|балістик|баллистик/;
 const SPAM = /реклам|знижк|скидк|розіграш|розыгрыш|вакансі|ваканси|продам|купл[юя]|підпис(атися|уйтесь)|подпис(аться|ывайтесь)|промокод|казино|курс валют|гороскоп/;
 
 const stems = s => [...new Set((s.toLowerCase().match(/[a-zа-яіїєґё']{4,}/g) || []).map(w => w.slice(0, 5)))];
@@ -105,7 +106,7 @@ function add(it, quiet) {
 function alertUser(item) {
   const text = item.voice || item.sum || item.text;
   bus.emit('toast', { level: item.level, text: item.sum || item.text, id: item.id });
-  if (item.level === 'red') { say(t('voiceAttention') + ' ' + short(text, 220)); vibrate(400); if (document.hidden) notify(t('appName'), short(text, 160)); }
+  if (item.level === 'red') { say(t('voiceAttention') + ' ' + short(text, 220)); vibrate(400); if (document.hidden && S.notify !== false) notify(t('appName'), short(text, 160)); }
   else if (item.level === 'yellow') say(short(text, 200));
   else if (item.voice) say(item.voice);
 }
@@ -139,7 +140,35 @@ async function updateHere() {
 }
 
 /* ---------- Telegram: публічні канали через веб-перегляд t.me/s ---------- */
-export const tgAvailable = () => isNative;      // у браузерній версії сайт Telegram не відповідає сторінкам (CORS)
+export const tgAvailable = () => isNative;
+
+// Перевірені публічні канали (листопад 2026). Загальноукраїнські показують лише те, де згадано області чи міста на шляху.
+export const DEFAULT_CHANNELS = [
+  { name: 'kpszsu', region: 'all', on: true },                       // Повітряні сили ЗСУ: ракети, БпЛА
+  { name: 'dsns_telegram', region: 'all', on: true },                // ДСНС України
+  { name: 'UA_National_Police', region: 'all', on: true },           // Національна поліція
+  { name: 'truexanewsua', region: 'all', on: true },                 // Труха Україна: швидкі новини
+  { name: 'kyivoda', region: 'kyiv', on: true },
+  { name: 'synegubov', region: 'kharkiv', on: true },
+  { name: 'dnipropetrovskaODA', region: 'dnipro', on: true },
+  { name: 'odeskaODA', region: 'odesa', on: true },
+  { name: 'zoda_gov_ua', region: 'zaporizhzhia', on: true },
+  { name: 'kozytskyy_maksym_official', region: 'lviv', on: true },
+  { name: 'chernigivskaODA', region: 'chernihiv', on: true }
+];
+export function addDefaultChannels() {
+  const have = new Set((S.channels || []).map(c => c.name.toLowerCase()));
+  const add = DEFAULT_CHANNELS.filter(c => !have.has(c.name.toLowerCase())).map(c => ({ ...c }));
+  S.channels = (S.channels || []).concat(add);
+  return add.length;
+}
+// Чи стосується повідомлення загальноукраїнського каналу нашого шляху: згадано область попереду або місто на маршруті.
+function mentionsRoute(text) {
+  const s = text.toLowerCase();
+  const ids = regionsAhead().map(r => r.id);
+  if (ids.some(id => { const o = OBLASTS.find(x => x.id === id); return o && o.re.test(s); })) return true;
+  return feed.towns.some(n => n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))));
+}      // у браузерній версії сайт Telegram не відповідає сторінкам (CORS)
 async function pollChannel(name) {
   const r = await http('https://t.me/s/' + encodeURIComponent(name), { viaNative: true, timeout: 20000, headers: { 'Accept-Language': 'uk,ru;q=0.8' } });
   if (r.status !== 200) throw new Error('HTTP ' + r.status);
@@ -171,7 +200,7 @@ export async function pollTelegram(manual) {
       const fresh = msgs.filter(m => Date.now() - m.time < 3 * 3600e3 && !seenKeys.has(m.key));
       for (const m of fresh) {
         const c2 = classify(m.text, m.ch);
-        const filtered = !c2.level || c2.score < VISIBLE;
+        const filtered = !c2.level || c2.score < VISIBLE || (c.region === 'all' && !mentionsRoute(m.text));
         const it = add({ src: 'tg', ...m, level: c2.level, score: c2.score, filtered }, first || S.aiFilter && hasKey() && c2.road);
         if (it && S.aiFilter && hasKey() && (c2.road || c2.level)) aiQueue.push(it);
       }
@@ -277,6 +306,7 @@ export async function init() {
   const st = await db.get('kv', 'feed');
   if (st) { feed.items = (st.items || []).filter(i => Date.now() - i.time < 24 * 3600e3); seenKeys = new Set(st.seen || []); }
   bus.on('feedPush', it => add(it));
+  if (!S.channelsSeeded) { if (!(S.channels || []).length) addDefaultChannels(); S.channelsSeeded = true; }
   bus.emit('feed', feed);
   const loop = async () => {
     if (S.lookahead) { await updateHere(); if (S.air) await pollAir(); if (S.tg) await pollTelegram(); }

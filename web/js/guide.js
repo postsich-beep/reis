@@ -8,7 +8,7 @@ import { t } from './i18n.js';
 export const g = {
   trip: null, route: null, idx: null, active: false, arrived: false,
   manI: 0, next: null, after: null, distNext: 0, remain: 0, remTime: 0, eta: 0,
-  rerouting: false, offRoute: false, passedA: true, passedV: false
+  rerouting: false, offRoute: false, passedA: true, passedV: false, leadPending: false
 };
 let said = {}, offSince = 0, lastReroute = 0, lastManI = -1;
 
@@ -58,6 +58,7 @@ export async function startTrip(trip) {
     catch (e) { log('warn', 'підведення до А: ' + e.message); }
   }
   applyRoute(route);
+  g.leadPending = pos.mode !== 'gps';        // GPS ще не знайшов нас: підведемо до А, щойно з'явиться
   say(t('voiceStart'));
   bus.emit('trip', g);
 }
@@ -67,11 +68,11 @@ export function stopTrip() {
   bus.emit('route', g); bus.emit('trip', g); bus.emit('guide', g);
 }
 
-async function reroute() {
+async function reroute(lead = false) {
   if (g.rerouting || !g.trip) return;
   g.rerouting = true; lastReroute = Date.now(); bus.emit('guide', g);
   try {
-    const r = await buildRoute(g.trip, { from: pos, heading: pos.spd > 2 ? pos.hdg : null, skipA: g.passedA, skipVia: g.passedV });
+    const r = await buildRoute(g.trip, { from: pos, heading: pos.spd > 2 ? pos.hdg : null, skipA: lead ? false : g.passedA, skipVia: g.passedV });
     if (g.active) { applyRoute(r); say(t('voiceReroute')); }
   } catch (e) { log('warn', 'перерахунок: ' + e.message); }
   g.rerouting = false; bus.emit('guide', g);
@@ -93,11 +94,16 @@ function announce() {
 function update() {
   if (!g.active || !g.idx || pos.lat == null) return;
   const mans = g.route.mans, idx = g.idx, now = Date.now();
+  if (g.leadPending && pos.mode === 'gps') {
+    g.leadPending = false;
+    if (hav(pos, g.trip.a) > 400 && online()) { reroute(true); return; }
+  }
   if (!pos.onRoute) {
     g.offRoute = pos.off > 80;
-    if (pos.mode === 'gps' && pos.spd >= 1.5 && pos.off > 80) {
+    const far = pos.off > 1500;              // далеко від маршруту — перебудовуємо, навіть якщо машина стоїть
+    if (pos.mode === 'gps' && pos.off > 80 && (pos.spd >= 1.5 || far)) {
       if (!offSince) offSince = now;
-      if (now - offSince > 8000 && now - lastReroute > 20000 && online()) reroute();
+      if (now - offSince > (far ? 3000 : 8000) && now - lastReroute > (far ? 60000 : 20000) && online()) reroute();
     } else offSince = 0;
   } else { offSince = 0; g.offRoute = false; }
 

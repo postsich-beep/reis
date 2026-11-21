@@ -150,10 +150,11 @@ function onPos() {
   if (!map || pos.lat == null) return;
   puck.setLngLat([pos.lon, pos.lat]).setRotation(pos.hdg);
   if (!puck._added) { puck.addTo(map); puck._added = true; follow(true); }
-  puckEl.classList.toggle('dr', pos.mode === 'dr');
+  const est = pos.mode === 'dr' || pos.mode === 'approx';
+  puckEl.classList.toggle('dr', est);
   const src = map.getSource && map.getSource('acc');
   if (src) {
-    if (pos.mode === 'dr') { src.setData(circle(pos, Math.max(20, pos.acc || 20))); accShown = true; }
+    if (est) { src.setData(circle(pos, Math.max(20, pos.acc || 20))); accShown = true; }
     else if (accShown) { src.setData(EMPTY); accShown = false; }
   }
   follow(false);
@@ -201,6 +202,11 @@ export function previewRoute(coords) {
   try { map.setPaintProperty('route-line', 'line-gradient', undefined); } catch (_) {}
   lastGrad = -1;
   if (coords) showRoute(coords);
+}
+export function setMapStyle(url) {
+  if (!map || !url) return;
+  view.blank = false; lastGrad = -1;
+  try { map.setStyle(url); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
 export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
 

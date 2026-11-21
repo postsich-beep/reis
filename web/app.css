@@ -73,7 +73,6 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #zoom{position:absolute;right:10px;bottom:calc(var(--bh,150px) + 14px);display:flex;flex-direction:column;gap:9px;z-index:4}
 #zoom .rb{font-size:26px}
 #bCenter.need{background:var(--amber);color:var(--amber-ink)}
-body.lost #bZin,body.lost #bZout{display:none}
 
 /* ---- швидкість ---- */
 #speed{position:absolute;left:10px;bottom:calc(var(--bh,150px) + 14px);width:104px;height:104px;border-radius:50%;background:var(--panel);box-shadow:var(--shadow);border:5px solid var(--line);display:flex;flex-direction:column;align-items:center;justify-content:center;z-index:4}
@@ -88,22 +87,19 @@ body.lost #bZin,body.lost #bZout{display:none}
 /* ---- низ ---- */
 #bottom{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-radius:20px 20px 0 0;box-shadow:0 -4px 18px rgba(12,20,30,.16);padding:8px 12px calc(var(--sb) + 6px);z-index:6}
 #tripbar{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 2px}
-.tb-main{flex:1;min-width:0;display:flex;align-items:baseline;gap:10px}
+.tb-main{flex:1;min-width:0;display:flex;flex-direction:column}
 .tb-main b{font:800 34px/1 var(--f-num);font-variant-numeric:tabular-nums}
-.tb-main span{font-size:14px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .chip{flex:none;display:flex;align-items:center;gap:6px;padding:6px 10px;border-radius:999px;background:var(--panel-2);font:700 15px/1 var(--f-num)}
 .chip i{width:10px;height:10px;border-radius:50%;background:var(--green)}
 .chip.weak i{background:var(--yellow)} .chip.lost{background:var(--red);color:#fff} .chip.lost i{background:#fff} .chip.none i{background:var(--line)}
-#lost{border:2px solid var(--red);border-radius:16px;padding:8px 10px 10px;margin-bottom:8px;background:color-mix(in srgb,var(--red) 8%,var(--panel))}
-.lost-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 10px;font-size:14px}
-.lost-head b{font:800 22px/1 var(--f-num);color:var(--red)}
-.lost-head .t{font:800 22px/1 var(--f-num);font-variant-numeric:tabular-nums}
-.lost-head .why{color:var(--ink-2);flex-basis:100%;font-size:13px}
-.lost-btns{display:flex;gap:10px;margin-top:8px}
-.lost-btns button{flex:1;height:60px;border-radius:14px;background:var(--ink);color:var(--panel);font:800 26px/1 var(--f-num);display:flex;align-items:center;justify-content:center;gap:8px}
-.lost-btns button:active{transform:scale(.97)}
-.lost-btns svg{width:26px;height:26px}
-#bAcceptGps{margin-top:8px;width:100%;min-height:48px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px}
+#bAcceptGps{width:100%;min-height:44px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px;margin-bottom:6px}
+.tb-row{display:flex;align-items:baseline;gap:10px;min-width:0}
+.tb-row span{font-size:14px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.tb-lost{display:block;max-width:100%;text-align:left;margin-top:3px;font:700 15px/1.2 var(--f-num);letter-spacing:.02em;color:var(--red);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+.nudge{flex:none;display:flex;flex-direction:column;gap:6px}
+.nudge button{width:88px;height:40px;border-radius:999px;border:2px solid var(--ink-2);background:var(--panel);color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px;font:800 20px/1 var(--f-num)}
+.nudge button svg{width:18px;height:18px}
+.nudge button:active{background:var(--ink);color:var(--panel);transform:scale(.96)}
 #tabs{display:grid;grid-template-columns:1fr 1fr 76px 1fr 1fr;align-items:center;margin-top:6px}
 #tabs button{height:54px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:12px;color:var(--ink-2);border-radius:12px;position:relative}
 #tabs button svg{width:26px;height:26px}

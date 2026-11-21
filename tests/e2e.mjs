@@ -91,7 +91,7 @@ async function newPage(native) {
         else status = 404;
         cb('http', { id, status, body });
       },
-      keepAwake() {}, saveFile(n) { window.__nativeCalls.push('saveFile:' + n); }, openUrl() {}, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}
+      keepAwake() {}, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n) { window.__nativeCalls.push('saveFile:' + n); }, openUrl() {}, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD });
   await page.goto(BASE);
@@ -107,6 +107,23 @@ try {
   ok('запуск без помилок JS', errors.length === 0, errors.join(' | '));
   ok('оболонку попросили стежити за місцем', await app(page, () => window.__nativeCalls.includes('startTracking')));
   ok('шари маршруту на карті', await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getLayer && !!m.getLayer('route-line'); }, null, { timeout: 15000 }).then(() => true, () => false));
+  // геолокація вимкнена → червоний чип; потім приблизне місце до першого GPS
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('locstate', { enabled: false, gps: false, network: false, fine: true, coarse: true, listening: true });
+  await sleep(300);
+  ok('геолокацію вимкнено → чип каже про це', (await page.textContent('#gpsText')) === 'Геолокація вимк.', await page.textContent('#gpsText'));
+  await emitN('locstate', { enabled: true, gps: true, network: true, fine: true, coarse: true, listening: true });
+  await emitN('loc', { prov: 'last', lat: 49.99, lon: 36.23, acc: 25, age: 3600, t: Date.now() - 3600e3 });
+  await sleep(200);
+  const ap1 = await app(page, () => ({ mode: window.__app.nav.pos.mode, acc: window.__app.nav.pos.acc, chip: document.getElementById('gpsText').textContent }));
+  ok('останнє відоме місце → приблизна позиція', ap1.mode === 'approx' && ap1.acc >= 1000 && ap1.chip.startsWith('≈'), JSON.stringify(ap1));
+  await emitN('loc', { prov: 'network', lat: 49.992, lon: 36.231, acc: 600, t: Date.now() });
+  await sleep(200);
+  const ap2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, acc: window.__app.nav.pos.acc }));
+  ok('вишки й Wi-Fi уточнюють приблизне місце', ap2.mode === 'approx' && ap2.acc === 600, JSON.stringify(ap2));
+  await page.click('#gpsChip'); await page.waitForSelector('#panelBody .item');
+  ok('панель GPS: стан і супутники', /Приблизно/.test(await page.textContent('#panelBody')) && /Супутники/.test(await page.textContent('#panelBody')));
+  await page.click('#panelClose');
   await shot(page, '01-start');
 
   // планування рейсу
@@ -170,8 +187,8 @@ try {
   const rd0 = await app(page, () => { window.__app.sim.setLost(true); return window.__app.nav.pos.rd; });
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 12000 });
   await sleep(3200);
-  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, lostHidden: document.getElementById('lost').hidden, chip: document.getElementById('gpsText').textContent, time: document.getElementById('lostTime').textContent }));
-  ok('GPS зник → режим розрахунку', dr.mode === 'dr' && dr.reason === 'timeout' && !dr.lostHidden && dr.chip === 'GPS ✕', JSON.stringify(dr));
+  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, lostHidden: document.getElementById('lostLine').hidden, nudge: !document.getElementById('nudge').hidden, chip: document.getElementById('lostLine').textContent }));
+  ok('GPS зник → режим розрахунку, компактні кнопки ±100', dr.mode === 'dr' && dr.reason === 'timeout' && !dr.lostHidden && dr.nudge && dr.chip.startsWith('GPS ✕'), JSON.stringify(dr));
   ok('без GPS позиція рухається маршрутом і надолужує паузу', dr.rd > rd0 + 110, `rd ${Math.round(rd0)} → ${Math.round(dr.rd)}`);
   ok('сказано про втрату сигналу', await app(page, () => window.__spoken.some(s => /Сигнал GPS втрачено/.test(s))));
   await shot(page, '06-gps-lost');
@@ -182,12 +199,12 @@ try {
   ok('↓100 двічі зсуває назад (200 м мінус рух)', up - dn > 140 && up - dn <= 201, `${Math.round(up - dn)} м`);
   await app(page, () => window.__app.sim.setLost(false));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
-  ok('GPS повернувся → знову веде GPS, панель сховано', await app(page, () => document.getElementById('lost').hidden));
+  ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано', await app(page, () => document.getElementById('nudge').hidden && !document.getElementById('gpsChip').hidden));
 
   // підміна GPS («Ліма»)
   await app(page, () => window.__app.sim.setSpoof(true));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
-  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('lostWhy').textContent }));
+  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('lostLine').textContent }));
   ok('підміну GPS відкинуто, позиція лишилась в Україні', sp.reason === 'spoof' && sp.lat > 49 && /підмін/.test(sp.why), JSON.stringify(sp));
   await sleep(4500);
   ok('під час підміни координати Ліми не прийнято', await app(page, () => window.__app.nav.pos.mode === 'dr' && window.__app.nav.pos.lat > 49));
@@ -217,12 +234,20 @@ try {
   await shot(page, '08-chat');
 
   // лабораторія, ніч
-  await page.click('#tabs button[data-panel="lab"]'); await page.waitForSelector('[data-tg="voice"]');
+  await page.click('#tabs button[data-panel="lab"]'); await page.waitForSelector('[data-tg="tg"]');
   await shot(page, '09-lab');
-  await page.click('[data-tg="voice"]');
-  ok('перемикач у Лабораторії змінює налаштування', await app(page, () => window.__app.S.voice === false));
-  await page.click('#panelClose'); await page.click('#bTheme'); await page.click('#bTheme'); await sleep(400);
+  await page.click('[data-tg="tg"]');
+  ok('перемикач у Лабораторії змінює налаштування', await app(page, () => window.__app.S.tg === false));
+  await page.click('#panelClose');
+  await page.click('#bSettings'); await page.waitForSelector('[data-seg="theme:night"]');
+  await shot(page, '11-settings');
+  await page.click('[data-seg="theme:day"]'); await sleep(300);
+  ok('шестерня → налаштування → тема «День»', await app(page, () => document.body.dataset.theme === 'day' && window.__app.S.theme === 'day'));
+  await page.click('[data-seg="theme:night"]'); await sleep(300);
   ok('нічний режим', await app(page, () => document.body.dataset.theme === 'night'));
+  await page.click('[data-tg="vibrate"]');
+  ok('перемикач вібрації', await app(page, () => window.__app.S.vibrate === false));
+  await page.click('#panelClose');
   await shot(page, '10-night');
   ok('жодної помилки JS за весь прохід', errors.length === 0, errors.join(' | '));
   await ctx.close();
