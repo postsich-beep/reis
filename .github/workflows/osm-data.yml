@@ -33,11 +33,17 @@ jobs:
 
       - name: Вивантаження України з Geofabrik
         run: |
-          # Geofabrik (з 19.11.2026 файли країн лежать у теці країни), старий шлях, далі дзеркало openstreetmap.fr
+          # Адресу файлу беремо з офіційного каталогу Geofabrik (index-v1.json) — він переживає перенесення файлів;
+          # далі відомі шляхи й дзеркало openstreetmap.fr. На кожну невдачу друкуємо код відповіді.
+          cands=$(curl -fsSL --retry 3 https://download.geofabrik.de/index-v1.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(f['properties']['urls']['pbf'] for f in d['features'] if f['properties'].get('id')=='ukraine'))" || true)
+          echo "каталог Geofabrik: ${cands:-немає}"
+          cands="$cands https://download.geofabrik.de/europe/ukraine/ukraine-latest.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine.osm.pbf"
           ok=""
           for round in 1 2 3; do
-            for u in https://download.geofabrik.de/europe/ukraine/ukraine-latest.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine.osm.pbf; do
-              if curl -fsSL --retry 3 --retry-delay 20 -o ukraine.osm.pbf "$u" && [ "$(stat -c %s ukraine.osm.pbf)" -gt 300000000 ]; then echo "звідки: $u"; ok=1; break 2; fi
+            for u in $cands; do
+              code=$(curl -sIL -o /dev/null -w '%{http_code} %{url_effective}' "$u" || true)
+              echo "перевірка: $u → $code"
+              if curl -fSL --retry 3 --retry-delay 20 -o ukraine.osm.pbf "$u" && [ "$(stat -c %s ukraine.osm.pbf)" -gt 300000000 ]; then echo "звідки: $u"; ok=1; break 2; fi
               echo "не вдалося: $u"
             done
             sleep 300
