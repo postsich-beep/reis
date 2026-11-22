@@ -124,7 +124,7 @@ async function newPage(native, opts = {}) {
   await page.route('**/data/stops.json', r => json(r, STOPS_JSON));
   await page.route('**/data/places.json', r => json(r, PLACES_JSON));
   await page.route('**/data/hazards.json', r => json(r, HAZ_JSON));
-  await page.route('**/styles/liberty', r => json(r, { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
+  await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
   await page.route('**/data/verified.json', r => json(r, VP_JSON));
   await page.route('https://ntfy.sh/**', r => {
@@ -158,7 +158,7 @@ async function newPage(native, opts = {}) {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
     window.ReisNative = {
-      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, nativeRev: 2 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
+      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, nativeRev: window.__nativeRev ?? 4 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
       speak(text, lang, rate, id) { window.__spoken.push(text); cb('tts', { id, state: 'done' }); }, stopSpeak() {}, listen() { cb('stt', { state: 'final', text: 'Що попереду на дорозі?' }); }, stopListen() {},
       http(id, method, url) {
         let status = 200, body = '';
@@ -315,8 +315,8 @@ if (run('1')) try {
   await shot(page, '01b-shower');
   await page.click('#panelClose');
   // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
-  await page.click('#bQuick'); await page.click('#quick [data-q="layers"]');
-  ok('швидкі налаштування → «Шари»: 10 галочок і «вимкнути все»', await page.$$eval('#quick .ly-row', e => e.length) === 10 && /Вимкнути все/.test(await page.textContent('#quick')));
+  await page.click('#bLayers');
+  ok('кнопка «Шари» справа на головному екрані → одразу 10 галочок і «вимкнути все», без «Назад»', await page.$$eval('#quick .ly-row', e => e.length) === 10 && /Вимкнути все/.test(await page.textContent('#quick')) && !(await page.$('#quick [data-q="back"]')) && await app(page, () => document.getElementById('bLayers').classList.contains('on')));
   await shot(page, '01d-layers');
   const feats = () => app(page, async () => { const m = window.__app.map.map; const s = await m.getSource('stops').getData(), k = await m.getSource('marks').getData(); return { stops: s.features.map(f => f.properties.t).join(''), marks: k.features.length }; });
   await page.click('#quick [data-ly="#off"]'); await sleep(200);
@@ -359,7 +359,7 @@ if (run('1')) try {
   await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), coords[500]); await sleep(300);
   ok('«Поставити на карту»: довге натискання ставить точку місцю', await app(page, () => { const x = window.__app.vplaces.byId('test-noloc'); return x && x.lat != null && document.querySelectorAll('.vpm').length === 3; }));
   await page.click('#panelClose');
-  await page.click('#bQuick'); await page.click('#quick [data-q="layers"]'); await page.click('#quick [data-ly="@mapVerified"]');
+  await page.click('#bLayers'); await page.click('#quick [data-ly="@mapVerified"]');
   ok('«Шари» → «Перевірені місця» ховає значки', await app(page, () => document.querySelectorAll('.vpm').length === 0));
   await page.click('#quick [data-ly="@mapVerified"]'); await page.click('#quick [data-q="close"]');
 
@@ -1020,7 +1020,7 @@ const layoutCheck = () => {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bCenter,#bReport,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#lostLine,#bAcceptGps,#updGo,#updX')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bLayers,#bCenter,#bReport,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#lostLine,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -1109,7 +1109,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await page.click('#bQuick'); await sleep(300);
     const qb = await app(page, () => { const q = document.getElementById('quick'), b = document.getElementById('bottom').getBoundingClientRect();   // без анімації: розмітка, а не кадр
       return { open: !q.hidden, top: q.offsetTop, bottom: q.offsetTop + q.offsetHeight, H: innerHeight, W: innerWidth, left: q.offsetLeft, right: q.offsetLeft + q.offsetWidth, bt: b.top, tiles: q.querySelectorAll('.q-tile').length, land: innerWidth > innerHeight }; });
-    ok(`${T}: швидкі налаштування відкрились, 9 плиток, у межах екрана й не під нижньою панеллю`, qb.open && qb.tiles === 9 && qb.top >= 0 && qb.left >= 0 && qb.right <= qb.W && (qb.land ? qb.bottom <= qb.H : qb.bottom <= qb.bt + 1), JSON.stringify(qb));
+    ok(`${T}: швидкі налаштування відкрились, 8 плиток («Шари» тепер окремою кнопкою), у межах екрана й не під нижньою панеллю`, qb.open && qb.tiles === 8 && qb.top >= 0 && qb.left >= 0 && qb.right <= qb.W && (qb.land ? qb.bottom <= qb.H : qb.bottom <= qb.bt + 1), JSON.stringify(qb));
     await shot(page, `a-${sc.n}-2-quick`);
     const st = () => app(page, () => { const A = window.__app; return { voice: A.S.voice, v3d: A.S.view3d, north: A.map.view.north, follow: A.map.view.follow, rec: !!A.S.rec, theme: A.S.theme, awake: A.S.keepAwake !== false, zb: A.map.view.zoomBias, open: !document.getElementById('quick').hidden, panel: A.ui ? null : document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent, badge: !!document.querySelector('#bQuick .q-badge') }; });
     const tap = async k => { await page.click(`#quick [data-q="${k}"]`); await sleep(120); return st(); };
@@ -1124,11 +1124,12 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     s1 = await tap('awake'); ok(`${T}: плитка «Екран» — гасне сам / не гасне (команда оболонці)`, s1.awake === !s0.awake && await app(page, v => window.__nativeCalls.includes('keepAwake:' + v), s1.awake)); await tap('awake');
     const z0 = s0.zb; s1 = await tap('zin'); const z1 = s1.zb; s1 = await tap('zout'); s1 = await tap('zout');
     ok(`${T}: масштаб + і −`, z1 === z0 + 1 && s1.zb === z0 - 1, `${z0} → ${z1} → ${s1.zb}`); await tap('zin');
-    await page.click('#quick [data-q="layers"]');
-    ok(`${T}: «Шари» — 10 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 10 && q.getBoundingClientRect().bottom <= innerHeight; }));
+    await page.click('#quick [data-q="close"]'); await page.click('#bLayers'); await sleep(200);
+    ok(`${T}: кнопка «Шари» справа — 10 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 10 && q.getBoundingClientRect().bottom <= innerHeight; }));
     await page.click('#quick [data-ly="fuel"]'); ok(`${T}: галочка в «Шарах» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
     await page.click('#quick [data-ly="fuel"]');
-    await page.click('#quick [data-q="back"]'); ok(`${T}: «Назад» із шарів — до плиток`, await app(page, () => document.querySelectorAll('#quick .q-tile').length === 9));
+    await page.click('#bLayers'); ok(`${T}: повторне торкання «Шарів» закриває шторку`, await app(page, () => document.getElementById('quick').hidden));
+    await page.click('#bQuick');
     await app(page, () => { window.__app.map.view.lastTouch = Date.now(); window.__app.map.setFollow(false); });
     s1 = await tap('center'); ok(`${T}: плитка «Моє місце» — стежить і шторка закрилась`, s1.follow && !s1.open, JSON.stringify(s1));
     await page.click('#bQuick'); await page.click('#quick [data-q="settings"]');
@@ -1358,6 +1359,26 @@ if (run('9')) try {
   ok('якісному голосу текст іде словами: малими літерами, без цифр і значків', await app(page, () => { const t = window.__spoken[window.__spoken.length - 1].normalize('NFC'); return /^через п'ятсот метрів поверніть праворуч\.?$/.test(t); }), await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC')));
   await app(page, () => window.__app.P.speak('Через 2 км АЗС OKKO на М-03, обмеження 90 км/год.'));
   ok('…числа, траси, скорочення й латиниця — словами', await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC') === "через два кілометри а зе ес окко на ем нуль три, обмеження дев'яносто кілометрів на годину."), await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC')));
+  // 1.1.5: рушій не запустився (як на Samsung і Xiaomi в 1.1.4) — одне зрозуміле повідомлення, хоч подій дві
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  await emitN('voice', { state: 'loadErr', pack: 'uk', error: 'engine: Invalid OfflineTtsConfig: failed to create native OfflineTts' });
+  await emitN('voice', { state: 'loadErr', pack: 'uk', error: 'engine: Invalid OfflineTtsConfig: failed to create native OfflineTts' }); await sleep(300);
+  { const tt = await app(page, () => [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent)); v = await vs();
+    ok('голос не запустився — одна плашка людською мовою (без «OfflineTtsConfig»), подробиці в налаштуваннях', tt.length === 1 && /не запустився — підказки звучать голосом телефону/.test(tt[0]) && !/OfflineTts/.test(tt[0]) && /Спробуйте видалити пакет/.test(v.text), JSON.stringify(tt)); }
+  await emitN('voice', { state: 'loaded', pack: 'uk', ms: 900 }); await sleep(150);
+  ok('голос запустився — червоний рядок про помилку зник', !/не запустився/.test((await vs()).text));
+  // перемикання голосів: кожен — свій диктор
+  for (const [id, sid] of [['uk:0', 0], ['uk:1', 1], ['uk:2', 2]]) { await page.click(`#voiceSec .vrow[data-voice="${id}"]`); await sleep(120); }
+  c = await calls();
+  ok('перемикання Лада → Микита → Тетяна — оболонці sid 0, 1, 2', ['setVoice:uk:0:uk', 'setVoice:uk:1:uk', 'setVoice:uk:2:uk'].every(x => c.includes(x)), c.slice(-6).join());
+  // стара оболонка 1.1.2–1.1.4: якісний голос не вмикаємо, пропонуємо оновити застосунок
+  await app(page, () => { window.__nativeRev = 3; window.__nativeCalls.length = 0; });
+  await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200); v = await vs(); c = await calls();
+  ok('стара оболонка: Микиту запамʼятано, але звучить голос телефону; є «Оновити застосунок»', c.includes('setVoice::0:') && !c.some(x => x.startsWith('setVoice:uk')) && v.on === 'uk:1' && /оновіть застосунок/i.test(v.text) && /Завантажений пакет лишається/.test(v.text), c.join() + ' | ' + v.text.slice(0, 120));
+  await shot(page, '17c-voice-old');
+  await page.click('#voiceSec [data-act="vApk"]'); await sleep(150);
+  ok('«Оновити застосунок» — перевірка оновлення', (await calls()).includes('checkUpdate'));
+  await app(page, () => { window.__nativeRev = 4; });
   await page.click('#voiceSec .vrow[data-voice="system"]'); await sleep(150);
   ok('назад на голос телефону', (await calls()).slice(-3).includes('setVoice::0:') && (await vs()).on === 'system');
   await page.click('#voiceSec [data-act="vDel"]'); await page.click('#voiceSec [data-act="vDel"]'); await sleep(200);
@@ -1529,6 +1550,46 @@ if (run('14')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tal
 } catch (e) { ok(`сприйняття, ${sc.title}: перевірка дійшла до кінця`, false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
+/* ============ прохід 15 (1.1.5): кружечок не дублює назву; «Шари» — окрема кнопка справа ============ */
+if (run('15')) try {
+  // базова карта для тесту: підписи місць як у OpenFreeMap (шар «poi_…», з’являються з 14-го масштабу)
+  const cafe = coords[turnIdx[3] + 300], shw = coords[turnIdx[3] + 330];
+  const style = { version: 8, sources: { tpoi: { type: 'geojson', data: { type: 'FeatureCollection', features: [
+      { type: 'Feature', properties: { name: 'Кафе «Дорога»' }, geometry: { type: 'Point', coordinates: [cafe[1] + 0.00005, cafe[0]] } },
+      { type: 'Feature', properties: { name: 'Магазин' }, geometry: { type: 'Point', coordinates: [shw[1] + 0.00005, shw[0]] } }] } } },
+    layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } },
+      { id: 'poi_r1', type: 'symbol', source: 'tpoi', minzoom: 14, layout: { 'icon-image': ['concat', 'fuel:', ['get', 'name']], 'icon-allow-overlap': true, 'icon-anchor': 'top', 'icon-offset': [0, 6] } }] };
+  const { page, ctx, errors } = await newPage(true, { style, viewport: { width: 360, height: 670 } });
+  const st = i => app(page, i => !!(window.__app.map.map.getFeatureState({ source: 'stops', id: i }) || {}).lab, i);
+  const go = async (p, z) => { await app(page, ([p, z]) => { const M = window.__app.map; M.setFollow(false); M.map.jumpTo({ center: [p[1], p[0]], zoom: z, bearing: 0, pitch: 0 }); }, [p, z]); await sleep(1500); };
+  await page.waitForFunction(() => window.__app.stopsdb.sdb.ready && window.__app.map.map.getSource('stops'), null, { timeout: 8000 });
+  await go(stopPt, 14);
+  ok('АЗС наближено: над нею плашка з назвою мережі — кружечка під плашкою немає', await st(1) && await app(page, () => window.__app.map.map.queryRenderedFeatures({ layers: ['fuel-label'] }).some(f => f.properties.i === 1)), JSON.stringify(await app(page, () => window.__app.map.hiddenDots())));
+  await shot(page, '18a-fuel-noDot');
+  await go(cafe, 16);
+  ok('кафе: карта вже пише назву «Кафе «Дорога»» — кружечок сховано', await st(3), JSON.stringify(await app(page, () => window.__app.map.hiddenDots())));
+  ok('душ поруч із чужим підписом («Магазин») — кружечок лишається', !(await st(5)));
+  ok('схований кружечок і далі натискається — відкриває картку місця', await app(page, ([p]) => { const m = window.__app.map.map, pt = m.project([p[1], p[0]]); return m.queryRenderedFeatures(pt, { layers: ['stops-all'] }).some(f => f.properties.i === 3); }, [cafe]));
+  await shot(page, '18b-cafe-noDot');
+  await go(cafe, 9.8); await sleep(1200);
+  ok('віддалили — назв немає, усі кружечки повернулись', (await app(page, () => window.__app.map.hiddenDots())).length === 0 && !(await st(3)) && !(await st(1)), JSON.stringify(await app(page, () => window.__app.map.hiddenDots())));
+  await shot(page, '18c-far-dots');
+  // «Шари» на головному екрані
+  const lb = await app(page, () => { const b = document.getElementById('bLayers'), q = document.getElementById('bQuick'), r = b.getBoundingClientRect(), rq = q.getBoundingClientRect();
+    return { vis: !b.hidden && r.width >= 44, below: r.top >= rq.bottom, right: innerWidth - r.right < 20, svg: !!b.querySelector('svg path[fill="#f59e0b"]'), label: b.getAttribute('aria-label') }; });
+  ok('кнопка «Шари» справа, під швидкими налаштуваннями, новий значок (шари з міткою)', lb.vis && lb.below && lb.right && lb.svg && /Що показувати на карті/.test(lb.label), JSON.stringify(lb));
+  await page.click('#bLayers'); await sleep(200);
+  ok('«Шари» відкривають одразу галочки (без плиток)', await app(page, () => document.querySelectorAll('#quick .ly-row').length === 10 && !document.querySelector('#quick .q-tile')));
+  await shot(page, '18d-layers');
+  await page.click('#quick [data-ly="#off"]'); await sleep(150);
+  ok('«Вимкнути все» — значок «Шарів» блідне', await app(page, () => document.getElementById('bLayers').classList.contains('off')));
+  await page.click('#quick [data-ly="#on"]'); await sleep(150);
+  ok('«Увімкнути все» — значок звичайний', await app(page, () => !document.getElementById('bLayers').classList.contains('off')));
+  await page.click('#quick [data-q="close"]');
+  ok('прохід 15 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 15 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
   const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);

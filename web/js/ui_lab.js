@@ -192,7 +192,7 @@ definePanel('settings', {
     body.onclick = e => {
       const row = e.target.closest('[data-tg]'), b = e.target.closest('button');
       const vr = e.target.closest('[data-voice]'); if (vr) { selectVoice(vr.dataset.voice); return; }
-      if (b && /^v(Dl|Cancel|Del)$/.test(b.dataset.act || '')) { voiceAct(b); return; }
+      if (b && /^v(Dl|Cancel|Del|Apk)$/.test(b.dataset.act || '')) { voiceAct(b); return; }
       if (row) {
         const k = row.dataset.tg; S[k] = !S[k];
         const sw = row.querySelector('.sw'); sw.classList.toggle('on', !!S[k]); sw.setAttribute('aria-checked', !!S[k]);
@@ -363,40 +363,48 @@ definePanel('diag', {
 /* =====================  ГОЛОС: телефону або якісний із пакета  ===================== */
 // Пакет «uk» (Piper ukrainian_tts) має трьох дикторів: 0 — Лада, 1 — Микита, 2 — Тетяна.
 const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta'], ['uk:0', 'uk', 0, 'vLada']];
-const vst = { dl: null };
+const vst = { dl: null, err: '', errShown: false };
 const PACK_VER = 2;                                          // v1 читала текст через espeak і звучала невірно — такий пакет оновлюємо
+// Оболонки 1.1.2–1.1.4 (native 3) передавали рушію теку словника espeak, якої в пакеті v2 немає, — модель не запускалась.
+// Виправлено в оболонці native 4 (1.1.5): на старих якісний голос не вмикаємо, а пропонуємо оновити застосунок.
+const VOICE_NATIVE = 4;
+const engineOk = () => (+P.appInfo().nativeRev || 0) >= VOICE_NATIVE;
 const packOk = st => { const p = st && st.packs && st.packs.uk; return !!p && (p.ver || 0) >= PACK_VER; };
 const fmtMB = b => Math.max(1, Math.round((b || 0) / 1e6)) + ' МБ';
 export function applyVoice() {
   const v = VOICES.find(x => x[0] === (S.ttsVoice || 'system'));
-  if (!v || !v[1] || !packOk(P.voiceStatus())) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
+  if (!v || !v[1] || !packOk(P.voiceStatus()) || !engineOk()) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
 }
 function voiceHtml() {
   if (!P.isNative) return `<div class="muted">${t('vWeb')}</div>`;
   if (!P.hasVoices()) return `<div class="muted">${t('vOldShell')}</div>`;
   const st = P.voiceStatus() || {}, cur = S.ttsVoice || 'system', old = st.packs && st.packs.uk && !packOk(st), have = packOk(st) && st.packs.uk;
+  const fix = engineOk() ? '' : `<div class="card vfix"><b>${t('vFixTitle')}</b><div class="muted">${t('vFixText')}</div><div class="btns"><button class="btn pri wide" data-act="vApk">${t('vFixBtn')}</button></div></div>`;
+  const err = engineOk() && vst.err ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vLoadErrD', esc(vst.err))}</div>` : '';
   const dl = vst.dl || (st.dl && st.dl.pack === 'uk' ? { pct: st.dl.pct } : null);
   const rows = VOICES.map(([id, pack, , nk, dk]) => `<button class="vrow${cur === id ? ' on' : ''}" data-voice="${id}" aria-pressed="${cur === id}"><i class="vdot"></i><span class="grow"><b>${t(nk)}</b><small>${pack ? t('vNeuralD') + (have ? '' : ' · ' + t('vNeedPack')) : t(dk)}</small></span></button>`).join('');
   let pk;
   if (dl) pk = `<div class="vbar"><i style="width:${Math.max(3, dl.pct)}%"></i></div><div class="vdl"><span class="muted">${dl.unzip ? t('vUnzip') : t('vDlNow', dl.pct >= 0 ? dl.pct + '%' : '')}</span><button class="btn sm" data-act="vCancel">${t('vCancel')}</button></div>`;
   else if (have) pk = `<div class="vdl"><span class="muted">${t('vPackHave', fmtMB(have.size))}</span><button class="btn sm" data-act="vDel">${t('vDel')}</button></div>`;
   else pk = `<div class="muted">${old ? t('vPackOld') : t('vPackSize')}</div><div class="btns"><button class="btn pri wide" data-act="vDl">${old ? t('vPackUpd') : t('vDl')}</button></div>`;
-  return `<div class="list vlist">${rows}</div><div class="card vpack"><b>${t('vPack')}</b>${pk}</div>` +
-    (S.lang === 'ru' ? `<div class="muted" style="margin-top:6px">${t('vUkOnly')}</div>` : '') + (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '');
+  return fix + `<div class="list vlist">${rows}</div><div class="card vpack"><b>${t('vPack')}</b>${pk}</div>` +
+    (S.lang === 'ru' ? `<div class="muted" style="margin-top:6px">${t('vUkOnly')}</div>` : '') + (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '') + err;
 }
 function voiceRefresh() { const el = $('voiceSec'); if (el) el.innerHTML = voiceHtml(); }
 function voiceDl(pack) { vst.dl = { pct: 0 }; if (!P.voiceDownload(pack)) vst.dl = null; voiceRefresh(); }
 function selectVoice(id) {
   const v = VOICES.find(x => x[0] === id); if (!v) return;
-  S.ttsVoice = id; applyVoice();
+  S.ttsVoice = id; vst.err = ''; applyVoice();
   const st = P.voiceStatus() || {};
   if (v[1] && !packOk(st)) { if (!vst.dl && !(st.dl && st.dl.pack)) voiceDl(v[1]); }
+  else if (v[1] && !engineOk()) toast(t('vFixTitle'), 'yellow', 5000);
   else setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), v[1] ? 600 : 0);
   voiceRefresh();
 }
 function voiceAct(b) {
   const a = b.dataset.act;
-  if (a === 'vDl') voiceDl('uk');
+  if (a === 'vApk') { if (upd.apk) updTap(); else { toast(t('updChecking'), '', 2500); updCheck(); } }
+  else if (a === 'vDl') voiceDl('uk');
   else if (a === 'vCancel') P.voiceCancel();
   else if (a === 'vDel') { if (b.dataset.sure) P.voiceDelete('uk'); else { b.dataset.sure = '1'; b.textContent = t('vDelSure'); } }
 }
@@ -457,11 +465,16 @@ export function initLab() {
     const s = d && d.state;
     if (s === 'dl') vst.dl = { pct: d.pct };
     else if (s === 'unzip') vst.dl = { pct: 92, unzip: true };
-    else if (s === 'ready') { vst.dl = null; applyVoice(); toast(t('vReady'), 'green', 5000); if ((S.ttsVoice || 'system') !== 'system') setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), 1800); }
+    else if (s === 'ready') { vst.dl = null; vst.err = ''; applyVoice(); toast(engineOk() ? t('vReady') : t('vReadyOld'), engineOk() ? 'green' : 'yellow', 6000); if (engineOk() && (S.ttsVoice || 'system') !== 'system') setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), 1800); }
     else if (s === 'error' || s === 'cancel') { vst.dl = null; if (s === 'error') toast(t('vErr', d.error === 'space' ? t('vNoSpace') : (d.error || '')), 'yellow', 8000); }
-    else if (s === 'deleted') vst.dl = null;
-    else if (s === 'fallback') log('warn', 'якісний голос не спрацював: ' + (d.error || ''));
-    else if (s === 'loaded') log('info', `голос завантажено в памʼять за ${d.ms} мс`);
+    else if (s === 'deleted') { vst.dl = null; vst.err = ''; }
+    else if (s === 'loadErr' || s === 'fallback') {
+      // модель не запустилась — одне зрозуміле повідомлення на сеанс, подробиці в журнал
+      log('warn', 'якісний голос не спрацював: ' + (d.error || ''));
+      vst.err = d.error || '?';
+      if (!vst.errShown) { vst.errShown = true; toast(t('vLoadErr'), 'yellow', 7000); }
+    }
+    else if (s === 'loaded') { vst.err = ''; log('info', `голос завантажено в памʼять за ${d.ms} мс`); }
     voiceRefresh();
   });
   applyVoice();

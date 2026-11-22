@@ -44,6 +44,7 @@ function staticLabels() {
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
+  $('bLayers').innerHTML = ICON.layersPin; $('bLayers').setAttribute('aria-label', t('lyTitle'));
   railState();
 }
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
@@ -84,19 +85,18 @@ function layersClick(e) {
    Звук, 3D, північ/курс, моє місце, шари, запис, тема, екран, налаштування, масштаб. Сама ховається за 15 с без дотиків,
    щоб у дорозі не лишилась відкритою. Значок на кнопці показує, що звук вимкнено чи йде запис. */
 const Q_IDLE = 15000;
-let quickView = 'main', quickTimer = null;
+let quickView = 'main', quickTimer = null, quickFrom = 'quick';   // quickFrom: шторку відкрили кнопкою швидких налаштувань чи «Шари» на головному екрані
 const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
 function quickHtml() {
   const head = (title, back) => `<div class="q-head">${back ? `<button class="q-x" data-q="back" aria-label="${t('back')}">${ICON.back}</button>` : ''}<b>${title}</b><button class="q-x" data-q="close" aria-label="${t('close')}">${ICON.x}</button></div>`;
-  if (quickView === 'layers') return head(t('lyTitle'), true) + `<div class="q-ly">${layersHtml().replace(/^<div class="ly-head">.*?<\/div>/, '')}</div>`;
+  if (quickView === 'layers') return head(t('lyTitle'), quickFrom === 'quick') + `<div class="q-ly">${layersHtml().replace(/^<div class="ly-head">.*?<\/div>/, '')}</div>`;
   const tile = (k, icon, label, state, on, extra = '') => `<button class="q-tile${on ? ' on' : ''}${extra}" data-q="${k}" aria-pressed="${!!on}">${icon}<span class="q-l">${label}</span><span class="q-s">${state}</span></button>`;
-  const nOn = LAYERS.filter(([k]) => layerOn(k)).length, th = S.theme || 'auto';
+  const th = S.theme || 'auto';
   return head(t('quickTitle')) + `<div class="q-grid">
     ${tile('voice', S.voice ? ICON.vol : ICON.mute, t('qVoice'), S.voice ? t('qOn') : t('qOff'), S.voice, S.voice ? '' : ' warn')}
     ${tile('3d', `<b class="q-txt">${S.view3d ? '3D' : '2D'}</b>`, t('qView'), S.view3d ? t('q3d') : t('q2d'), S.view3d)}
     ${tile('north', view.north ? ICON.north : ICON.head, t('qOrient'), view.north ? t('qNorthUp') : t('qHeadUp'), view.north)}
     ${tile('center', ICON.center, t('qCenter'), view.follow ? t('qFollowOn') : t('qFollowOff'), view.follow)}
-    ${tile('layers', ICON.layers, t('qLayers'), nOn + ' / ' + LAYERS.length, false)}
     ${tile('rec', ICON.rec, t('qRec'), S.rec ? t('qRecOn') : t('qOff'), S.rec, S.rec ? ' rec' : '')}
     ${tile('theme', th === 'night' ? ICON.moon : th === 'day' ? ICON.sun : ICON.auto, t('qTheme'), t(th === 'night' ? 'themeNight' : th === 'day' ? 'themeDay' : 'themeAuto'), false)}
     ${tile('awake', ICON.awake, t('qAwake'), S.keepAwake !== false ? t('qAwakeOn') : t('qAwakeOff'), S.keepAwake !== false)}
@@ -106,20 +106,22 @@ function quickHtml() {
 }
 function quickRender() { const box = $('quick'); if (!box.hidden) box.innerHTML = quickHtml(); }
 function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => quickOpen(false), Q_IDLE); }
+// open: false — закрити; 'layers' — одразу «Що показувати на карті» (кнопка «Шари» справа); інше — плитки
 export function quickOpen(open) {
   const box = $('quick');
-  if (open) { quickView = 'main'; box.hidden = false; box.innerHTML = quickHtml(); $('spdPop').hidden = true; quickIdle(); }
+  if (open) { quickFrom = quickView = open === 'layers' ? 'layers' : 'main'; if (quickFrom === 'main') quickFrom = 'quick'; box.hidden = false; box.innerHTML = quickHtml(); $('spdPop').hidden = true; quickIdle(); }
   else { box.hidden = true; clearTimeout(quickTimer); }
-  $('bQuick').classList.toggle('on', !!open); $('bQuick').setAttribute('aria-expanded', String(!!open));
+  const q = !!open && quickFrom === 'quick', l = !!open && quickFrom === 'layers';
+  $('bQuick').classList.toggle('on', q); $('bQuick').setAttribute('aria-expanded', String(q));
+  $('bLayers').classList.toggle('on', l); $('bLayers').setAttribute('aria-expanded', String(l));
 }
 function quickClick(e) {
   quickIdle();
-  if (quickView === 'layers' && layersClick(e)) { quickRender(); return; }
+  if (quickView === 'layers' && layersClick(e)) { quickRender(); railState(); return; }
   const b = e.target.closest('[data-q]'); if (!b) return;
   const k = b.dataset.q;
   if (k === 'close') return quickOpen(false);
   if (k === 'back') { quickView = 'main'; return quickRender(); }
-  if (k === 'layers') { quickView = 'layers'; return quickRender(); }
   if (k === 'voice') { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); }
   else if (k === '3d') { S.view3d = !S.view3d; setFollow(true); }
   else if (k === 'north') { view.north = !view.north; setFollow(true); }
@@ -143,6 +145,7 @@ function railState() {
   const qb = $('bQuick');
   qb.innerHTML = ICON.quick + (!S.voice ? `<i class="q-badge mute">${ICON.mute}</i>` : S.rec ? '<i class="q-badge rec"></i>' : '');
   qb.classList.toggle('muted', !S.voice);
+  $('bLayers').classList.toggle('off', !LAYERS.some(([k]) => layerOn(k)));   // усе вимкнено — значок блідий
   const c = $('bCenter'), need = !view.follow;
   if (c.hidden === need) { c.hidden = !need; c.classList.toggle('need', need); }
   quickRender();
@@ -1070,9 +1073,10 @@ export function initUI() {
     if (tsOpen()) tsHide(false);
     currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel);
   }; });
-  $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden); };
+  $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden || quickFrom !== 'quick'); };
+  $('bLayers').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden || quickFrom !== 'layers' ? 'layers' : false); };
   $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
-  document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick')) quickOpen(false); });
+  document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick,#bLayers')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
   $('bReport').innerHTML = ICON.warnTri; $('bReport').setAttribute('aria-label', t('repBtn'));

@@ -41,6 +41,8 @@ export const ICON = {
   send: I('<path d="M4 12 20 4l-5 16-3.5-6.5Z"/>'),
   pin: I('<path d="M12 21s-6.5-6-6.5-11a6.5 6.5 0 0 1 13 0c0 5-6.5 11-6.5 11Z"/><circle cx="12" cy="10" r="2.4"/>'),
   layers: I('<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 12.5 9 5 9-5"/><path d="m3 17 9 5 9-5"/>'),
+  // кнопка «Що показувати на карті» на головному екрані: шари карти з міткою зверху
+  layersPin: I('<path d="m3 16.6 9 4.6 9-4.6"/><path d="M12 8.2 3 12.6l9 4.6 9-4.6Z"/><path d="M12 13.4s4.4-3.9 4.4-7.1a4.4 4.4 0 0 0-8.8 0c0 3.2 4.4 7.1 4.4 7.1Z" fill="#f59e0b" stroke="none"/><circle cx="12" cy="6.3" r="1.7" fill="#fff" stroke="none"/>'),
   quick: I('<path d="M4 7h9M17 7h3M4 17h3M11 17h9"/><circle cx="15" cy="7" r="2.3"/><circle cx="9" cy="17" r="2.3"/>'),
   truck: I('<path d="M2.5 6.5h11v9h-11z"/><path d="M13.5 9.5h4l3 3.2v2.8h-7"/><circle cx="6.5" cy="17" r="1.8"/><circle cx="16.5" cy="17" r="1.8"/>'),
   car: I('<path d="M4 14.5 5.6 9.4A2 2 0 0 1 7.5 8h9a2 2 0 0 1 1.9 1.4l1.6 5.1"/><rect x="3" y="14" width="18" height="3.5" rx="1.2"/><circle cx="7" cy="18.5" r="1.4"/><circle cx="17" cy="18.5" r="1.4"/>'),

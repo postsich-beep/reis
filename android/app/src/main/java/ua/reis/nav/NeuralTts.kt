@@ -24,7 +24,7 @@ import kotlin.math.min
 
 /**
  * Якісний голос без інтернету: нейромережа Piper (VITS) через sherpa-onnx, прямо в телефоні.
- * Пакет голосу (модель + словник вимови espeak-ng) завантажується з релізу «voices» нашого GitHub
+ * Пакет голосу (модель і таблиця літер; словник espeak-ng — лише в старих пакетах) завантажується з релізу «voices» нашого GitHub
  * у files/voices/<pack>/ і далі працює офлайн. Один пакет може мати кількох дикторів (sid).
  */
 class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject) -> Unit) {
@@ -71,10 +71,15 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
         val model = File(d, meta.getString("model"))
         if (!model.isFile) throw IOException("model missing")
         val threads = Runtime.getRuntime().availableProcessors().coerceIn(2, 4)
+        // Словник вимови espeak-ng — лише якщо він справді є в пакеті. Пакет v2 читає літери й словника не має:
+        // тоді шлях має бути порожнім, бо інакше рушій шукає в теці пакета файл phontab і відмовляється запускатись
+        // («Invalid OfflineTtsConfig» у 1.1.2–1.1.4).
+        val dataName = meta.optString("data", "espeak-ng-data")
+        val dataDir = if (dataName.isBlank()) "" else File(d, dataName).takeIf { File(it, "phontab").isFile }?.path ?: ""
         val vits = OfflineTtsVitsModelConfig(
             model = model.path,
             tokens = File(d, meta.optString("tokens", "tokens.txt")).path,
-            dataDir = File(d, meta.optString("data", "espeak-ng-data")).path,
+            dataDir = dataDir,
             noiseScale = meta.optDouble("noise", 0.667).toFloat(),
             noiseScaleW = meta.optDouble("noiseW", 0.8).toFloat(),
             lengthScale = 1.0f,
@@ -90,7 +95,8 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
         return t
     }
 
-    fun preload(pack: String) { if (installed(pack)) exec.execute { try { ensure(pack) } catch (e: Exception) { emit("voice", JSONObject().put("state", "error").put("pack", pack).put("error", e.message ?: "")) } } }
+    // помилка запуску моделі — окремий стан («loadErr»), щоб не плутати з невдалим завантаженням пакета
+    fun preload(pack: String) { if (installed(pack)) exec.execute { try { ensure(pack) } catch (e: Exception) { emit("voice", JSONObject().put("state", "loadErr").put("pack", pack).put("error", e.message ?: "")) } } }
 
     fun release() {
         val t = tts; tts = null; loaded = ""

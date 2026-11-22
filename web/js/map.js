@@ -164,6 +164,8 @@ export function initMap() {
   bus.on('reports', drawReports); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); });
   bus.on('stopsdb', drawStops);
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
+  map.on('render', () => { if (!labTimer) labTimer = setTimeout(labelDots, LAB_EVERY); });
+  map.on('idle', () => { clearTimeout(labTimer); labTimer = null; labelDots(); });
   setInterval(drawEvents, 60000);
   bus.on('settings', k => { if (k === 'theme') applyTheme(); if (k === 'view3d') follow(true); });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { cam.anc = null; follow(true); } });
@@ -175,6 +177,55 @@ export function initMap() {
   applyTheme();
   return map;
 }
+
+/* ---------- кружечок не потрібен, коли назву вже видно ---------- */
+// Наближено над АЗС стоїть плашка з назвою мережі, а біля кафе, мотелю чи стоянки карта сама пише назву.
+// Кружечок поруч із назвою лише рябить — ховаємо його (натиснути на місце можна, як і раніше).
+// Віддалили — назв на карті вже немає, і кружечки повертаються.
+const LAB_EVERY = 300, LAB_HOLD = 900, LAB_R = 60;      // як часто перевіряти; скільки тримати схованим, коли назва зникла на мить; радіус пошуку назви, пікселі
+const labSeen = new Map(), labHid = new Set();         // номер точки → коли востаннє бачили її назву; сховані кружечки
+let labTimer = null, poiLy = null;
+const normName = s => String(s || '').toLowerCase().normalize('NFC').replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+const sameName = (a, b) => a === b || (a.length >= 4 && b.includes(a)) || (b.length >= 4 && a.includes(b));
+// шари підписів місць базової карти (OpenFreeMap — source-layer «poi», офлайн-карта Protomaps — «pois»), без наших
+function poiLayers() {
+  if (poiLy) return poiLy.filter(id => map.getLayer(id));
+  poiLy = [];
+  try { for (const l of map.getStyle().layers || []) if (l.type === 'symbol' && (l['source-layer'] === 'poi' || l['source-layer'] === 'pois' || /^pois?[_-]|^pois$/.test(l.id)) && l.id !== 'poi-dot') poiLy.push(l.id); } catch (_) {}
+  return poiLy;
+}
+export function labelDots() {
+  labTimer = null;
+  if (!map || !map.getLayer('stops-all') || !map.getSource('stops')) return;
+  const now = performance.now(), seen = i => { if (i != null) labSeen.set(+i, now); };
+  if (map.getZoom() >= 9.5 && S.mapStops !== false) {
+    try {
+      if (map.getLayer('fuel-label')) for (const f of map.queryRenderedFeatures({ layers: ['fuel-label'] })) seen(f.properties.i);
+      const pl = poiLayers();
+      if (pl.length) {
+        const labels = [];
+        for (const f of map.queryRenderedFeatures({ layers: pl })) {
+          if (!f.geometry || f.geometry.type !== 'Point') continue;
+          const pr = f.properties || {}, n = normName(pr['name:uk'] || pr.name || pr.name_int || '');
+          if (n) labels.push({ p: map.project(f.geometry.coordinates), n });
+        }
+        if (labels.length) for (const f of map.queryRenderedFeatures({ layers: ['stops-all'] })) {
+          const i = f.properties.i, r = sdb.rows[i], n = normName(r && r[4]); if (!n) continue;
+          const p = map.project(f.geometry.coordinates);
+          if (labels.some(l => Math.abs(l.p.x - p.x) < LAB_R && Math.abs(l.p.y - p.y) < LAB_R && sameName(l.n, n))) seen(i);
+        }
+      }
+    } catch (_) {}
+  }
+  let pending = false;
+  for (const [i, ts] of labSeen) {
+    const hide = now - ts < LAB_HOLD;
+    if (hide) { if (ts < now) pending = true; if (!labHid.has(i)) { labHid.add(i); map.setFeatureState({ source: 'stops', id: i }, { lab: true }); } }
+    else { labSeen.delete(i); if (labHid.delete(i)) map.setFeatureState({ source: 'stops', id: i }, { lab: false }); }
+  }
+  if (pending && !labTimer) labTimer = setTimeout(labelDots, LAB_HOLD);   // назва зникла, а карта стоїть — перевірити ще раз і повернути кружечок
+}
+export const hiddenDots = () => [...labHid];
 
 // Плашка АЗС: значок колонки + назва мережі; колір — наш, за назвою (не фірмовий)
 const FUEL_COL = ['#0f766e', '#1d4ed8', '#7c3aed', '#b45309', '#be123c', '#047857', '#4338ca', '#0e7490', '#a16207', '#334155'];
@@ -238,7 +289,11 @@ function addLayers() {
   // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
   const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, 'h', TYPES.h.color, '#1f2937'];
   // точка з душем — товстий бірюзовий обідок, щоб душ було видно серед АЗС і стоянок
+  // назву вже видно (плашка АЗС чи підпис карти) — кружечок прозорий, але натискається
+  const unlab = ['case', ['boolean', ['feature-state', 'lab'], false], 0, 1];
+  labSeen.clear(); labHid.clear(); poiLy = null;
   const stopPaint = r => ({
+    'circle-opacity': unlab, 'circle-stroke-opacity': unlab,
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, r, 9, r + 1.8, 13, r + 4.5, 16, r + 7],
     'circle-color': color,
     'circle-stroke-color': ['case', ['==', ['get', 'sh'], 1], SHOWER_COLOR, ['match', ['get', 't'], 'c', '#e5484d', '#ffffff']],
@@ -248,7 +303,7 @@ function addLayers() {
   map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, paint: stopPaint(2.6) });
   // АЗС — плашка з назвою мережі (OKKO, WOG, UPG…), щоб одразу видно, яка заправка далі. Малюємо самі, без шрифтів карти — працює й офлайн.
   map.addLayer({ id: 'fuel-label', type: 'symbol', source: 'stops', minzoom: 10, filter: ['==', ['get', 't'], 'f'],
-    layout: { 'icon-image': ['concat', 'fuel:', ['get', 'nm']], 'icon-anchor': 'bottom', 'icon-offset': [0, -5], 'icon-allow-overlap': false, 'icon-padding': 2,
+    layout: { 'icon-image': ['concat', 'fuel:', ['get', 'nm']], 'icon-anchor': 'bottom', 'icon-offset': [0, 1], 'icon-allow-overlap': false, 'icon-padding': 2,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.85, 14, 1.05], 'symbol-sort-key': ['-', 0, ['get', 'r']] } });
   map.on('click', 'fuel-label', e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
   map.addLayer({

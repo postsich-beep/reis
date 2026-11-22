@@ -599,3 +599,10 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
 /* «Назад» прилипає до самого низу: під ним нічого не визирає */
 #panel.full #panelBody{padding-bottom:0}
 #panel.full .pb-back{padding-bottom:calc(var(--sb) + 10px);background:linear-gradient(transparent,var(--panel) 18px)}
+/* ---- 1.1.5: «Що показувати на карті» — окрема кнопка справа, під швидкими налаштуваннями ---- */
+#bLayers{margin-top:9px}
+#bLayers svg{width:30px;height:30px}
+#bLayers.off svg{opacity:.45}
+/* голос: старий застосунок — пропонуємо оновити */
+.vfix{margin-bottom:10px;border-left:6px solid var(--yellow)}
+.vfix .btns{margin-top:8px}
