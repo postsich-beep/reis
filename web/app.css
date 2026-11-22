@@ -606,3 +606,8 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
 /* голос: старий застосунок — пропонуємо оновити */
 .vfix{margin-bottom:10px;border-left:6px solid var(--yellow)}
 .vfix .btns{margin-top:8px}
+/* в альбомній орієнтації екран низький: «Шари» стоять у ряд ліворуч від швидких налаштувань, а не під ними */
+@media (orientation:landscape){
+  #rail{flex-direction:row-reverse}
+  #bLayers{margin-top:0;margin-right:9px}
+}

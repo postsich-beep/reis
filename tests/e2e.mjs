@@ -1128,7 +1128,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     ok(`${T}: кнопка «Шари» справа — 10 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 10 && q.getBoundingClientRect().bottom <= innerHeight; }));
     await page.click('#quick [data-ly="fuel"]'); ok(`${T}: галочка в «Шарах» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
     await page.click('#quick [data-ly="fuel"]');
-    await page.click('#bLayers'); ok(`${T}: повторне торкання «Шарів» закриває шторку`, await app(page, () => document.getElementById('quick').hidden));
+    await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває «Шари»`, await app(page, () => document.getElementById('quick').hidden && !document.getElementById('bLayers').classList.contains('on')));
     await page.click('#bQuick');
     await app(page, () => { window.__app.map.view.lastTouch = Date.now(); window.__app.map.setFollow(false); });
     s1 = await tap('center'); ok(`${T}: плитка «Моє місце» — стежить і шторка закрилась`, s1.follow && !s1.open, JSON.stringify(s1));
