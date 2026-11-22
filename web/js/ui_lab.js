@@ -131,6 +131,8 @@ function settingsHtml() {
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
   <div class="muted" style="margin:-4px 2px 10px">${t('themeHint')}</div>
+  <div class="muted" style="margin:0 2px 6px">${t('setPassed')}</div>
+  ${seg('passed', [['hide', t('passed_hide'), S.passed !== 'grey'], ['grey', t('passed_grey'), S.passed === 'grey']])}
   <div class="muted" style="margin:0 2px 6px">${t('setGlass')}</div>
   ${seg('glass', [['low', t('glass_low'), S.glass === 'low'], ['mid', t('glass_mid'), S.glass === 'mid'], ['high', t('glass_high'), S.glass === 'high'], ['max', t('glass_max'), S.glass === 'max']])}
   <div class="muted" style="margin:-4px 2px 10px">${t('glassHint')}</div>
@@ -205,6 +207,7 @@ definePanel('settings', {
         if (k === 'theme') { S.theme = v; applyTheme(); }
         else if (k === 'lang') S.lang = v;
         else if (k === 'glass') S.glass = v;
+        else if (k === 'passed') S.passed = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }

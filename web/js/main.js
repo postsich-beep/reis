@@ -18,6 +18,7 @@ import * as mapM from './map.js';
 import * as route from './route.js';
 import { initUI } from './ui.js';
 import { initLab } from './ui_lab.js';
+import { resumeTrip } from './ui.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
@@ -31,6 +32,7 @@ async function boot() {
   await feed.init();
   stopsdb.load();
   P.nativeReady(); P.startLocation(); P.keepAwake(S.keepAwake !== false);
+  resumeTrip();
   const b = document.getElementById('boot');
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});

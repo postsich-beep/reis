@@ -2,7 +2,7 @@
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView } from './nav.js';
-import { g, startTrip, stopTrip, rerouteNow, say, setVia } from './guide.js';
+import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
@@ -163,7 +163,33 @@ function hud() {
   // нижній рядок
   if (g.arrived) { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = t('tripDone'); }
   else if (g.active && g.route) { $('eta').textContent = fmtClock(new Date(g.eta)); $('remain').textContent = fmtDist(g.remain) + ' · ' + fmtDur(g.remTime); }
-  else { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = t('noTrip'); }
+  else if (plan.trip && plan.trip.route) { const r = plan.trip.route; $('eta').textContent = fmtClock(new Date()); $('remain').textContent = fmtDist(r.dist) + ' · ' + fmtDur(r.time) + ' · ' + t('previewReady'); }
+  else { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = ''; }
+}
+
+/* ---------- рейс без «Поїхали»: водій побудував маршрут і просто поїхав ним — вмикаємо ведення самі ---------- */
+let followSince = 0, followHint = 0;
+function autoStart() {
+  if (g.active || !plan.trip || !plan.trip.route || pos.mode !== 'gps' || pos.sim) { followSince = 0; return; }
+  const idx = indexOfRoute(plan.trip.route), loc = idx && idx.locate(pos, followHint);
+  const on = loc && loc.off < 50 && pos.spd > 4;
+  if (!on) { followSince = 0; return; }
+  followHint = loc.d;
+  if (!followSince) { followSince = Date.now(); return; }
+  if (Date.now() - followSince < 15000) return;
+  followSince = 0;
+  const trip = plan.trip;
+  toast(t('autoStarted'), 'green', 6000);
+  goTrip(trip, { onRoute: true });
+}
+// Рейс, що йшов до перезапуску чи оновлення, — продовжуємо, ніби нічого не сталося.
+export async function resumeTrip() {
+  if (!(await resumeActive())) return false;
+  const tr = g.trip;
+  restorePoi(tr.cams, tr.stops); setRouteContext(tr.regions, tr.towns);
+  setFollow(true); P.keepAwake(S.keepAwake !== false);
+  toast(t('tripResumed'), 'green', 5000);
+  return true;
 }
 
 function stripUpdate() {
@@ -358,7 +384,7 @@ async function doBuild() {
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
     trip.route = await buildRoute(trip);
-    plan.trip = trip; previewRoute(trip.route.coords, trip.route);
+    plan.trip = trip; previewRoute(trip.route.coords, trip.route); hud();
     loadRegions(trip);
   } catch (e) {
     plan.err = (e.code ? t('routeFail') : t('netErr')) + ' ' + (e.message || '');
@@ -366,12 +392,13 @@ async function doBuild() {
   }
   plan.busy = false; refresh('trip');
 }
-async function goTrip(trip) {
+async function goTrip(trip, opts = {}) {
   saveTrip(trip); places.remember(trip.b);
   restorePoi(trip.cams, trip.stops);
-  closePanel(); showPick(null);
+  if (!opts.onRoute) closePanel();
+  showPick(null);
   P.keepAwake(S.keepAwake !== false);
-  await startTrip(trip);
+  await startTrip(trip, opts);
   setRouteContext(trip.regions, trip.towns);
   setFollow(true);
   plan.trip = null; plan.a = plan.v = plan.b = null;
@@ -389,13 +416,13 @@ function tripClicks(e) {
   else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
     const tr = plan.trip, alt = tr.route.alt;
     alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
-    previewRoute(alt.coords, alt); refresh('trip'); loadRegions(tr);
+    previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
-  else if (d.act === 'save' && plan.trip) { saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); openPanel('trip'); }
+  else if (d.act === 'save' && plan.trip) { saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); hud(); openPanel('trip'); }
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') { const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); } stopTrip(); previewRoute(null); setRouteContext([], []); openPanel('trip'); }
-  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); openPanel('trip'); loadRegions(tr); } }
+  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
     if (pos.lat == null) { toast(t('gpsWait')); return; }
@@ -639,7 +666,7 @@ export function initUI() {
   applyGlass(); staticLabels(); layoutVars(); hud(); stripUpdate();
   window.addEventListener('resize', layoutVars);
   setInterval(() => { hud(); if (currentPanel() === 'trip' && g.active) refresh('trip'); }, 1000);
-  bus.on('pos', hud); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
+  bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
   bus.on('chat', () => { refresh('chat'); micState(); });
   bus.on('trips', () => refresh('trip'));

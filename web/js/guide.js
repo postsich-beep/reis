@@ -1,5 +1,5 @@
 // Ведення за маршрутом: наступний маневр, голос, прибуття, перерахунок при з'їзді.
-import { bus, log, S, RouteIndex, hav, clamp } from './core.js';
+import { bus, log, S, RouteIndex, hav, clamp, db } from './core.js';
 import { pos, setRoute } from './nav.js';
 import { speak, stopSpeak, online } from './platform.js';
 import { buildRoute } from './route.js';
@@ -39,7 +39,32 @@ export function distWords(m) {
 }
 
 /* ---------- старт і зупинка рейсу ---------- */
-function applyRoute(route) {
+/* ---------- активний рейс переживає перезапуск застосунку й оновлення інтерфейсу ---------- */
+const ACTIVE_KEY = 'activeTrip', ACTIVE_MAX_H = 18;
+function saveActive() {
+  if (!g.active || !g.trip || !g.route) return;
+  const r = { ...g.route }; delete r._hz; delete r.heat;
+  db.set('kv', ACTIVE_KEY, { trip: { ...g.trip, route: undefined }, route: r, passedA: g.passedA, passedV: g.passedV, at: Date.now() }).catch(() => {});
+}
+let flagsSaved = '';
+function saveFlags() { const k = g.passedA + ':' + g.passedV; if (k !== flagsSaved) { flagsSaved = k; saveActive(); } }
+function clearActive() { db.del('kv', ACTIVE_KEY); }
+// Відновити рейс, що йшов до перезапуску (не старший 18 год і не завершений). Повертає true, якщо відновлено.
+export async function resumeActive() {
+  try {
+    const s = await db.get('kv', ACTIVE_KEY);
+    if (!s || !s.route || !s.trip || Date.now() - s.at > ACTIVE_MAX_H * 3600e3 || g.active) return false;
+    g.trip = { ...s.trip, route: s.route }; g.active = true; g.arrived = false;
+    applyRoute(s.route, true);
+    g.passedA = !!s.passedA || g.passedA; g.passedV = !!s.passedV || g.passedV;
+    say(t('voiceResume'));
+    bus.emit('trip', g);
+    log('info', 'рейс відновлено після перезапуску');
+    return true;
+  } catch (e) { log('warn', 'відновлення рейсу: ' + e.message); return false; }
+}
+
+function applyRoute(route, resumed = false) {
   g.route = route; g.idx = new RouteIndex(route.coords);
   for (const m of route.mans) m.d0 = g.idx.cum[Math.min(m.i0, g.idx.cum.length - 1)];
   g.manI = 0; lastManI = -1; said = {}; offSince = 0; g.offRoute = false;
@@ -47,13 +72,14 @@ function applyRoute(route) {
   setRoute(g.idx);
   bus.emit('route', g);
   update();
+  if (!resumed) saveActive();
 }
 
-export async function startTrip(trip) {
+export async function startTrip(trip, opts = {}) {
   g.trip = trip; g.active = true; g.arrived = false;
   let route = trip.route;
-  // Стартуємо не з точки А — ведемо до неї від поточного місця.
-  if (pos.lat != null && pos.mode === 'gps' && hav(pos, trip.a) > 400 && online()) {
+  // Стартуємо не з точки А — ведемо до неї від поточного місця (крім випадку, коли водій уже їде цим маршрутом).
+  if (!opts.onRoute && pos.lat != null && pos.mode === 'gps' && hav(pos, trip.a) > 400 && online()) {
     try { route = await buildRoute(trip, { from: pos, heading: pos.spd > 2 ? pos.hdg : null }); }
     catch (e) { log('warn', 'підведення до А: ' + e.message); }
   }
@@ -63,6 +89,7 @@ export async function startTrip(trip) {
   bus.emit('trip', g);
 }
 export function stopTrip() {
+  clearActive();
   g.active = false; g.trip = null; g.route = null; g.idx = null; g.next = null; g.arrived = false; g.rerouting = false;
   setRoute(null); queue.length = 0;
   bus.emit('route', g); bus.emit('trip', g); bus.emit('guide', g);
@@ -112,6 +139,7 @@ function update() {
   const d = pos.rd == null ? 0 : pos.rd;
   if (g.route.aD != null && d >= g.route.aD - 80) g.passedA = true;
   if (g.route.viaD != null && d >= g.route.viaD - 80) g.passedV = true;
+  saveFlags();
 
   let i = g.manI;
   if (i >= mans.length || mans[i].d0 > d + 1) i = 0;
@@ -133,7 +161,7 @@ function update() {
     }
     announce();
     if (g.remain < 45 && !g.arrived) {
-      g.arrived = true; g.active = false; say(t('voiceArrived'), { urgent: true });
+      g.arrived = true; g.active = false; clearActive(); say(t('voiceArrived'), { urgent: true });
       bus.emit('arrived', g);
     }
   }

@@ -292,8 +292,18 @@ try {
   ok('картка маневру: поворот ліворуч попереду', s1.next === 15 && /км|м/.test(s1.man) && /Пушкінськ/.test(s1.text), JSON.stringify(s1));
   ok('швидкість на екрані', +s1.spd > 40 && +s1.spd < 70, s1.spd);
   await shot(page, '03-drive');
+  // пройдене: за замовчуванням ховаємо — на карті лише шлях попереду; за налаштуванням — блідо
+  const pr = await app(page, async () => { const m = window.__app.map.map, g = window.__app.guide.g;
+    const r = await m.getSource('route').getData(), dn = await m.getSource('route-done').getData();
+    const first = (r.features || [r])[0].geometry.coordinates[0], here = window.__app.nav.pos;
+    const off = window.__app.core.hav({ lat: first[1], lon: first[0] }, here);
+    return { off: Math.round(off), rd: Math.round(here.rd), done: dn.geometry ? dn.geometry.coordinates.length : (dn.features || []).length }; });
+  ok('пройдена частина маршруту схована: лінія починається від машини', pr.rd > 20 && pr.off < 60 && pr.done === 0, JSON.stringify(pr));
+  await app(page, () => { window.__app.S.passed = 'grey'; });
+  await sleep(2300);
   const done = await app(page, async () => { const s = window.__app.map.map.getSource('route-done'); const d = await s.getData(); return d && d.geometry ? d.geometry.coordinates.length : 0; });
-  ok('пройдена частина маршруту малюється окремою світлою лінією', done >= 2, 'точок ' + done);
+  ok('за налаштуванням «блідо» пройдене малюється окремою лінією', done >= 2, 'точок ' + done);
+  await app(page, () => { window.__app.S.passed = 'hide'; });
 
   // стрічка: Telegram + тривога
   await app(page, async () => { const f = window.__app.feed; await f.pollAir(); await f.pollTelegram(true); });
@@ -478,6 +488,39 @@ try {
   ok('прохід перезапуску без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід перезапуску дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 2в: маршрут без «Поїхали» і перезапуск посеред рейсу ============ */
+try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('loc', { prov: 'gps', lat: coords[0][0], lon: coords[0][1], acc: 5, spd: 0, t: Date.now() });
+  const n = coords.length;
+  const trip = { id: 't-auto', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  await app(page, tr => window.__app.route.saveTrip(tr), trip);
+  await page.click('#tabs button[data-panel="trip"]');
+  await page.click('[data-open="t-auto"]'); await page.click('#panelClose');
+  ok('без рейсу немає «Рейс не задано»; побудований маршрут — «не запущено»', /не запущено/.test(await page.textContent('#remain')) && !/Рейс не задано/.test(await page.textContent('#bottom')));
+  // водій просто їде маршрутом ~20 м/с
+  await app(page, () => { const R = window.__app.core.RouteIndex; const idx = new R(window.__app.route.getTrips().find(x => x.id === 't-auto').route.coords); let d = 100;
+    window.__drive = setInterval(() => { const p = idx.at(d); window.__reis('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 20, brg: p.brg, t: Date.now() }); d += 20; }, 1000); });
+  await page.waitForFunction(() => window.__app.guide.g.active, null, { timeout: 30000 }).catch(() => {});
+  const au = await app(page, () => ({ active: window.__app.guide.g.active, id: window.__app.guide.g.trip && window.__app.guide.g.trip.id, toast: document.getElementById('toasts').textContent, rd: window.__app.nav.pos.rd }));
+  ok('їде маршрутом без «Поїхали» → ведення вмикається саме, без повернення до А', au.active && au.id === 't-auto' && /ведення увімкнено/.test(au.toast) && au.rd > 200, JSON.stringify({ ...au, toast: au.toast.slice(0, 80) }));
+  await sleep(1500);
+  await app(page, () => clearInterval(window.__drive));
+  // перезапуск посеред рейсу (оновлення інтерфейсу, закрили застосунок)
+  await page.reload();
+  await page.waitForFunction(() => window.__app && window.__app.guide.g.active, null, { timeout: 15000 }).catch(() => {});
+  const rs = await app(page, () => ({ active: window.__app.guide.g.active, id: window.__app.guide.g.trip && window.__app.guide.g.trip.id, toast: document.getElementById('toasts').textContent }));
+  ok('після перезапуску рейс продовжується сам', rs.active && rs.id === 't-auto' && /Рейс продовжено/.test(rs.toast), JSON.stringify({ ...rs, toast: rs.toast.slice(0, 80) }));
+  // завершили рейс — після перезапуску не відновлюється
+  await app(page, () => window.__app.guide.stopTrip()); await sleep(300);
+  await page.reload(); await sleep(2500);
+  ok('зупинений рейс після перезапуску не воскресає', await app(page, () => !window.__app.guide.g.active));
+  ok('прохід «без Поїхали і перезапуск» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «без Поїхали і перезапуск» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
 try {

@@ -107,13 +107,19 @@ export function initMap() {
   puckEl.innerHTML = '<svg viewBox="0 0 48 48"><path class="puck-halo" d="M24 3 42 43 24 34 6 43Z"/><path class="puck-body" d="M24 8 37.5 38 24 31 10.5 38Z"/></svg>';
   puck = new maplibregl.Marker({ element: puckEl, rotationAlignment: 'map', pitchAlignment: 'map' });
   bus.on('pos', onPos);
+  const attr = document.getElementById('attr');
+  if (attr) {
+    const full = attr.textContent.trim();
+    attr.textContent = 'ⓘ'; attr.title = full;
+    attr.onclick = () => { attr.classList.toggle('open'); attr.textContent = attr.classList.contains('open') ? full : 'ⓘ'; clearTimeout(attr._t); if (attr.classList.contains('open')) attr._t = setTimeout(() => { attr.classList.remove('open'); attr.textContent = 'ⓘ'; }, 6000); };
+  }
   bus.on('route', drawRoute);
   bus.on('hazards', drawHazards);
   bus.on('rough', drawRough);
   bus.on('marks', drawMarks);
   bus.on('settings', k => { if (k === 'mapStopTypes' || k === 'mapStops') drawMarks(); if (k === 'mapEvents') drawEvents(); if (k === 'mapHazards') drawHazards(); if (k === 'cams') drawStops(); });
   bus.on('settings', k => { if (k === 'roughMap') drawRough(); });
-  bus.on('settings', k => { if (k === 'routeCats') drawRoute(); if (k === 'truck') drawHazards(); });
+  bus.on('settings', k => { if (k === 'routeCats' || k === 'passed') drawRoute(); if (k === 'truck') drawHazards(); });
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
@@ -247,11 +253,24 @@ function drawRoute() {
 }
 function setDone(data) { const s = map && map.getSource && map.getSource('route-done'); if (s) s.setData(data); }
 // Пройдена частина маршруту — окрема світла лінія від старту до машини. Оновлюється не частіше ніж раз на 2 с.
+// Залишок маршруту від машини до кінця (з категоріями доріг) — коли пройдене ховаємо.
+function remainData(rd) {
+  const idx = g.idx, rc = S.routeCats !== false ? routeCats(g.route) : null, f = [];
+  const line = (a, b, c) => { const cs = idx.slice(a, b); if (cs.length >= 2) f.push({ type: 'Feature', properties: c ? { c } : {}, geometry: { type: 'LineString', coordinates: cs } }); };
+  if (rc) { for (const s of rc.segs) { const d0 = idx.cum[Math.min(s.i0, idx.cum.length - 1)], d1 = idx.cum[Math.min(s.i1, idx.cum.length - 1)]; if (d1 > rd) line(Math.max(d0, rd), d1, s.c); } }
+  else line(rd, idx.total);
+  return { type: 'FeatureCollection', features: f };
+}
 function drawProgress() {
   if (!map || !g.idx) return;
   const rd = pos.rd == null ? 0 : pos.rd, now = Date.now();
   if (Math.abs(rd - doneD) < 10 || (now - doneT < 2000 && Math.abs(rd - doneD) < 300)) return;
   doneD = rd; doneT = now;
+  if (S.passed !== 'grey') {                 // пройдене ховаємо: на карті лише шлях попереду
+    setDone(EMPTY);
+    const src = map.getSource('route'); if (src && g.route) src.setData(rd < 5 ? routeData(g.route.coords, g.route) : remainData(rd));
+    return;
+  }
   if (rd < 5) { setDone(EMPTY); return; }
   let c = g.idx.slice(0, rd);
   if (c.length > 3000) {                    // давню частину проріджуємо, останні 600 точок — повністю
