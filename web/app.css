@@ -329,7 +329,7 @@ body[data-theme="night"]{
   #bottom{left:auto;width:46%;border-radius:20px 0 0 0}
   #speed{bottom:14px}#cam{bottom:26px}#zoom{right:calc(46% + 10px);bottom:14px}#rail{right:calc(46% + 10px);top:calc(var(--st) + 10px)}
   #attr{bottom:4px;right:calc(46% + 8px)}
-  #panel{bottom:0}
+  #panel{bottom:calc(var(--bh,150px) - 14px)}   /* панель закінчується над нижньою плашкою — кнопки внизу форми не ховаються під неї */
 }
 @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
 /* компактна верхня плашка (1.0.18): картка маневру ~62 px замість ~84, шторка 30 замість 38; порожня шторка під карткою ховається */
@@ -464,3 +464,54 @@ body[data-theme="night"]{
 #photoView .pv-strip img{flex:0 0 100%;width:100%;height:100%;object-fit:contain;scroll-snap-align:center}
 #photoView .pv-x{position:absolute;right:max(12px,env(safe-area-inset-right));top:calc(var(--st) + 12px);width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;z-index:2}
 #photoView .pv-x svg{width:26px;height:26px}
+/* ---- вибір варіанта маршруту (1.1.1): карта з обома варіантами зверху, шторка внизу ---- */
+#routePick{position:absolute;left:8px;right:8px;bottom:calc(var(--sb) + 8px);z-index:9;padding:12px 12px 10px;border-radius:22px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:qdown .18s ease-out}
+.rp-head{font-size:14px;color:var(--ink-2);margin:0 2px 8px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rp-head b{color:var(--ink);font-weight:600}
+.alts.rp-cards{grid-auto-flow:row;grid-template-columns:1fr 1fr;grid-auto-columns:auto;overflow:visible;padding:0;margin:0}
+.alts.rp-cards .alt:only-child{grid-column:1/-1}
+.rp-cards .alt{padding:10px 12px;min-height:104px}
+.rp-cards .alt b{font-size:21px;white-space:nowrap}
+.rp-btns{display:flex;gap:8px;margin-top:10px}
+.rp-btns .btn{min-height:50px;padding:0 12px;flex:1}
+.rp-btns .btn.pri{flex:1.6;gap:6px}
+.rp-btns .btn svg{width:20px;height:20px}
+.rp-btns .rp-x{flex:0 0 50px;padding:0}
+body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hidden}
+@media (orientation:landscape){
+  #routePick{left:auto;width:calc(46% - 16px)}
+}
+@media (max-width:350px){ .rp-cards .alt b{font-size:18px} .rp-btns .btn{padding:0 8px;font-size:14px} }
+.alts{grid-auto-flow:row;grid-template-columns:1fr 1fr;overflow:visible}
+/* плашка оновлення (1.1.1): зелена смуга над нижньою панеллю; під час завантаження — заповнюється */
+#updBar{display:flex;align-items:stretch;gap:6px;margin-bottom:6px}
+#updBar[hidden]{display:none}
+#updGo{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:12px;background:var(--green);color:#fff;font-weight:700;font-size:15px;text-align:left;
+  text-shadow:none;background-image:linear-gradient(90deg,rgba(255,255,255,.28) var(--p,0%),transparent var(--p,0%))}
+#updBar:not(.busy) #updGo{background-image:none}
+#updGo svg{width:22px;height:22px;flex:none}
+#updGo span{overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;line-height:1.2}
+#updX{width:44px;min-height:44px;border-radius:12px;background:var(--panel-2);color:var(--ink-2);display:grid;place-items:center;flex:none}
+#updX svg{width:20px;height:20px}
+/* вибір маршруту (1.1.1): А · Б · С кольоровими мітками, кнопки масштабу над шторкою */
+.rp-head{display:flex;align-items:center;gap:6px;min-width:0}
+.rp-head b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.rp-t{flex:none;width:22px;height:22px;border-radius:7px;display:grid;place-items:center;font:800 13px/1 var(--f-num);font-style:normal;color:#fff;background:#2f9e62}
+.rp-t.v{background:#5f6a75}.rp-t.b{background:var(--red)}
+.rp-zoom{position:absolute;right:4px;bottom:calc(100% + 10px);display:flex;flex-direction:column;gap:8px}
+.rp-zoom button{width:48px;height:48px;border-radius:14px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font:700 26px/1 var(--f-num);display:grid;place-items:center}
+.rp-zoom button svg{width:24px;height:24px}
+@media (orientation:landscape){
+  .rp-zoom{right:calc(100% + 10px);bottom:0}                       /* альбомна: кнопки масштабу ліворуч від шторки */
+  .rp-btns{flex-wrap:wrap}
+  .rp-btns .btn.pri{flex:1 1 100%}
+  .rp-btns .btn{min-height:46px}
+  .rp-cards .alt{min-height:78px;padding:8px 10px}
+  .rp-head{margin-bottom:6px}
+  #routePick{padding:10px 10px 8px}
+}
+/* «Поїхали» — окремим широким рядком, під ним «Зберегти», «Деталі», ✕: на вузьких екранах (S10, 320 px) усе влазить */
+.rp-btns{flex-wrap:wrap}
+.rp-btns .btn.pri{flex:1 1 100%}
+.rp-btns .btn{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

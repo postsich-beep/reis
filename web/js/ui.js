@@ -8,7 +8,7 @@ import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegra
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
-import { view, setFollow, zoomBy, previewRoute, previewAlts, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
+import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
 import { heatAlong, heatApplies } from './weather.js';
@@ -405,8 +405,8 @@ function tripActiveHtml() {
 }
 function savedHtml() {
   const list = getTrips().filter(x => !g.trip || x.id !== g.trip.id);
-  if (!list.length) return `<div class="muted">${t('savedNone')}</div>`;
-  return '<div class="list">' + list.map(x => `<div class="item"><div class="grow"><div class="t">${esc(tripTitle(x))}</div><div class="muted">${x.route ? fmtDist(x.route.dist) + ' · ' + fmtDur(x.route.time) : ''}</div></div>
+  if (!list.length) return '';                                       // порожньо — нічого не показуємо
+  return `<div class="sec">${t('savedSec')}</div><div class="list">` + list.map(x => `<div class="item"><div class="grow"><div class="t">${esc(tripTitle(x))}</div><div class="muted">${x.route ? fmtDist(x.route.dist) + ' · ' + fmtDur(x.route.time) : ''}</div></div>
     <button class="btn sm pri" data-open="${x.id}">${t('open')}</button><button class="btn sm" data-del="${x.id}" aria-label="${t('delete')}">${ICON.trash}</button></div>`).join('') + '</div>';
 }
 function fieldHtml(k, cls, tag, ph) {
@@ -415,13 +415,13 @@ function fieldHtml(k, cls, tag, ph) {
     ${k === 'a' ? `<button data-here="1" aria-label="${t('myPlace')}">${ICON.here}</button>` : `<button data-clear="${k}" aria-label="${t('clear')}">${ICON.x}</button>`}</div><div class="sugg" id="sg_${k}" hidden></div>`;
 }
 function planHtml() {
-  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div>${plan.trip ? '' : showersNearHtml()}<div class="sec">${t('newTrip')}</div>
-    ${fieldHtml('a', 'a', 'A', t('phA'))}${fieldHtml('v', 'v', '•', t('phV'))}${fieldHtml('b', 'b', 'Б', t('phB'))}
+  // Лише три точки: А — звідки, Б — через (проміжна, необов'язково), С — куди. Нічого зайвого (душі тощо — на карті й у дорозі).
+  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec">${t('newTrip')}</div>
+    ${fieldHtml('a', 'a', 'А', t('phA'))}${fieldHtml('v', 'v', 'Б', t('phV'))}${fieldHtml('b', 'b', 'С', t('phB'))}
     ${vehHtml()}
-    <div class="muted">${t('pickHint')}</div>
     <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
     <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
-    <div class="sec">${t('savedSec')}</div><div id="savedBox">${savedHtml()}</div>`;
+    <div id="savedBox">${savedHtml()}</div>`;
 }
 // Фура чи легковик: для фури — габарити, маса, мости, обмежувач; для легковика — без обмежень
 function vehHtml() {
@@ -429,8 +429,8 @@ function vehHtml() {
   return `<div class="seg veh"><button data-veh="truck" class="${v === 'truck' ? 'on' : ''}">${ICON.truck}${t('vehTruck')}</button><button data-veh="auto" class="${v === 'auto' ? 'on' : ''}">${ICON.car}${t('vehCar')}</button></div>`;
 }
 // Варіанти маршруту карточками (до трьох): час, кілометри, головні дороги, обмеження для фури
-function altCardsHtml() {
-  const rs = plan.routes || []; if (rs.length < 2) return '';
+function altCardsHtml(force = false) {
+  const rs = plan.routes || []; if (rs.length < 2 && !force) return '';
   const truck = plan.trip && plan.trip.costing !== 'auto';
   const best = Math.min(...rs.map(r => r.time));
   return `<div class="alts">` + rs.map((r, i) => {
@@ -445,6 +445,39 @@ function selectAlt(i) {
   plan.sel = i; tr.route = r; tr.regions = []; tr.towns = []; tr.chosen = null;
   previewRoute(r.coords, r); previewAlts(plan.routes.map((x, k) => [k, x.coords]).filter(([k]) => k !== i));
   hud(); refresh('trip'); loadRegions(tr);
+  if (!$('routePick').hidden) pickShow();
+}
+/* ---------- вибір варіанта, як у BlindDriver: карта з обома маршрутами зверху, дві карточки й кнопки знизу ---------- */
+function pickHtml() {
+  const tr = plan.trip;
+  return `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
+    <div class="rp-head"><i class="rp-t a">А</i><b>${esc(tr.a.label || '')}</b>${tr.v ? `<i class="rp-t v">Б</i><b>${esc(tr.v.label || '')}</b>` : ''}<i class="rp-t b">С</i><b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
+    ${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
+    <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
+}
+function pickShow() {
+  if (!plan.trip || g.active) return pickHide();
+  const box = $('routePick'); box.innerHTML = pickHtml(); box.hidden = false;
+  requestAnimationFrame(pickFit);
+}
+// Увесь маршрут (обидва варіанти) цілком — у вільній частині карти над шторкою
+function pickFit() {
+  const box = $('routePick'); if (box.hidden || !plan.trip) return;
+  const tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
+  fitRoutes(plan.routes.map(r => r.coords), top, bottom);
+}
+function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
+function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
+function pickClick(e) {
+  const c = e.target.closest('[data-alt]'); if (c) { selectAlt(+c.dataset.alt); return; }
+  const b = e.target.closest('[data-rp]'); if (!b || !plan.trip) return;
+  const k = b.dataset.rp;
+  if (k === 'zin' || k === 'zout') { zoomBy(k === 'zin' ? 1 : -1); return; }
+  if (k === 'fit') { pickFit(); return; }
+  if (k === 'go') { pickHide(); goTrip(plan.trip); }
+  else if (k === 'save') { const tr = plan.trip; if (tr.route) delete tr.route.alts; saveTrip(tr); toast(t('saved'), 'green', 3000); pickCancel(); }
+  else if (k === 'info') { pickHide(); openPanel('trip'); }
+  else if (k === 'x') pickCancel();
 }
 function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
 function planSumHtml() {
@@ -455,8 +488,7 @@ function planSumHtml() {
     : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
   return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
-    ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}
-    ${showersRouteHtml(r, indexOfRoute(r), 0)}`;
+    ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
 }
 function showSugg(k, list, head) {
   const box = $('sg_' + k); if (!box) return;
@@ -494,12 +526,13 @@ async function doBuild() {
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
     trip.costing = S.vehicle === 'auto' ? 'auto' : 'truck';
-    const r = await buildRoute(trip, { alternates: 2 });
-    plan.routes = [r, ...(r.alts || [])].slice(0, 3); plan.sel = 0;
+    const r = await buildRoute(trip, { alternates: 1 });
+    plan.routes = [r, ...(r.alts || [])].slice(0, 2); plan.sel = 0;          // два варіанти, як у BlindDriver
     for (const x of plan.routes) delete x.alts;
     trip.route = r;
-    plan.trip = trip; previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
+    plan.trip = trip; mapM.previewPoints(trip); previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
     loadRegions(trip);
+    plan.busy = false; closePanel(); pickShow(); return;
   } catch (e) {
     plan.err = (e.code ? t('routeFail') : t('netErr')) + ' ' + (e.message || '');
     log('warn', 'маршрут: ' + e.message);
@@ -507,6 +540,7 @@ async function doBuild() {
   plan.busy = false; refresh('trip');
 }
 async function goTrip(trip, opts = {}) {
+  plan.going = true; pickHide();
   if (trip.route) delete trip.route.alts;
   previewAlts(null); plan.routes = []; plan.sel = 0;
   saveTrip(trip); places.remember(trip.b);
@@ -518,6 +552,7 @@ async function goTrip(trip, opts = {}) {
   setRouteContext(trip.regions, trip.towns);
   setFollow(true);
   plan.trip = null; plan.a = plan.v = plan.b = null;
+  plan.going = false;
   if (!trip.regions || !trip.regions.length) loadRegions(trip);
   if (S.offline && P.online() && !offlineActive()) runOffline(trip.route);
   pollAir(); pollTelegram(true);
@@ -541,7 +576,7 @@ function tripClicks(e) {
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') { const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); } stopTrip(); previewRoute(null); setRouteContext([], []); openPanel('trip'); }
-  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
+  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
     if (pos.lat == null) { toast(t('gpsWait')); return; }
@@ -660,7 +695,7 @@ function onMapPick(p) {
   }
   showPick(p);
   const box = $('pick'); box.hidden = false;
-  const pts = g.active ? '' : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
+  const pts = g.active ? '' : `<button class="btn" data-k="a">А</button><button class="btn" data-k="v">Б · ${t('via')}</button><button class="btn" data-k="b">С</button>`;
   box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
     ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
     <div class="row"><button class="btn sm" data-k="shower">${ICON.shower}${t('showerMarkAction')}</button></div>`;
@@ -683,7 +718,7 @@ function onMarkTap(id) {
   const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, m)) + ' ' + t('fromYou') : '';
   const box = $('pick'); box.hidden = false; showPick(null);
   const btns = g.active ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
-    : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
+    : `<button class="btn" data-k="a">А</button><button class="btn" data-k="v">Б · ${t('via')}</button><button class="btn" data-k="b">С</button>`;
   box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:#06b6d4"></span><div class="grow"><div class="t">${esc(m.name || t('showerMineTitle'))}</div>
     <div class="muted">${t('showerMineShort')} · ${new Date(m.t).toLocaleDateString('uk-UA')}${dist}</div></div></div>
     <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
@@ -743,7 +778,7 @@ function onStopTap(x) {
   const box = $('pick'); box.hidden = false; showPick(null);
   const btns = ty === 'c' ? '' : g.active
     ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
-    : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
+    : `<button class="btn" data-k="a">А</button><button class="btn" data-k="v">Б · ${t('via')}</button><button class="btn" data-k="b">С</button>`;
   const mine = showers.myShowerAt({ lat, lon }, 60);
   const shBtn = ty === 'c' ? '' : `<div class="row"><button class="btn sm${mine ? ' sh-on' : ''}" data-k="shower">${ICON.shower}${mine ? t('showerMine') : t('showerMarkAction')}</button></div>`;
   box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER || mine ? ';border-color:#06b6d4' : ''}"></span><div class="grow"><div class="t">${esc(title)}</div>
@@ -856,6 +891,7 @@ definePanel('chat', {
 export function initUI() {
   applyGlass(); staticLabels(); layoutVars(); hud(); stripUpdate();
   window.addEventListener('resize', layoutVars);
+  bus.on('layout', () => requestAnimationFrame(layoutVars));
   setInterval(stripUpdate, 10000);                       // відстань до події в шторці зменшується, поки їдемо
   setInterval(() => { hud(); if (currentPanel() === 'trip' && g.active) refresh('trip'); }, 1000);
   bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
@@ -869,6 +905,10 @@ export function initUI() {
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
+  $('routePick').onclick = pickClick;
+  // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
+  bus.on('panel', name => { if (name) { if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
+  bus.on('trip', () => { if (g.active) pickHide(); });
   bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
   bus.on('stopTap', onStopTap);
   bus.on('markTap', onMarkTap);
@@ -903,6 +943,7 @@ export function initUI() {
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
     if (!$('quick').hidden) { quickOpen(false); return true; }
+    if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
     if (currentPanel()) { closePanel(); return true; }
     return false;

@@ -198,5 +198,7 @@ export const canReloadUi = () => !!(N && typeof N.reloadUi === 'function');
 export function reloadUi() { if (N && typeof N.reloadUi === 'function') { try { N.reloadUi(); return true; } catch (_) {} } return false; }
 export function applyWebUpdate() { if (N) { try { N.applyWebUpdate(); return true; } catch (_) {} } return false; }
 export function installApk() { if (N) { try { N.installApk(); return true; } catch (_) {} } return false; }
+/** Запасний шлях оновлення — reis.apk браузером (оболонка з 1.1.1; старіші й так відкривають браузер в installApk). */
+export function apkInBrowser() { if (N) { try { if (typeof N.apkInBrowser === 'function') N.apkInBrowser(); else N.installApk(); return true; } catch (_) {} } return false; }
 export function nativeReady() { if (N) { try { N.ready(); } catch (_) {} } }
 export const online = () => navigator.onLine !== false;

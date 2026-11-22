@@ -289,7 +289,12 @@ const relRank = (i, r) => r.tier === 'far' ? 1.5 : RANK[i.level] || 0;
 // Головне (тут і попереду) та інше (відсіяне, позаду, далеко) — для шторки й панелі стрічки
 export function feedLists(now = Date.now()) {
   const main = [], rest = [];
-  for (const i of feed.items) { const r = relevance(i, now); (r.show ? main : rest).push([i, r]); }
+  const airNew = {};                                          // тривога області — одна, найсвіжіша (після перезапусків не множиться)
+  for (const i of feed.items) if (i.src === 'air' && i.region && (!airNew[i.region] || airNew[i.region].time < i.time)) airNew[i.region] = i;
+  for (const i of feed.items) {
+    const r = i.src === 'air' && airNew[i.region] !== i ? { show: false, tier: 'old' } : relevance(i, now);
+    (r.show ? main : rest).push([i, r]);
+  }
   main.sort((a, b) => (relRank(b[0], b[1]) - relRank(a[0], a[1])) || ((a[1].ahead ?? 5e4) - (b[1].ahead ?? 5e4)) || (b[0].time - a[0].time));
   rest.sort((a, b) => b[0].time - a[0].time);
   return { main, rest };
@@ -525,6 +530,7 @@ function airCheck() {
     const on = feed.air[z.id];
     if (on && !airSaid[z.id]) {
       airSaid[z.id] = true;
+      if (feed.items.some(i => i.src === 'air' && i.region === z.id && i.level === 'yellow' && now - i.time < 12 * 3600e3 && !feed.items.some(j => j.src === 'air' && j.region === z.id && j.level === 'green' && j.time > i.time))) continue;   // та сама тривога, застосунок перезапускали
       add({ src: 'air', level: 'yellow', region: z.id, key: 'air:' + z.id + ':' + Math.floor(now / 6e5), text: t('airOn', oblastName(z.id)) + (on.part ? ' ' + t('airPart') : '') });
     }
   }

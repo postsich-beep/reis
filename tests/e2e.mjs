@@ -143,7 +143,7 @@ async function newPage(native, opts = {}) {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
     window.ReisNative = {
-      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
+      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, nativeRev: 2 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
       speak(text, lang, rate, id) { window.__spoken.push(text); cb('tts', { id, state: 'done' }); }, stopSpeak() {}, listen() { cb('stt', { state: 'final', text: 'Що попереду на дорозі?' }); }, stopListen() {},
       http(id, method, url) {
         let status = 200, body = '';
@@ -154,13 +154,25 @@ async function newPage(native, opts = {}) {
         cb('http', { id, status, body });
       },
       offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
-      offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {},
-      keepAwake(on) { window.__nativeCalls.push('keepAwake:' + on); }, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}, reloadUi() { window.__nativeCalls.push('reloadUi'); }
+      offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {}, apkInBrowser() { window.__nativeCalls.push('apkInBrowser'); },
+      keepAwake(on) { window.__nativeCalls.push('keepAwake:' + on); }, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() { window.__nativeCalls.push('checkUpdate'); }, applyWebUpdate() { window.__nativeCalls.push('applyWebUpdate'); }, installApk() { window.__nativeCalls.push('installApk'); }, reloadUi() { window.__nativeCalls.push('reloadUi'); }
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
   await page.goto(BASE);
   await page.waitForFunction(() => window.__app && document.getElementById('boot') === null, null, { timeout: 15000 });
   return { page, ctx, errors };
+}
+// Вибір маршруту: чи весь маршрут (обидва варіанти) у вільній частині карти — між верхньою плашкою і шторкою, не під кнопками масштабу
+function pickWhole(page) {
+  return page.evaluate(() => {
+    const m = window.__app.map.map, R = el => el && !el.hidden ? el.getBoundingClientRect() : null;
+    const box = R(document.getElementById('routePick')), z = R(document.querySelector('#routePick .rp-zoom')), tp = R(document.getElementById('top')), cr = m.getContainer().getBoundingClientRect();
+    const inR = (r, x, y) => r && x >= r.left - 2 && x <= r.right + 2 && y >= r.top - 2 && y <= r.bottom + 2;
+    const lines = [m.getSource('route')._data, m.getSource('route-alts')._data].flatMap(d => d.features ? d.features : [d]).map(f => f.geometry.coordinates);
+    let out = 0, n = 0, under = 0;
+    for (const cs of lines) for (let i = 0; i < cs.length; i += 10) { const p = m.project(cs[i]), x = cr.left + p.x, y = cr.top + p.y; n++;
+      if (x < 0 || x > innerWidth || y < 0 || y > innerHeight || inR(box, x, y) || inR(tp, x, y)) out++; else if (inR(z, x, y)) under++; }
+    return { n, out, under, zoom: Math.round(m.getZoom() * 100) / 100, head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim() }; });
 }
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name + '.png') }); };
 const app = (page, fn, arg) => page.evaluate(fn, arg);
@@ -230,7 +242,8 @@ if (run('1')) try {
   const shm = await app(page, async () => { const d = await window.__app.map.map.getSource('marks').getData(); return { n: window.__app.showers.myShowers().length, f: d.features.length, all: window.__app.showers.allShowers().length }; });
   ok('позначка душу збережена й намальована на карті; усього душів: OKKO, окремий душ і позначка', shm.n === 1 && shm.f === 1 && shm.all === 3, JSON.stringify(shm));
   await page.click('#tabs button[data-panel="trip"]');
-  ok('«Рейс» без маршруту: найближчий душ', /Найближчий душ/.test(await page.textContent('#panelBody')) && /ваша позначка/.test(await page.textContent('#panelBody')));
+  { const pb = await app(page, () => ({ text: document.getElementById('panelBody').textContent, tags: [...document.querySelectorAll('#panelBody .field .tag')].map(x => x.textContent).join(''), ph: [...document.querySelectorAll('#panelBody .field input')].map(x => x.placeholder) }));
+    ok('«Маршрут»: лише три точки А (звідки), Б (через), С (куди) — без душів і зайвого', pb.tags === 'АБС' && /Звідки/.test(pb.ph[0]) && /Через/.test(pb.ph[1]) && /Куди/.test(pb.ph[2]) && !/душ/i.test(pb.text), JSON.stringify({ tags: pb.tags, ph: pb.ph, text: pb.text.slice(0, 120) })); }
   await shot(page, '01b-shower');
   await page.click('#panelClose');
   // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
@@ -304,7 +317,36 @@ if (run('1')) try {
   await page.fill('#in_a', 'Харків'); await page.waitForSelector('#sg_a button', { timeout: 5000 }); await page.click('#sg_a button');
   await page.fill('#in_b', 'Полтава'); await page.waitForSelector('#sg_b button', { timeout: 5000 }); await page.click('#sg_b button');
   await page.click('[data-act="build"]');
-  await page.waitForSelector('[data-act="go"]', { timeout: 10000 });
+  // як у BlindDriver: панель ховається, зверху карта з обома варіантами, знизу дві карточки й кнопки
+  await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(900);
+  const rp = await app(page, () => { const m = window.__app.map.map, b = m.getBounds(), box = document.getElementById('routePick').getBoundingClientRect();
+    const g = window.__app.guide, inV = (lat, lon) => { const p = m.project([lon, lat]); return b.contains([lon, lat]) && p.y < box.top; };
+    const pr = document.getElementById('panel').hidden, cards = [...document.querySelectorAll('#routePick .alt')].map(x => x.textContent.replace(/\s+/g, ' ').trim());
+    const alts = m.getSource('route-alts')._data, mainD = m.getSource('route')._data;
+    const altC = (alts.features || [])[0] ? alts.features[0].geometry.coordinates : [], mid = altC[Math.floor(altC.length / 2)] || [0, 0];
+    return { panelHidden: pr, cards, altMidVisible: inV(mid[1], mid[0]), sheetTop: Math.round(box.top), H: innerHeight }; });
+  ok('вибір варіанта: панель сховано, шторка з двома карточками внизу', rp.panelHidden && rp.cards.length === 2 && /М-03/.test(rp.cards[0]) && /Н-31/.test(rp.cards[1]), JSON.stringify(rp));
+  ok('обидва варіанти видно на карті над шторкою (сірий — посередині видно)', rp.altMidVisible, JSON.stringify(rp));
+  await shot(page, '02a-pick');
+  // увесь маршрут цілком: усі точки обох варіантів — у вільній частині карти (між верхньою плашкою і шторкою), не під кнопками масштабу
+  const whole = () => pickWhole(page);
+  const w1 = await whole();
+  ok('вибір: увесь маршрут видно цілком, без прокрутки (обидва варіанти між верхньою плашкою і шторкою)', w1.n > 20 && w1.out === 0 && w1.under === 0, JSON.stringify(w1));
+  ok('вибір: зверху шторки А → С (звідки й куди)', /А\s*Харків.*С\s*Полтава/.test(w1.head), w1.head);
+  await page.click('#routePick [data-rp="zin"]'); await sleep(500);
+  const w2 = await whole();
+  ok('вибір: «+» наближає карту', w2.zoom > w1.zoom + 0.5, `${w1.zoom} → ${w2.zoom}`);
+  await page.click('#routePick [data-rp="zout"]'); await page.click('#routePick [data-rp="zout"]'); await sleep(500);
+  ok('вибір: «−» віддаляє', (await whole()).zoom < w2.zoom - 1.2);
+  await page.click('#routePick [data-rp="fit"]'); await sleep(800);
+  const w3 = await whole();
+  ok('вибір: кнопка «Увесь маршрут» повертає весь маршрут на екран', w3.out === 0 && Math.abs(w3.zoom - w1.zoom) < 0.2, JSON.stringify(w3));
+  await page.click('#routePick .alt[data-alt="1"]'); await sleep(700);
+  ok('дотик по другій карточці — він основний (синій), перший — сірий', await app(page, async () => document.querySelector('#routePick .alt.on').dataset.alt === '1' && (await window.__app.map.map.getSource('route-alts').getData()).features.map(f => f.properties.k).join() === '0'));
+  await shot(page, '02a-pick2');
+  await page.click('#routePick .alt[data-alt="0"]'); await sleep(500);
+  await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('[data-act="go"]', { timeout: 10000 });
+  ok('«Деталі» — повна панель маршруту, шторку вибору сховано', await app(page, () => document.getElementById('routePick').hidden));
   ok('маршрут побудовано і показано зведення', /26,8 км|27 км/.test(await page.textContent('#planSum')), (await page.textContent('#planSum')).slice(0, 80));
   await page.waitForFunction(() => document.querySelectorAll('#planSum .pill').length >= 2, null, { timeout: 30000 }).catch(() => {});
   ok('області на шляху визначено', (await page.$$eval('#planSum .pill', e => e.map(x => x.textContent))).join(',').includes('Полтавська'));
@@ -313,7 +355,7 @@ if (run('1')) try {
   const tk = await page.textContent('#panelBody');
   ok('план: частка доріг за категоріями (М-03 ≈ 75%)', /траси М і Н 7[45]%/.test(tk) && /місцеві й вулиці 2[56]%/.test(tk), (tk.match(/траси М і Н \d+%|місцеві й вулиці \d+%/g) || []).join(' '));
   ok('план: міст 20 т на маршруті — червоним, з вагою фури', /Міст до 20 т/.test(tk) && /ваша фура 40 т/.test(tk) && await page.$$eval('.hz-item.red', e => e.some(x => /Міст до 20 т/.test(x.textContent))));
-  ok('план: душ попереду — OKKO і окремий душ, з відстанню', /Душ попереду/.test(tk) && /OKKO/.test(tk) && /Душ для водіїв/.test(tk), (tk.match(/Душ попереду.{0,120}/) || [''])[0]);
+  ok('план: без переліку душів (зайве прибрано)', !/Душ попереду/.test(tk));
   ok('план: ґрунт ≈ 1,2 км', /Ґрунт або щебінь — 1,[12] км/.test(tk), (tk.match(/Ґрунт[^·]*?км/) || [''])[0]);
   ok('проїзд на вулиці навхрест і міст 55 т не вважаються проблемою', !/3,8 м/.test(tk) && !/55 т/.test(tk));
   const rmap = await app(page, async () => { const m = window.__app.map.map; const d = await m.getSource('route').getData(); const bad = await m.getSource('route-bad').getData();
@@ -323,7 +365,7 @@ if (run('1')) try {
   // варіанти маршруту карточками; вибір — сірий інший варіант на карті; повертаємось до першого
   const alts = await page.$$eval('#planSum .alt', e => e.map(x => x.textContent.replace(/\s+/g, ' ').trim()));
   ok('варіанти маршруту: 2 карточки — час, км, дороги; перший найшвидший', alts.length === 2 && /М-03/.test(alts[0]) && /найшвидший/.test(alts[0]) && /Н-31/.test(alts[1]), JSON.stringify(alts));
-  ok('запит маршруту просить запасні варіанти', routeReqs.some(q => q.alternates === 2));
+  ok('запит маршруту просить один запасний варіант (усього два)', routeReqs.some(q => q.alternates === 1));
   ok('на карті сірим — інший варіант', await app(page, async () => (await window.__app.map.map.getSource('route-alts').getData()).features.length === 1));
   await page.click('#planSum .alt[data-alt="1"]'); await sleep(700);
   const pick1 = await app(page, async () => ({ on: document.querySelector('#planSum .alt.on') && document.querySelector('#planSum .alt.on').dataset.alt, alts: (await window.__app.map.map.getSource('route-alts').getData()).features.map(f => f.properties.k) }));
@@ -332,10 +374,12 @@ if (run('1')) try {
   await page.click('#planSum .alt[data-alt="0"]'); await sleep(700);
   // фура / легкова
   ok('перемикач «Фура / Легкова»: за замовчуванням фура', await app(page, () => document.querySelector('.seg.veh .on').dataset.veh === 'truck'));
-  await page.click('.seg.veh [data-veh="auto"]'); await page.waitForSelector('[data-act="go"]', { timeout: 10000 }); await sleep(300);
+  await page.click('.seg.veh [data-veh="auto"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
   ok('легкова: маршрут без обмежень для фур (costing auto)', routeReqs[routeReqs.length - 1].costing === 'auto' && await app(page, () => window.__app.S.vehicle === 'auto'), routeReqs[routeReqs.length - 1].costing);
-  await page.click('.seg.veh [data-veh="truck"]'); await page.waitForSelector('[data-act="go"]', { timeout: 10000 }); await sleep(300);
+  await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('.seg.veh');
+  await page.click('.seg.veh [data-veh="truck"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
   ok('знову фура: профіль truck з обмежувачем 90', routeReqs[routeReqs.length - 1].costing === 'truck' && routeReqs[routeReqs.length - 1].costing_options.truck.top_speed === 90);
+  await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('[data-act="go"]');
   ok('після вибору підказки список не відкривається знову', await app(page, () => ['a', 'b'].every(k => document.getElementById('sg_' + k).hidden)));
   if (SHOTS) { await app(page, () => { const b = document.getElementById('panelBody'), h = [...b.querySelectorAll('.sec')].find(x => /фури/i.test(x.textContent)); if (h) b.scrollTop = h.offsetTop - 8; }); await sleep(200); await shot(page, '02b-truck');
     await app(page, () => { document.getElementById('panelBody').scrollTop = 0; }); }
@@ -574,7 +618,7 @@ if (run('2б')) try {
   // нова версія інтерфейсу приїхала посеред підміни — не перезавантажуємось самі
   await emitN('webUpdated', { ok: true, ver: 99 });
   await sleep(300);
-  ok('у зоні підміни інтерфейс не перезавантажується сам', await app(page, () => !window.__nativeCalls.includes('reloadUi') && /підміна GPS/.test(document.getElementById('toasts').textContent)));
+  ok('у зоні підміни інтерфейс не перезавантажується сам — лише плашка «готова, перезапустити»', await app(page, () => !window.__nativeCalls.includes('reloadUi') && !document.getElementById('updBar').hidden && /перезапустити/.test(document.getElementById('updGo').textContent)));
   ok('прохід перезапуску без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід перезапуску дійшов до кінця', false, String(e.message).split('\n')[0]); }
@@ -843,11 +887,11 @@ const layoutCheck = () => {
   const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
   for (const el of top) { const r = R(el); if (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1) out.push('за межами екрана: ' + nm(el) + ' [' + [r.left, r.top, r.right, r.bottom].map(Math.round) + ']'); }
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (inter(R(top[i]), R(top[j]))) out.push('накладаються: ' + nm(top[i]) + ' і ' + nm(top[j]));
-  for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button']) {
+  for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button', '#bottom > *', '#updBar > *']) {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#lostLine,#bAcceptGps')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#lostLine,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -880,6 +924,19 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     const trip = { id: 't-scr', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
       route: { coords, mans: [{ type: 1, ins: 'Рухайтесь по кільцю та поверніть у 1-й зʼїзд на вулицю Довгу-Предовгу Назву', street: '', streets: [], i0: 0, i1: turnIdx[1], len: 2000, time: 140 },
         { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Пушкінська', streets: [], i0: turnIdx[1], i1: n - 1, len: 24800, time: 1600 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+    // вибір маршруту на цьому екрані: увесь маршрут цілком, шторка й кнопки в межах екрана, нічого не перекрито
+    await page.click('#tabs button[data-panel="trip"]');
+    await page.fill('#in_a', 'Харків'); await page.waitForSelector('#sg_a button', { timeout: 5000 }); await page.click('#sg_a button');
+    await page.fill('#in_b', 'Полтава'); await page.waitForSelector('#sg_b button', { timeout: 5000 }); await page.click('#sg_b button');
+    await page.click('[data-act="build"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(1000);
+    const wp = await pickWhole(page), Lr = await app(page, () => { const out = [], b = document.getElementById('routePick').getBoundingClientRect();
+      if (b.top < 0 || b.bottom > innerHeight + 1 || b.right > innerWidth + 1) out.push('шторка за межами екрана');
+      for (const el of document.querySelectorAll('#routePick button')) { const r = el.getBoundingClientRect(), h = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+        if (r.top < 0 || r.bottom > innerHeight + 1 || r.left < 0 || r.right > innerWidth + 1) out.push('за екраном: ' + (el.dataset.rp || el.dataset.alt)); else if (!h || !(h === el || el.contains(h))) out.push('перекрита: ' + (el.dataset.rp || el.dataset.alt)); }
+      return out; });
+    ok(`${T}: вибір маршруту — увесь маршрут видно цілком, кнопки й карточки в межах екрана`, wp.out === 0 && wp.under === 0 && Lr.length === 0, JSON.stringify(wp) + ' ' + Lr.join('; '));
+    await shot(page, `a-${sc.n}-0-pick`);
+    await page.click('#routePick [data-rp="x"]'); await sleep(200);
     await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
     const p0 = coords[40];
     await emitN('loc', { prov: 'gps', lat: p0[0], lon: p0[1], acc: 5, spd: 24, brg: 270, t: Date.now() });
@@ -890,6 +947,12 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await app(page, () => { const c = document.getElementById('cam'); c.hidden = false; });
     const L1 = await app(page, layoutCheck);
     ok(`${T}: у дорозі без GPS нічого не накладається й не перекрите`, L1.length === 0, L1.join('; '));
+    // плашка оновлення внизу — теж нічого не перекриває
+    await emitN('update', { apk: { code: 250, name: '1.1.2.50' } }); await sleep(250);
+    const Lu = await app(page, layoutCheck), uv = await app(page, () => !document.getElementById('updBar').hidden);
+    ok(`${T}: плашка оновлення видна й нічого не перекриває`, uv && Lu.length === 0, Lu.join('; '));
+    await shot(page, `a-${sc.n}-0-update`);
+    await page.click('#updX'); await sleep(150);
     if (sc.st) {
       const ins = await app(page, () => { const R = s => document.querySelector(s).getBoundingClientRect(); return { top: R('#top').top, rail: R('#rail').top, tabs: R('#tabs').bottom, H: innerHeight }; });
       ok(`${T}: плашки не заходять під виріз угорі й під смугу жестів унизу`, ins.top >= sc.st && ins.rail >= sc.st && ins.tabs <= ins.H - sc.sb + 1, JSON.stringify(ins));
@@ -986,6 +1049,139 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await ctx.close();
   } catch (e) { ok(`екран ${sc.title}: перевірка дійшла до кінця`, false, String(e.message).split('\n').slice(0, 12).join(' / ').slice(0, 900)); }
 }
+
+/* ============ прохід 7: стрілка в дорозі — завжди посередині, на одній висоті, дивиться вгору (на всіх екранах) ============ */
+// Їдемо маршрутом (GPS раз на секунду, 90 км/год) через поворот ліворуч на 90°, потім 3D, потім без GPS (розрахунок),
+// потім зсунули карту і натиснули «Моє місце». Кожні ~0,1 с міряємо: де стрілка відносно своєї точки, як вона повернута
+// і куди на екрані йде лінія маршруту попереду.
+const camDrive = (page, o) => app(page, async o => {
+  const A = window.__app, m = A.map.map, R = A.guide.g.idx, out = [];
+  let d = o.d0, nextFix = 0, k = 0, lastFix = 0; const t0 = performance.now();
+  while (performance.now() - t0 < o.ms) {
+    const now = performance.now();
+    // фікси GPS — нерівно, як на телефоні (Android віддає їх пачками): 0,6 с, 1,4 с, 0,6 с…
+    if (o.v && now >= nextFix) { if (lastFix) d += o.v * (now - lastFix) / 1000; lastFix = now; const p = R.at(d); window.__reis('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: o.v, brg: p.brg, t: Date.now() }); nextFix = now + (o.jitter ? (k++ % 2 ? 1400 : 600) : 1000); }
+    await new Promise(r => setTimeout(r, 90));
+    if (performance.now() - t0 < (o.warm || 1500)) continue;
+    const el = document.querySelector('.puck'); if (!el) continue;
+    const c = m.getContainer().getBoundingClientRect(), r = el.getBoundingClientRect(), anc = A.map.anchorPoint(), pd = m.getPadding();
+    // точка, куди камера зараз ставить стрілку (якщо нижня плашка змінила висоту — точка плавно переїжджає за ~0,5 с)
+    const a = { x: c.width / 2 + (pd.left - pd.right) / 2, y: (c.height + pd.top - pd.bottom) / 2 }, drift = Math.round(Math.abs(a.y - anc.y));
+    const rz = /rotateZ\(([-\d.e]+)deg\)/.exec(el.style.transform || ''), rot = rz ? (((+rz[1]) % 360) + 540) % 360 - 180 : 999;
+    const cs = A.map.camState.cur, ll = m.project([cs.lon, cs.lat]), rd = A.nav.pos.rd;
+    const ah = R.at(Math.min(R.total, (A.map.camState.dd ?? rd) + 80)), pa = m.project([ah.lon, ah.lat]);
+    const hit = document.elementFromPoint(c.left + a.x, c.top + a.y);
+    const S0 = A.map.camState;
+    out.push({ drift, dd: S0.dd, ft: S0.ft, x: Math.round(r.left + r.width / 2 - c.left - a.x), y: Math.round(r.top + r.height / 2 - c.top - a.y), rot: Math.round(rot * 10) / 10,
+      ux: Math.round(pa.x - ll.x), uy: Math.round(pa.y - ll.y), turn: o.turns.some(t => Math.abs(t - rd) < 150), f: A.map.view.follow, mode: A.nav.pos.mode, rd: Math.round(rd),
+      cov: hit && !hit.closest('.puck') && !hit.classList.contains('maplibregl-canvas') ? (hit.id || String(hit.className).split(' ')[0] || hit.tagName) : '' });
+  }
+  return { out, d };
+}, o);
+function camJudge(T, what, out) {
+  const fol = out.filter(s => s.f);
+  const worst = k => fol.reduce((w, s) => Math.abs(s[k]) > Math.abs(w[k]) ? s : w, { [k]: 0 });
+  const wx = worst('x'), wy = worst('y'), wr = worst('rot');
+  ok(`${T}: ${what} — стрілка стоїть у своїй точці посередині (зсув ≤ 3 px по ширині, ≤ 4 px по висоті)`, fol.length >= 10 && Math.abs(wx.x) <= 3 && Math.abs(wy.y) <= 4, `зразків ${fol.length}/${out.length}; найгірше x=${wx.x} (rd ${wx.rd}), y=${wy.y} (rd ${wy.rd})`);
+  ok(`${T}: ${what} — стрілка дивиться строго вгору`, Math.abs(wr.rot) <= 1.5, `найгірше ${wr.rot}° (rd ${wr.rd})`);
+  const str = fol.filter(s => !s.turn), bad = str.filter(s => !(s.uy < -8 && Math.abs(s.ux) <= Math.max(3, 0.2 * Math.abs(s.uy))));
+  ok(`${T}: ${what} — на прямій маршрут попереду йде вгору, а не вбік`, str.length >= 5 && bad.length === 0, `прямих ${str.length}, вбік ${bad.length}` + (bad[0] ? ` (rd ${bad[0].rd}: ux=${bad[0].ux}, uy=${bad[0].uy})` : ''));
+  const cov = fol.filter(s => s.cov);
+  ok(`${T}: ${what} — стрілку нічого не закриває`, cov.length === 0, cov.slice(0, 3).map(s => s.cov).join(', '));
+  const last = fol.slice(-5);
+  ok(`${T}: ${what} — стрілка на своїй висоті (у нижній частині вільної карти)`, last.length && last.every(s => s.drift <= 2), last.map(s => s.drift).join(','));
+}
+// Плавність: швидкість стрілки на екрані (уздовж маршруту) між замірами рівна — без ривків, зупинок і кроків назад
+function camSmooth(T, what, out, v) {
+  const sp = [];
+  for (let i = 1; i < out.length; i++) { const a = out[i - 1], b = out[i]; if (a.dd == null || b.dd == null || !(b.ft > a.ft)) continue; sp.push({ v: (b.dd - a.dd) / (b.ft - a.ft) * 1000, back: b.dd - a.dd < -0.5, rd: b.rd }); }
+  const dev = sp.map(s => Math.abs(s.v - v)).sort((a, b) => a - b), p90 = dev[Math.floor(dev.length * 0.9)] || 0, mx = dev[dev.length - 1] || 0;
+  ok(`${T}: ${what} — стрілка їде плавно, без ривків (швидкість на екрані рівна, назад не смикається)`, sp.length >= 10 && !sp.some(s => s.back) && p90 <= 0.2 * v && mx <= 0.45 * v,
+    `замірів ${sp.length}, треба ${v} м/с; відхилення p90 ${p90.toFixed(1)}, макс ${mx.toFixed(1)}` + (sp.some(s => s.back) ? ', є крок назад' : ''));
+}
+if (run('7')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) {
+  try {
+    const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+    const T = 'стрілка, ' + sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    if (sc.st) await app(page, ([st, sb]) => { const r = document.documentElement.style; r.setProperty('--st', st + 'px'); r.setProperty('--sb', sb + 'px'); }, [sc.st, sc.sb]);
+    const n = coords.length;
+    const trip = { id: 't-cam', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+      route: { coords, mans: [{ type: 1, ins: 'Рухайтесь на захід', street: '', streets: [], i0: 0, i1: turnIdx[1], len: 2000, time: 140 },
+        { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Пушкінська', streets: [], i0: turnIdx[1], i1: turnIdx[2], len: 1500, time: 110 },
+        { type: 10, ins: 'Поверніть праворуч', street: '', streets: [], i0: turnIdx[2], i1: n - 1, len: 23300, time: 1500 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+    await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+    await app(page, () => { window.__app.S.view3d = false; window.__app.map.setFollow(true); });
+    const turns = [2000, 3500, 6000];
+    const r1 = await camDrive(page, { d0: 1650, v: 25, ms: 19000, turns, jitter: true });
+    await shot(page, `c-${sc.n}-2d`);
+    camJudge(T, '2D, GPS, поворот ліворуч', r1.out);
+    camSmooth(T, 'GPS пачками (0,6 / 1,4 с)', r1.out.slice(8), 25);
+    await app(page, () => { window.__app.S.view3d = true; window.__app.map.setFollow(true); });
+    const r2 = await camDrive(page, { d0: r1.d, v: 25, ms: 8000, turns });
+    await shot(page, `c-${sc.n}-3d`);
+    camJudge(T, '3D, GPS', r2.out);
+    const a3 = await app(page, () => { const a = window.__app.map.anchorPoint(); return { y: a.y, top: Math.round(a.top), bot: Math.round(a.bot), H: a.H, frac: Math.round((a.y - a.top) / (a.bot - a.top) * 100) / 100 }; });
+    ok(`${T}: точка стрілки — у нижній частині вільної карти (видно дорогу попереду)`, a3.frac >= 0.6 && a3.frac <= 0.8 && a3.bot - a3.y >= 60, JSON.stringify(a3));
+    await app(page, () => window.__app.nav.nudge(0));                // GPS зник — далі розрахунок уздовж маршруту
+    const r3 = await camDrive(page, { d0: 0, v: 0, ms: 6000, turns, warm: 1200 });
+    ok(`${T}: без GPS позначка рухається розрахунком`, r3.out.length && r3.out[r3.out.length - 1].mode === 'dr' && r3.out[r3.out.length - 1].rd - r3.out[0].rd > 60, JSON.stringify(r3.out.length ? [r3.out[0].rd, r3.out[r3.out.length - 1].rd, r3.out[r3.out.length - 1].mode] : []));
+    camJudge(T, 'без GPS (розрахунок)', r3.out);
+    { const v = await app(page, () => window.__app.nav.pos.spd); camSmooth(T, 'без GPS', r3.out.slice(4), Math.round(v * 10) / 10); }
+    await shot(page, `c-${sc.n}-dr`);
+    // зсунули карту пальцем, потім «Моє місце» — стрілка знову на своєму місці
+    const [cx, cy] = await app(page, () => { const a = window.__app.map.anchorPoint(), c = window.__app.map.map.getContainer().getBoundingClientRect(); return [Math.round(c.left + a.x + 30), Math.round(c.top + a.y - 90)]; });
+    await fingerDrag(page, cx, cy, -60, 70);
+    if (await app(page, () => window.__app.map.view.follow)) { await sleep(400); await fingerDrag(page, cx, cy, 60, 60); }
+    const off = await app(page, () => !window.__app.map.view.follow);
+    await page.click('#bCenter'); await sleep(700);
+    const r4 = await camDrive(page, { d0: 0, v: 0, ms: 2500, turns, warm: 300 });
+    ok(`${T}: зсунули карту — стеження вимкнулось`, off);
+    camJudge(T, 'після «Моє місце»', r4.out);
+    ok(`${T}: без помилок JS`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  } catch (e) { ok(`стрілка, ${sc.title}: перевірка дійшла до кінця`, false, String(e.message).split('\n').slice(0, 8).join(' / ').slice(0, 600)); }
+}
+
+/* ============ прохід 8: оновлення з плашки ============ */
+if (run('8')) try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const bar = () => app(page, () => ({ on: !document.getElementById('updBar').hidden, text: document.getElementById('updGo').textContent.trim(), calls: window.__nativeCalls.slice() }));
+  await sleep(300);
+  await emitN('update', { apk: { code: 250, name: '1.1.2.50' }, web: { ver: 99, name: '1.1.2' } }); await sleep(250);
+  let b = await bar();
+  ok('оновлення: інтерфейс завантажується сам, у фоні', b.calls.includes('applyWebUpdate'), b.calls.join());
+  ok('оновлення: плашка «Нова версія 1.1.2 — оновити»', b.on && /Нова версія 1\.1\.2 — оновити/.test(b.text), JSON.stringify(b.text));
+  await shot(page, '16-update');
+  await page.click('#updGo'); await sleep(150); b = await bar();
+  ok('торкнулись плашки — застосунок сам завантажує APK (без браузера)', b.calls.includes('installApk') && !b.calls.includes('apkInBrowser') && /Завантажую оновлення/.test(b.text), b.text);
+  await emitN('apk', { state: 'dl', pct: 46 }); await sleep(120); b = await bar();
+  ok('видно, скільки завантажено', /46%/.test(b.text) && await app(page, () => document.getElementById('updBar').classList.contains('busy')), b.text);
+  await shot(page, '16b-update-dl');
+  await emitN('apk', { state: 'perm' }); await sleep(120); b = await bar();
+  ok('перший раз — підказка дозволити встановлення з цього джерела', /Дозвольте/.test(b.text), b.text);
+  await emitN('apk', { state: 'install' }); await sleep(120);
+  const n1 = (await bar()).calls.filter(c => c === 'installApk').length;
+  await page.click('#updGo'); await sleep(120); b = await bar();
+  ok('вікно встановлення не відкрилось — торкнулись ще раз, пробуємо знову', b.calls.filter(c => c === 'installApk').length === n1 + 1);
+  await emitN('apk', { state: 'error', error: 'HTTP 404' }); await sleep(120); b = await bar();
+  ok('не завантажилось — пропонує браузер', /браузером/.test(b.text), b.text);
+  await page.click('#updGo'); await sleep(120); b = await bar();
+  ok('…і відкриває завантаження браузером', b.calls.includes('apkInBrowser'));
+  await page.click('#updX'); await sleep(120);
+  ok('✕ ховає плашку', !(await bar()).on);
+  await emitN('update', { apk: { code: 250, name: '1.1.2.50' } }); await sleep(150);
+  ok('ту саму версію після ✕ не показує знову одразу', !(await bar()).on);
+  // нова версія лише інтерфейсу: завантажилась — плашка «готова», а без рейсу перезапуск сам
+  await emitN('update', { web: { ver: 99, name: '1.1.2' } }); await sleep(150);
+  await emitN('webUpdated', { ok: true, ver: 99 }); await sleep(200); b = await bar();
+  ok('інтерфейс завантажено — плашка «Нова версія 1.1.2 готова — перезапустити»', b.on && /готова — перезапустити/.test(b.text), b.text);
+  await sleep(1500);
+  ok('без рейсу перезапускається сам', (await bar()).calls.includes('reloadUi'));
+  ok('перевірка оновлень при запуску й далі кожні 30 хв (є виклик перевірки)', await app(page, () => typeof window.__app === 'object'));
+  ok('прохід «оновлення» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «оновлення» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
 if (run('3')) try {

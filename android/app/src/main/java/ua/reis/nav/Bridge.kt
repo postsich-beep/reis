@@ -60,7 +60,7 @@ class Bridge(private val act: MainActivity) {
         .put("native", true).put("app", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE)
         .put("web", WebStore.activeVersion).put("bundledWeb", WebStore.bundledVersion)
         .put("sdk", Build.VERSION.SDK_INT).put("model", Build.MANUFACTURER + " " + Build.MODEL)
-        .put("repo", BuildConfig.UPDATE_REPO).toString()
+        .put("repo", BuildConfig.UPDATE_REPO).put("nativeRev", BuildConfig.NATIVE_REV).put("inst", true).toString()
 
     @JavascriptInterface
     fun ready() { act.onJsReady() }
@@ -365,10 +365,14 @@ class Bridge(private val act: MainActivity) {
                 if (c.responseCode != 200) throw IOException("HTTP " + c.responseCode)
                 val v = JSONObject(String(readLimited(c, 65536), Charsets.UTF_8))
                 update = v
-                if (v.optInt("apkCode", 0) > BuildConfig.VERSION_CODE)
+                // Новий APK пропонуємо, лише коли змінилася сама оболонка (native); інтерфейс приходить окремо, без перевстановлення
+                val apkNewer = v.optInt("apkCode", 0) > BuildConfig.VERSION_CODE
+                val needApk = if (v.has("native")) v.optInt("native", 0) > BuildConfig.NATIVE_REV else apkNewer
+                if (apkNewer && needApk)
                     o.put("apk", JSONObject().put("code", v.optInt("apkCode")).put("name", v.optString("apkName")))
                 if (v.optInt("web", 0) > WebStore.activeVersion)
-                    o.put("web", JSONObject().put("ver", v.optInt("web")))
+                    o.put("web", JSONObject().put("ver", v.optInt("web")).put("name", v.optString("name")))
+                if (!apkNewer) try { apkFile().delete() } catch (_: Exception) {}
             } catch (e: Exception) {
                 o.put("error", e.message ?: e.javaClass.simpleName)
             } finally {
@@ -401,10 +405,92 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface
     fun reloadUi() = act.reloadUi()
 
+    /* ---------- оновлення застосунку з плашки: завантажуємо reis.apk у телефон і відкриваємо системне встановлення ---------- */
+    private fun apkFile(): File = File(File(act.cacheDir, "upd").apply { mkdirs() }, "reis.apk")
+    @Volatile private var apkBusy = false
+
+    /** Завантажений файл — справді наш застосунок і новіший за встановлений. */
+    private fun apkReady(f: File): Boolean {
+        if (!f.exists() || f.length() < 100_000) return false
+        @Suppress("DEPRECATION")
+        val pi = act.packageManager.getPackageArchiveInfo(f.path, 0) ?: return false
+        @Suppress("DEPRECATION")
+        val code = if (Build.VERSION.SDK_INT >= 28) pi.longVersionCode else pi.versionCode.toLong()
+        return pi.packageName == act.packageName && code > BuildConfig.VERSION_CODE.toLong()
+    }
+
     @JavascriptInterface
     fun installApk() {
+        if (BuildConfig.UPDATE_REPO.isEmpty() || apkBusy) return
+        apkBusy = true
+        io.execute {
+            try {
+                val f = apkFile()
+                if (!apkReady(f)) {
+                    val tmp = File(f.parentFile, "reis.apk.part")
+                    var c: HttpURLConnection? = null
+                    try {
+                        c = open(releaseUrl("reis.apk"), 30000)
+                        if (c.responseCode != 200) throw IOException("HTTP " + c.responseCode)
+                        val total = c.contentLengthLong
+                        var got = 0L
+                        var lastPct = -1
+                        emit("apk", JSONObject().put("state", "dl").put("pct", 0))
+                        c.inputStream.use { inp ->
+                            tmp.outputStream().use { out ->
+                                val buf = ByteArray(65536)
+                                while (true) {
+                                    val n = inp.read(buf)
+                                    if (n < 0) break
+                                    out.write(buf, 0, n)
+                                    got += n
+                                    val pct = if (total > 0) (got * 100 / total).toInt() else -1
+                                    if (pct >= lastPct + 2 || (pct == 100 && lastPct != 100)) {
+                                        lastPct = pct
+                                        emit("apk", JSONObject().put("state", "dl").put("pct", pct).put("got", got))
+                                    }
+                                }
+                            }
+                        }
+                    } finally {
+                        try { c?.disconnect() } catch (_: Exception) {}
+                    }
+                    if (f.exists()) f.delete()
+                    if (!tmp.renameTo(f)) throw IOException("rename")
+                    if (!apkReady(f)) { f.delete(); throw IOException("bad apk") }
+                }
+                main.post { launchInstall() }
+            } catch (e: Exception) {
+                emit("apk", JSONObject().put("state", "error").put("error", e.message ?: e.javaClass.simpleName))
+            } finally {
+                apkBusy = false
+            }
+        }
+    }
+
+    private fun launchInstall() {
+        try {
+            if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
+                // перший раз Android просить дозволити «встановлення з цього джерела» — відкриваємо цей перемикач
+                emit("apk", JSONObject().put("state", "perm"))
+                act.startActivity(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:" + act.packageName)))
+                return
+            }
+            val uri = Uri.parse("content://" + act.packageName + ".apk/reis.apk")
+            val i = Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
+            act.startActivity(i)
+            emit("apk", JSONObject().put("state", "install"))
+        } catch (e: Exception) {
+            emit("apk", JSONObject().put("state", "error").put("error", e.message ?: e.javaClass.simpleName))
+        }
+    }
+
+    /** Запасний шлях: завантажити reis.apk браузером (як раніше). */
+    @JavascriptInterface
+    fun apkInBrowser() {
         if (BuildConfig.UPDATE_REPO.isEmpty()) return
-        openUrl(releaseUrl("reis.apk"))        // браузер завантажить файл, Android запропонує встановити поверх
+        openUrl(releaseUrl("reis.apk"))
     }
 
     fun shutdown() {

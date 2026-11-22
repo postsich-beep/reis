@@ -7,6 +7,8 @@ plugins {
 val vCode = (project.findProperty("vCode") as String?)?.toIntOrNull() ?: 1
 val vName = (project.findProperty("vName") as String?) ?: "1.0.0"
 val updateRepo = (project.findProperty("updateRepo") as String?) ?: ""
+// Номер «рідної» частини (Kotlin): росте лише тоді, коли міняється сама оболонка — тоді плашка пропонує новий APK
+val nativeRev = (project.findProperty("nativeRev") as String?)?.toIntOrNull() ?: 0
 
 android {
     namespace = "ua.reis.nav"
@@ -19,6 +21,7 @@ android {
         versionCode = vCode
         versionName = vName
         buildConfigField("String", "UPDATE_REPO", "\"$updateRepo\"")
+        buildConfigField("int", "NATIVE_REV", "$nativeRev")
     }
     buildFeatures { buildConfig = true }
 

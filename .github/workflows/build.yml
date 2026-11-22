@@ -33,7 +33,10 @@ jobs:
         run: |
           WEB=$(python3 -c "import json;print(json.load(open('web/version.json'))['web'])")
           NAME=$(python3 -c "import json;print(json.load(open('web/version.json'))['name'])")
+          NATIVE=$(python3 -c "import json;print(json.load(open('web/version.json')).get('native',0))")
           echo "web=$WEB" >> "$GITHUB_OUTPUT"
+          echo "native=$NATIVE" >> "$GITHUB_OUTPUT"
+          echo "vname=$NAME" >> "$GITHUB_OUTPUT"
           echo "code=$((100 + GITHUB_RUN_NUMBER))" >> "$GITHUB_OUTPUT"
           echo "name=${NAME}.${GITHUB_RUN_NUMBER}" >> "$GITHUB_OUTPUT"
 
@@ -61,13 +64,14 @@ jobs:
           -PvCode=${{ steps.v.outputs.code }}
           -PvName=${{ steps.v.outputs.name }}
           -PupdateRepo=${{ github.repository }}
+          -PnativeRev=${{ steps.v.outputs.native }}
 
       - name: Файли релізу
         run: |
           mkdir -p out
           cp android/app/build/outputs/apk/release/app-release.apk out/reis.apk
           (cd web && zip -qr ../out/web.zip .)
-          echo "{\"apkCode\": ${{ steps.v.outputs.code }}, \"apkName\": \"${{ steps.v.outputs.name }}\", \"web\": ${{ steps.v.outputs.web }}}" > out/version.json
+          echo "{\"apkCode\": ${{ steps.v.outputs.code }}, \"apkName\": \"${{ steps.v.outputs.name }}\", \"web\": ${{ steps.v.outputs.web }}, \"native\": ${{ steps.v.outputs.native }}, \"name\": \"${{ steps.v.outputs.vname }}\"}" > out/version.json
           cat out/version.json
           ls -la out
 

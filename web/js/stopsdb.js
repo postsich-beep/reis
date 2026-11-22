@@ -48,7 +48,7 @@ export function score(r) {
 // Назва мережі АЗС для підпису на карті: одна мережа — одна назва (ОККО/OKKO, Сокар/Socar…).
 // Лише назви на наших кольорових плашках: фірмові логотипи — чужі знаки, їх не малюємо.
 const BRANDS = [
-  [/^(окко|okko)/i, 'OKKO'], [/^wog/i, 'WOG'], [/^(upg|юпіджі)/i, 'UPG'], [/^(укрнафта|ukrnafta)/i, 'Укрнафта'], [/^(брсм|brsm)/i, 'БРСМ'],
+  [/^(окко|okko)/i, 'OKKO'], [/^(wog|вог)\b/i, 'WOG'], [/^(upg|юпідж)/i, 'UPG'], [/^(укрнафта|ukrnafta)/i, 'Укрнафта'], [/^(брсм|brsm)/i, 'БРСМ'],
   [/^amic/i, 'AMIC'], [/^(socar|сокар)/i, 'SOCAR'], [/^shell/i, 'Shell'], [/^(кло|klo)$/i, 'KLO'], [/^motto/i, 'Motto'], [/^chipo/i, 'Chipo'],
   [/^(marshal|маршал)/i, 'Marshal'], [/^(атан|atan)/i, 'ATAN'], [/^avantage\s?7/i, 'Avantage 7'], [/^(паралл?ель|parallel)/i, 'Параллель'],
   [/^(tes|тэс|тес)$/i, 'TES'], [/^(glusco|глуско)/i, 'Glusco'], [/^укр-?петроль/i, 'Укр-Петроль'], [/^sun oil/i, 'Sun Oil'], [/^brent/i, 'Brent Oil'],

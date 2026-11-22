@@ -355,7 +355,7 @@ definePanel('diag', {
 });
 
 /* =====================  ПРО ЗАСТОСУНОК І ОНОВЛЕННЯ  ===================== */
-const upd = { state: 'idle', apk: null, web: null, error: '' };
+export const upd = { state: 'idle', apk: null, web: null, error: '', webReady: false, webName: '', apkSt: '', pct: -1, checkedAt: 0 };
 function aboutHtml() {
   const info = P.appInfo();
   let u = '';
@@ -377,7 +377,7 @@ definePanel('about', {
     body.onclick = e => {
       const b = e.target.closest('button'); if (!b) return;
       if (b.dataset.act === 'check') { upd.state = 'checking'; refresh('about'); if (!P.checkUpdate()) { upd.state = 'error'; upd.error = ''; refresh('about'); } }
-      else if (b.dataset.act === 'apk') P.installApk();
+      else if (b.dataset.act === 'apk') updApk();
     };
   }
 });
@@ -390,22 +390,78 @@ export function initLab() {
   bus.on('pos', () => refresh('gps'));
   bus.on('log', () => refresh('diag'));
   bus.on('native:update', d => {
-    upd.state = d.error ? 'error' : 'done'; upd.error = d.error || ''; upd.apk = d.apk || null; upd.web = d.web || null;
+    upd.state = d.error ? 'error' : 'done'; upd.error = d.error || ''; upd.checkedAt = Date.now();
+    if (!d.error) { upd.apk = d.apk || null; if (!upd.apk) upd.apkSt = ''; }
     refresh('about');
-    if (d.web) { P.applyWebUpdate(); }
-    if (d.apk) toast(t('updApk', d.apk.name), 'green', 9000, () => openPanel('about'));
+    if (d.web && !upd.webReady) { upd.web = d.web; P.applyWebUpdate(); }      // інтерфейс завантажуємо самі, у фоні
+    updBar();
   });
   bus.on('native:webUpdated', d => {
-    if (!(d && d.ok)) { toast(t('updError'), 'yellow', 7000); return; }
-    if (!P.canReloadUi()) { toast(t('updWebDone'), 'green', 9000); return; }
-    // Без активного рейсу оновлюємось одразу; під час рейсу — коли він закінчиться або водій торкнеться сповіщення.
-    const go = () => { toast(t('updWebNow'), 'green', 4000); setTimeout(() => P.reloadUi(), 1500); };
-    // Не перезавантажуємо і в зоні підміни чи без сигналу: там застосунок тримає місце й швидкість у пам'яті.
+    if (!(d && d.ok)) { log('warn', 'оновлення інтерфейсу: ' + ((d && d.error) || '')); return; }
+    upd.webReady = true; upd.webName = (upd.web && upd.web.name) || ''; updBar();
+    if (!P.canReloadUi()) return;
+    // Перезапускаємось самі, коли спокійно: без активного рейсу, не без GPS і не в зоні підміни (там місце й швидкість — у пам'яті).
+    // Раніше — коли водій сам торкнеться плашки.
     const calm = () => !g.active && pos.mode !== 'dr' && Date.now() - (pos.spoofAt || 0) > 10 * 60000;
-    if (calm()) { go(); return; }
-    toast(g.active ? t('updWebLater') : t('updWebSpoof'), 'green', 12000, go);
-    const iv = setInterval(() => { if (calm()) { clearInterval(iv); go(); } }, 20000);
+    if (calm()) { updReload(); return; }
+    clearInterval(calmTimer); calmTimer = setInterval(() => { if (calm()) { clearInterval(calmTimer); updReload(); } }, 20000);
   });
+  bus.on('native:apk', d => {
+    upd.apkSt = d.state || ''; if (d.pct != null) upd.pct = d.pct; if (d.error) { upd.error = d.error; log('warn', 'оновлення APK: ' + d.error); }
+    updBar();
+  });
+  $('updGo').onclick = updTap;
+  $('updX').onclick = () => { try { localStorage.setItem('reis.updHide', JSON.stringify({ k: updKey(), until: Date.now() + 3 * 3600e3 })); } catch (_) {} updBar(true); };
+  $('updX').innerHTML = ICON.x; $('updX').setAttribute('aria-label', t('ubHide'));
+  // повернулися з налаштувань («дозволити встановлення») — одразу встановлюємо; давно не перевіряли — перевіряємо
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) return;
+    if (upd.apkSt === 'perm') setTimeout(() => P.installApk(), 400);
+    if (Date.now() - upd.checkedAt > UPD_EVERY) updCheck();
+  });
+  bus.on('settings', k => { if (k === 'lang') updBar(); });
+  if (P.isNative) setInterval(() => { if (Date.now() - upd.checkedAt > UPD_EVERY - 60000) updCheck(); }, 5 * 60000);
   bus.on('native:saved', d => { if (d && d.error) toast(t('saveErr') + ' ' + d.error, 'yellow'); else if (d && /^reis-gps/.test(d.name || '')) toast(t('jSaved', d.path || d.name), 'green', 9000); });
-  if (P.isNative) setTimeout(() => { if (P.online()) P.checkUpdate(); }, 15000);
+  if (P.isNative) setTimeout(updCheck, 15000);
+}
+
+/* ---------- плашка оновлення внизу: «Нова версія — оновити» ---------- */
+// Перевіряємо при запуску і кожні 30 хв. Інтерфейс (web.zip) завантажується сам і ставиться, коли спокійно або коли водій торкнеться;
+// новий APK (лише коли змінилася сама оболонка) завантажуємо в телефоні й відкриваємо системне «Встановити».
+const UPD_EVERY = 30 * 60000;
+let calmTimer = 0;
+function updCheck() { if (!P.isNative || !P.online()) return; upd.checkedAt = Date.now(); P.checkUpdate(); }
+const inApp = () => !!P.appInfo().inst;                                // оболонка вміє сама завантажити й поставити APK
+const updKey = () => upd.apk ? 'apk' + upd.apk.code : upd.webReady ? 'web' + ((upd.web && upd.web.ver) || '') : '';
+function updHidden() { try { const h = JSON.parse(localStorage.getItem('reis.updHide') || 'null'); return !!h && h.k === updKey() && Date.now() < h.until; } catch (_) { return false; } }
+function updReload() { toast(t('updWebNow'), 'green', 4000); setTimeout(() => P.reloadUi(), 1200); }
+function updApk() {
+  if (inApp()) { upd.apkSt = 'dl'; upd.pct = 0; P.installApk(); }
+  else { upd.apkSt = 'browser'; P.installApk(); }                        // стара оболонка: завантаження браузером
+  updBar();
+}
+function updTap() {
+  if (upd.apk) {
+    if (upd.apkSt === 'dl') return;
+    if (upd.apkSt === 'error' || upd.apkSt === 'browser') { upd.apkSt = 'browser'; P.apkInBrowser(); updBar(); return; }
+    updApk(); return;
+  }
+  if (upd.webReady) { if (P.canReloadUi()) updReload(); else toast(t('updWebDone'), 'green', 6000); }
+}
+export function updBar(hideNow) {
+  const bar = $('updBar'), go = $('updGo'); if (!bar) return;
+  let text = '', busy = false;
+  if (upd.apk) {
+    const st = upd.apkSt;
+    if (st === 'dl') { text = t('ubDl', upd.pct >= 0 ? upd.pct + '%' : ''); busy = true; }
+    else if (st === 'perm') text = t('ubPerm');
+    else if (st === 'install') text = t('ubInstall');
+    else if (st === 'error') text = t('ubErr');
+    else if (st === 'browser') text = t('ubBrowser');
+    else text = t('ubApk', String(upd.apk.name || '').split('.').slice(0, 3).join('.'));
+  } else if (upd.webReady) text = t('ubWeb', upd.webName ? ' ' + upd.webName : '');
+  const show = !!text && !(hideNow === true || (!busy && updHidden()));
+  go.innerHTML = `${ICON.up}<span>${esc(text)}</span>`;
+  bar.classList.toggle('busy', busy); bar.style.setProperty('--p', Math.max(0, upd.pct) + '%');
+  if (bar.hidden === show) { bar.hidden = !show; bus.emit('layout'); }
 }

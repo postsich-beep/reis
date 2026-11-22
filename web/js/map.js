@@ -152,6 +152,8 @@ export function initMap() {
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   setInterval(drawEvents, 60000);
   bus.on('settings', k => { if (k === 'theme') applyTheme(); if (k === 'view3d') follow(true); });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { cam.anc = null; follow(true); } });
+  window.addEventListener('resize', () => { cam.anc = null; if (view.follow) follow(true); });
   setInterval(() => {
     applyTheme();
     if (!view.follow && S.autoCenter && Date.now() - view.lastTouch > 12000 && (g.active || pos.spd > 3)) setFollow(true);
@@ -201,7 +203,8 @@ function addLayers() {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
     'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } });
   // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
-  map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#8b95a7', 'line-width': w(4, 7, 12), 'line-opacity': 0.85 } });
+  map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } });
+  map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } });
   map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f) bus.emit('altTap', f.properties.k); });
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) } });
@@ -256,24 +259,119 @@ export function applyTheme() {
 }
 
 /* ---------- позиція і камера ---------- */
+// Як у звичайному навігаторі: у режимі «за рухом» стрілка стоїть в одній точці екрана — посередині по ширині,
+// у нижній частині вільної карти — і дивиться строго вгору; рухається й повертається карта під нею.
+// Позицію між фіксами (раз на секунду) ведемо плавно кадр за кадром: і стрілку, і камеру — однією точкою,
+// тому стрілка не «гуляє» відносно центру, як було з окремою анімацією камери.
+export const ANCHOR = { frac: 0.72 };          // частка висоти вільної карти від її верху до стрілки
+const cam = { cur: null, from: null, to: null, t0: 0, dur: 0, lastPosT: 0, brg: null, tBrg: 0, z: null, raf: 0, lastT: 0, drawT: 0, blendUntil: 0, pad: null, anc: null, ancT: 0,
+  dd: null, rdT: 0, rdAt: 0, v: 0, idx: null, onR: false };
+export const camState = cam;
 export function setFollow(on) { view.follow = on; if (on) { view.zoomBias = 0; follow(true); } bus.emit('view', view); }
 export function zoomBy(d) {
   if (view.follow) { view.zoomBias = clamp(view.zoomBias + d, -5, 3); follow(true); }
   else if (map) map.easeTo({ zoom: map.getZoom() + d, duration: 250 });
 }
-function follow(force) {
-  if (!map || pos.lat == null || (document.hidden && !force) || !view.follow) return;
-  if (!force && (view.down && Date.now() - view.touchT < 8000 || Date.now() - (view.touchT || 0) < 700)) return;   // палець на карті
+const D2R = Math.PI / 180;
+const brgOf = (a, b) => { const y = Math.sin((b.lon - a.lon) * D2R) * Math.cos(b.lat * D2R), x = Math.cos(a.lat * D2R) * Math.sin(b.lat * D2R) - Math.sin(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.cos((b.lon - a.lon) * D2R); return (Math.atan2(y, x) / D2R + 360) % 360; };
+const distM = (a, b) => { const x = (b.lon - a.lon) * D2R * Math.cos((a.lat + b.lat) / 2 * D2R), y = (b.lat - a.lat) * D2R; return Math.hypot(x, y) * 6371008.8; };
+const angD = (a, b) => ((b - a) % 360 + 540) % 360 - 180;
+// Напрям «вгору»: на маршруті — уздовж самої лінії маршруту трохи наперед (короткі зламані відрізки доріг і шум GPS не крутять карту),
+// поза маршрутом — курс руху.
+const onRouteNow = () => !!(g.active && g.idx && pos.onRoute && pos.rd != null);
+function routeBrg(R, d) {
+  const L = clamp((pos.spd || 0) * 2.5, 30, 80);
+  const a = R.at(Math.max(0, d - L * 0.35)), b = R.at(Math.min(R.total, d + L));
+  return distM(a, b) > 8 ? brgOf(a, b) : null;
+}
+function navBrg() {
+  if (onRouteNow()) { const b = routeBrg(g.idx, pos.rd); if (b != null) return b; }
+  return pos.hdg || 0;
+}
+// Точка екрана для стрілки: посередині по ширині, на ANCHOR.frac висоти вільної карти між верхньою і нижньою плашками
+export function anchorPoint() {
+  const c = map.getContainer(), W = c.clientWidth, H = c.clientHeight, cr = c.getBoundingClientRect(), now = Date.now();
+  if (cam.anc && cam.anc.W === W && cam.anc.H === H && now - cam.ancT < 1000) return cam.anc;
+  let top = 0, bot = H;
+  if (W <= H) {
+    const tp = document.getElementById('top'), bt = document.getElementById('bottom');
+    if (tp && !tp.hidden) top = Math.max(0, tp.getBoundingClientRect().bottom - cr.top);
+    if (bt && !bt.hidden) bot = Math.min(H, bt.getBoundingClientRect().top - cr.top);
+    if (bot - top < 160) { top = 0; bot = H; }
+  } else {                                       // альбомна: плашки по боках, середина екрана вільна
+    const st = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--st')) || 0;
+    top = st + 10; bot = H - 10;
+  }
+  cam.anc = { x: W / 2, y: Math.round(top + (bot - top) * ANCHOR.frac), W, H, top, bot }; cam.ancT = now;
+  return cam.anc;
+}
+function camPadding() {
+  const a = anchorPoint(), y = a.y;
+  return { top: Math.max(0, 2 * y - a.H), bottom: Math.max(0, a.H - 2 * y), left: 0, right: 0 };
+}
+function targetZoom() {
   const kmh = pos.spd * 3.6;
   let zoom = clamp(16.8 - kmh / 45, 14.4, 16.8);
   if (g.active && g.next && g.distNext < 350) zoom = Math.max(zoom, 16.3);
   // позиція приблизна — віддаляємо карту, щоб коло похибки вміщалося на екрані
   if ((pos.mode === 'approx' || pos.mode === 'dr') && pos.acc > 80) zoom = Math.min(zoom, clamp(16.6 - Math.log2(pos.acc / 50), 10, 16.6));
-  const h = map.getContainer().clientHeight;
-  map.easeTo({
-    center: [pos.lon, pos.lat], zoom: clamp(zoom + view.zoomBias, 5, 19), bearing: view.north ? 0 : pos.hdg, pitch: S.view3d ? 52 : 0,
-    padding: { top: Math.round(h * 0.36), bottom: Math.round(h * 0.16), left: 0, right: 0 }, duration: force ? 400 : 950, easing: x => x
-  });
+  return clamp(zoom + view.zoomBias, 5, 19);
+}
+const camFree = () => view.down && Date.now() - view.touchT < 8000 || Date.now() - (view.touchT || 0) < 700;   // палець на карті
+// Перехід до стеження (кнопка «Моє місце», 3D, північ, масштаб): коротка анімація, далі — покадрово
+function follow(force) {
+  if (!map || !cam.cur || !view.follow || (document.hidden && !force)) return;
+  if (!force && camFree()) return;
+  const z = targetZoom(); cam.z = z; cam.pad = camPadding();
+  map.easeTo({ center: [cam.cur.lon, cam.cur.lat], zoom: z, bearing: view.north ? 0 : cam.brg, pitch: S.view3d ? 52 : 0, padding: cam.pad, duration: 400 });
+  cam.blendUntil = performance.now() + 430; kick();
+}
+function kick() { if (!cam.raf) cam.raf = requestAnimationFrame(frame); }
+function frame(ts) {
+  cam.raf = 0;
+  if (!map || !cam.cur) return;
+  const dt = cam.lastT ? Math.min(300, ts - cam.lastT) : 16; cam.lastT = ts; cam.ft = ts;   // повільний телефон — кадри рідші, але швидкість та сама
+  let more = false;
+  if (cam.onR && g.idx === cam.idx && cam.dd != null) {
+    // На маршруті стрілка їде самою лінією маршруту з рівною швидкістю: між фіксами — наперед зі швидкістю руху,
+    // а розбіжність із новим фіксом (раз на секунду, пачками) розтягуємо на ~0,7 с. Назад не смикаємо: дрібне випередження
+    // просто «чекає», доки машина наздожене. На вигинах не зрізає кути, як пряма між двома фіксами.
+    const R = cam.idx, pred = cam.rdT + cam.v * Math.min(2, (ts - cam.rdAt) / 1000);
+    const err = pred - cam.dd;
+    let step = cam.v * dt / 1000 + err * (1 - Math.exp(-dt / 700));
+    if (step < 0 && err > -40) step = Math.max(step, 0);
+    cam.dd = clamp(cam.dd + step, 0, R.total);
+    const p = R.at(cam.dd); cam.cur = { lat: p.lat, lon: p.lon };
+    const b = routeBrg(R, cam.dd); if (b != null) cam.tBrg = b;
+    if (cam.v > 0.2 || Math.abs(err) > 0.3) more = true;
+  } else if (cam.dur > 0) {
+    const k = Math.min(1, (ts - cam.t0) / cam.dur);
+    cam.cur = { lat: cam.from.lat + (cam.to.lat - cam.from.lat) * k, lon: cam.from.lon + (cam.to.lon - cam.from.lon) * k };
+    if (k < 1) more = true; else cam.dur = 0;
+  }
+  if (cam.brg == null) cam.brg = cam.tBrg;
+  const db = angD(cam.brg, cam.tBrg);
+  if (Math.abs(db) > 0.2) {
+    let st = db * (1 - Math.exp(-dt / 280)); const cap = 140 * dt / 1000;
+    if (Math.abs(st) > cap) st = Math.sign(st) * cap;
+    if (Math.abs(db) < 0.6) st = db;
+    cam.brg = (cam.brg + st + 360) % 360; more = true;
+  }
+  puck.setLngLat([cam.cur.lon, cam.cur.lat]).setRotation(cam.brg);
+  if (view.follow && !document.hidden && !camFree() && ts >= cam.blendUntil) {
+    const tz = targetZoom(), pad = camPadding();
+    if (cam.z == null) cam.z = map.getZoom();
+    const dz = tz - cam.z; cam.z = Math.abs(dz) < 0.01 ? tz : cam.z + dz * (1 - Math.exp(-dt / 900));
+    if (!cam.pad) cam.pad = pad;
+    let padMove = false;
+    for (const k of ['top', 'bottom']) { const d = pad[k] - cam.pad[k]; if (Math.abs(d) > 0.5) { cam.pad = { ...cam.pad, [k]: cam.pad[k] + d * (1 - Math.exp(-dt / 250)) }; padMove = true; } else cam.pad = { ...cam.pad, [k]: pad[k] }; }
+    if (ts - cam.drawT >= 22 || !more) {          // не частіше ~45 кадрів/с — батарея
+      cam.drawT = ts;
+      map.jumpTo({ center: [cam.cur.lon, cam.cur.lat], zoom: cam.z, bearing: view.north ? 0 : cam.brg, pitch: S.view3d ? 52 : 0, padding: cam.pad });
+    }
+    if (cam.z !== tz || padMove) more = true;
+  }
+  if (more) kick(); else cam.lastT = 0;
 }
 function circle(p, r) {
   const pts = [], kx = 111320 * Math.cos(p.lat * Math.PI / 180);
@@ -283,8 +381,21 @@ function circle(p, r) {
 let accShown = false;
 function onPos() {
   if (!map || pos.lat == null) return;
-  puck.setLngLat([pos.lon, pos.lat]).setRotation(pos.hdg);
-  if (!puck._added) { puck.addTo(map); puck._added = true; follow(true); }
+  const now = performance.now(), to = { lat: pos.lat, lon: pos.lon };
+  cam.tBrg = navBrg();
+  // між фіксами — плавно за час, що минув від попереднього (≈1 с); великий стрибок (прив'язка, «Я тут») — одразу
+  const jump = !cam.cur || distM(cam.cur, to) > 400;
+  if (onRouteNow()) {
+    if (!cam.onR || cam.idx !== g.idx || cam.dd == null || Math.abs(cam.dd - pos.rd) > 400) cam.dd = pos.rd;   // перший раз, новий маршрут, «Я тут»
+    cam.onR = true; cam.idx = g.idx; cam.rdT = pos.rd; cam.rdAt = now; cam.v = pos.spd > 0.3 ? pos.spd : 0; cam.dur = 0;
+    if (jump) { const p = g.idx.at(cam.dd); cam.cur = { lat: p.lat, lon: p.lon }; cam.brg = cam.tBrg; }
+  } else {
+    cam.onR = false; cam.dd = null;
+    if (jump || now - cam.lastPosT > 4000) { cam.cur = to; cam.dur = 0; if (jump) cam.brg = cam.tBrg; }
+    else { cam.from = { ...cam.cur }; cam.to = to; cam.t0 = now; cam.dur = clamp(now - cam.lastPosT, 200, 1150); }
+  }
+  cam.lastPosT = now;
+  if (!puck._added) { cam.brg = cam.tBrg; puck.setLngLat([to.lon, to.lat]).setRotation(cam.brg).addTo(map); puck._added = true; follow(true); }
   const est = pos.mode === 'dr' || pos.mode === 'approx';
   puckEl.classList.toggle('dr', est);
   const src = map.getSource && map.getSource('acc');
@@ -292,21 +403,27 @@ function onPos() {
     if (est) { src.setData(circle(pos, Math.max(20, pos.acc || 20))); accShown = true; }
     else if (accShown) { src.setData(EMPTY); accShown = false; }
   }
-  follow(false);
+  kick();
 }
 
 /* ---------- маршрут ---------- */
 function wpEl(cls, txt) { const d = document.createElement('div'); d.className = 'wp ' + cls; d.textContent = txt; return d; }
+// Мітки точок: А — звідки, Б — через, С — куди (і в дорозі, і поки вибираємо варіант)
+let previewTrip = null;
+export function previewPoints(tr) { previewTrip = tr || null; drawRoute(); }
+function drawPins(tr) {
+  const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
+  add(tr.a, 'wp-a', 'А'); add(tr.v, 'wp-v', 'Б'); add(tr.b, 'wp-b', 'С');
+}
 function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
   doneD = -1; doneT = 0; setDone(EMPTY);
-  if (!g.route) { src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); return; }
+  if (!g.route) { src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); if (previewCoords && previewTrip) drawPins(previewTrip); return; }
   src.setData(routeData(g.route.coords, g.route));
   drawHazards();
   const tr = g.trip; if (!tr) return;
-  const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
-  add(tr.a, 'wp-a', 'A'); add(tr.v, 'wp-v', '•'); add(tr.b, 'wp-b', 'Б');
+  drawPins(tr);
   drawProgress();
 }
 function setDone(data) { const s = map && map.getSource && map.getSource('route-done'); if (s) s.setData(data); }
@@ -383,6 +500,22 @@ export function showRoute(coords) {
   const h = map.getContainer().clientHeight;
   map.fitBounds(b, { padding: { top: Math.round(h * 0.22), bottom: Math.round(h * 0.42), left: 40, right: 40 }, bearing: 0, pitch: 0, duration: 700, maxZoom: 15 });
 }
+// Вибір варіанта: обидва маршрути цілком у верхній частині екрана (над шторкою вибору), як у BlindDriver.
+// Поки вибираємо, карта сама не повертається до машини.
+export function fitRoutes(list, padTop, padBottom) {
+  if (!map || !list || !list.length) return;
+  const b = new maplibregl.LngLatBounds();
+  for (const coords of list) {
+    const step = Math.max(1, Math.floor(coords.length / 300));
+    for (let i = 0; i < coords.length; i += step) b.extend([coords[i][1], coords[i][0]]);
+    b.extend([coords[coords.length - 1][1], coords[coords.length - 1][0]]);
+  }
+  view.follow = false; view.lastTouch = Date.now() + 3600e3; bus.emit('view', view);
+  const h = map.getContainer().clientHeight, w = map.getContainer().clientWidth;
+  const land = w > h, side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: 70 };   // справа — кнопки масштабу
+  map.fitBounds(b, { padding: { top: Math.round(padTop), bottom: Math.round(land ? 30 : padBottom), ...side }, bearing: 0, pitch: 0, duration: 600, maxZoom: 14 });
+}
+export function freeView() { view.lastTouch = Date.now(); }
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
 export function previewAlts(list) {
   const src = map && map.getSource && map.getSource('route-alts'); if (!src) return;
@@ -393,6 +526,8 @@ export function previewRoute(coords, route = null) {
   if (!coords) previewAlts(null);
   previewCoords = coords || null; previewR = coords ? route : null;
   src.setData(coords ? routeData(coords, route) : EMPTY);
+  if (!coords) previewTrip = null;
+  if (!g.route) { for (const m of wps) m.remove(); wps = []; if (coords && previewTrip) drawPins(previewTrip); }
   drawHazards();
   doneD = -1; setDone(EMPTY);
   if (coords) showRoute(coords);
