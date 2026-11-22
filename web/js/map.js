@@ -168,6 +168,7 @@ function fuelImage(nm) {
   x.font = `800 ${fs}px Roboto, "Segoe UI", system-ui, sans-serif`;
   const w = Math.ceil(pad + ico + 4 * dpr + x.measureText(nm).width + pad), tail = 5 * dpr;
   c.width = w; c.height = h + tail;
+  x.font = `800 ${fs}px Roboto, "Segoe UI", system-ui, sans-serif`;     // зміна розміру полотна скидає шрифт — ставимо знову
   let hsh = 0; for (const ch of nm) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
   const col = nm === 'Газ' ? '#6b7280' : nm === 'АЗС' ? '#374151' : FUEL_COL[hsh % FUEL_COL.length];
   const r = 7 * dpr;
