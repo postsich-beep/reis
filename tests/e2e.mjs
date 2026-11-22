@@ -742,7 +742,7 @@ if (run('2ґ')) try {
   await shot(page, '14b-where');
   await page.click('#wherePop [data-d]');
   await sleep(300);
-  const s2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, on: window.__app.nav.pos.onRoute, rd: Math.round(window.__app.nav.pos.rd || -1) }));
+  const s2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, on: window.__app.nav.pos.onRoute, rd: window.__app.nav.pos.rd == null ? -1 : Math.round(window.__app.nav.pos.rd) }));   // 0 — початок маршруту, теж правильно
   ok('«На маршрут» — позначка на маршруті, ведення без GPS', s2.mode === 'dr' && s2.on && s2.rd >= 0, JSON.stringify(s2));
   // довге натискання біля маршруту (за 50 м від лінії) без GPS = «я тут, на маршруті» — без меню
   { const pt = await app(page, () => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(9000); return { lat: p.lat + 0.00045, lon: p.lon }; });
