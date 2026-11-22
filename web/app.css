@@ -293,6 +293,10 @@ body[data-theme="night"]{
 #pick .btn.wide{flex:1}
 #pick .btn svg{width:22px;height:22px}
 #pick .btn.sh-on{background:#06b6d4;color:#fff}
+.pick-info{margin-top:8px;font-size:15px;line-height:1.35;display:grid;gap:3px}
+.pick-info b{font-weight:600;color:var(--ink-2)}
+.pick-links{flex-wrap:wrap;gap:6px}
+.pick-links .btn.sm{flex:0 0 auto}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}

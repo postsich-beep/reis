@@ -83,12 +83,13 @@ export async function fetchForRoute(idx, force) {
 }
 
 // Прив'язка об'єктів до поточного маршруту: відстань уздовж і відхилення вбік.
-const KIND = { f: 'fuel', s: 'services', p: 'parking', m: 'motel', e: 'food' };
+const KIND = { f: 'fuel', s: 'services', p: 'parking', m: 'motel', e: 'food', h: 'shower' };
 function fromDb(x) {
-  const [lat, lon, t, f, name, extra] = x.r;
+  const [lat, lon, t, f, name, extra, info] = x.r;
   if (t === 'c') return { id: 'db' + x.i, lat, lon, d: x.d, off: x.off, max: extra || null };
-  return { id: 'db' + x.i, lat, lon, d: x.d, off: x.off, name, kind: KIND[t] || 'fuel', hgv: !!(f & F.HGV), shower: !!(f & F.SHOWER), food: !!(f & F.FOOD),
-    wc: !!(f & F.WC), h24: !!(f & F.H24), score: dbScore(x.r) };
+  const fa = (info && info.fa) || [];
+  return { id: 'db' + x.i, i: x.i, lat, lon, d: x.d, off: x.off, name, kind: t === 's' && info && info.k === 'ra' ? 'rest' : KIND[t] || 'fuel', hgv: !!(f & F.HGV), shower: !!(f & F.SHOWER), food: !!(f & F.FOOD),
+    wc: !!(f & F.WC) || fa.includes('wc'), h24: !!(f & F.H24), score: dbScore(x.r) };
 }
 function reproject(idx) {
   if (sdb.ready) {

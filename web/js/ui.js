@@ -14,7 +14,7 @@ import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
 import * as showers from './showers.js';
 import { offlineActive } from './offline.js';
-import { sdb, TYPES, F } from './stopsdb.js';
+import { sdb, TYPES, F, nearbyRows } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
@@ -450,13 +450,45 @@ function onMarkTap(id) {
 
 /* картка піт-стопу: торкання кольорової точки на карті */
 const STOP_T = { e: 'stop_food', f: 'stop_fuel', s: 'stop_services', p: 'stop_parking', m: 'stop_motel', c: 'camera', h: 'stop_shower' };
+// Довідка до точки: що тут є, що поруч, години, посилання на сайт, телефон, Google Maps, OpenStreetMap.
+const FA_ORDER = ['wc', 'water', 'shop', 'picnic', 'tyres', 'repair', 'air', 'wash', 'atm', 'hotel'];
+// Години у форматі OSM («Mo-Fr 08:00-20:00; Sa off») — людською мовою
+function fmtHours(h) {
+  const D = S.lang === 'ru' ? { Mo: 'Пн', Tu: 'Вт', We: 'Ср', Th: 'Чт', Fr: 'Пт', Sa: 'Сб', Su: 'Вс', PH: 'праздники', off: 'выходной' }
+    : { Mo: 'Пн', Tu: 'Вт', We: 'Ср', Th: 'Чт', Fr: 'Пт', Sa: 'Сб', Su: 'Нд', PH: 'свята', off: 'вихідний' };
+  return String(h).replace(/\b(Mo|Tu|We|Th|Fr|Sa|Su|PH|off)\b/g, m => D[m]).replace(/;\s*/g, '; ');
+}
+function stopKindLabel(ty, info) { return ty === 's' && info && info.k === 'ra' ? t('stop_rest') : t(STOP_T[ty]); }
+function stopInfoHtml(i, r) {
+  const [lat, lon, ty, f, , , info = {}] = r;
+  if (ty === 'c') return { html: '', links: '' };
+  const have = FA_ORDER.filter(c => (info.fa || []).includes(c)).map(c => t('fa_' + c));
+  const R = ty === 's' ? (info.k === 'ra' ? 200 : 350) : 200;
+  const near = nearbyRows(i, R).slice(0, 4).map(x => { const k = stopKindLabel(x.r[2], x.r[6]), n = x.r[4];
+    return (n && n.toLowerCase() !== k.toLowerCase() ? n + ' (' + k + ')' : k) + ' · ' + fmtDist(x.dist); });
+  const L = [];
+  if (have.length) L.push(`<div><b>${t('infoHave')}</b> ${esc(have.join(' · '))}</div>`);
+  if (near.length) L.push(`<div><b>${t('infoNear')}</b> ${esc(near.join('; '))}</div>`);
+  if (info.h) L.push(`<div><b>${t('infoHours')}</b> ${esc(fmtHours(info.h))}</div>`);
+  if (info.o) L.push(`<div><b>${t('infoOperator')}</b> ${esc(info.o)}</div>`);
+  if (!have.length && !near.length && !(f & (F.SHOWER | F.FOOD | F.WC)) && (ty === 's' || ty === 'p')) L.push(`<div>${t('infoUnknown')}</div>`);
+  const links = [`<button class="btn sm" data-u="${esc('https://www.google.com/maps/search/?api=1&query=' + lat + ',' + lon)}">${t('linkGmaps')}</button>`];
+  if (info.w) links.push(`<button class="btn sm" data-u="${esc(info.w)}">${t('linkSite')}</button>`);
+  if (info.p) links.push(`<button class="btn sm" data-u="${esc('tel:' + info.p.replace(/[^\d+]/g, ''))}">${t('linkCall')}</button>`);
+  if (info.id) links.push(`<button class="btn sm" data-u="${esc('https://www.openstreetmap.org/' + (info.id[0] === 'n' ? 'node/' : 'way/') + info.id.slice(1))}">OSM</button>`);
+  return { html: L.length ? `<div class="pick-info">${L.join('')}</div>` : '', links: `<div class="row pick-links">${links.join('')}</div>` };
+}
+
 function onStopTap(x) {
   const r = sdb.rows[x.i]; if (!r) return;
-  const [lat, lon, ty, f, name, extra] = r;
-  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && t('f_food'), f & F.WC && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
+  const [lat, lon, ty, f, name, extra, info] = r;
+  const fa = (info && info.fa) || [];
+  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
   const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, { lat, lon })) + ' ' + t('fromYou') : '';
-  const title = ty === 'c' ? t('camera') + (extra ? ' · ' + extra + ' ' + t('kmh') : '') : (name || t(STOP_T[ty]));
-  const p = { lat, lon, label: name || t(STOP_T[ty]) };
+  const kindL = stopKindLabel(ty, info);
+  const title = ty === 'c' ? t('camera') + (extra ? ' · ' + extra + ' ' + t('kmh') : '') : (name || kindL);
+  const p = { lat, lon, label: name || kindL };
+  const inf = stopInfoHtml(x.i, r);
   const box = $('pick'); box.hidden = false; showPick(null);
   const btns = ty === 'c' ? '' : g.active
     ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
@@ -464,10 +496,12 @@ function onStopTap(x) {
   const mine = showers.myShowerAt({ lat, lon }, 60);
   const shBtn = ty === 'c' ? '' : `<div class="row"><button class="btn wide${mine ? ' sh-on' : ''}" data-k="shower">${ICON.shower}${mine ? t('showerMine') : f & F.SHOWER ? t('showerConfirm') : t('showerHere')}</button></div>`;
   box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER || mine ? ';border-color:#06b6d4' : ''}"></span><div class="grow"><div class="t">${esc(title)}</div>
-    <div class="muted">${esc((name ? t(STOP_T[ty]) : '') + (name && feats.length ? ' · ' : '') + feats.join(', ') + (mine && !(f & F.SHOWER) ? (feats.length || name ? ' · ' : '') + t('showerMineShort') : ''))}${dist}</div></div></div>
+    <div class="muted">${esc((name ? kindL : '') + (name && feats.length ? ' · ' : '') + feats.join(', ') + (mine && !(f & F.SHOWER) ? (feats.length || name ? ' · ' : '') + t('showerMineShort') : ''))}${dist}</div></div></div>
+    ${inf.html}${inf.links}
     <div class="row">${btns}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>${shBtn}`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
+    if (b.dataset.u) { P.openUrl(b.dataset.u); return; }     // посилання не закривають картку
     box.hidden = true;
     const k = b.dataset.k;
     if (k === 'x') return;

@@ -15,6 +15,19 @@ export const SHOWER_COLOR = '#06b6d4';
 export const F = { HGV: 1, SHOWER: 2, FOOD: 4, WC: 8, H24: 16, BIG: 32 };
 export const sdb = { ready: false, date: '', rows: [], geo: null, count: 0 };
 
+// Інші точки бази поруч (без камер): [{i, r, dist}] за відстанню.
+export function nearbyRows(i, radius = 300) {
+  const me = sdb.rows[i]; if (!me) return [];
+  const out = [], kx = 111320 * Math.cos(me[0] * Math.PI / 180);
+  sdb.rows.forEach((r, j) => {
+    if (j === i || r[2] === 'c') return;
+    const dy = (r[0] - me[0]) * 111320; if (dy > radius || dy < -radius) return;
+    const dx = (r[1] - me[1]) * kx, d = Math.hypot(dx, dy);
+    if (d <= radius) out.push({ i: j, r, dist: d });
+  });
+  return out.sort((a, b) => a.dist - b.dist);
+}
+
 // Наскільки точка важлива фурі — щоб здалеку показувати головне, а при наближенні все.
 export function rank(r) {
   const [, , t, f] = r;
