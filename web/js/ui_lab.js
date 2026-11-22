@@ -159,7 +159,7 @@ function settingsHtml() {
   ${seg('lang', [['uk', 'Українська', S.lang === 'uk'], ['ru', 'Русский', S.lang === 'ru']])}
 
   <div class="sec">${t('setTruck')}</div><div class="form">
-    ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5')}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}
+    ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5')}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
   <div class="muted" style="margin-top:6px">${t('setTruckHint')}</div>
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
@@ -230,7 +230,8 @@ definePanel('settings', {
       const id = e.target.id || '', v = e.target.value;
       if (id.startsWith('tr_')) {
         const k = id.slice(3), tr = { ...S.truck };
-        if (k === 'hazmat') tr.hazmat = v === '1'; else { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0)) return; tr[k] = n; }
+        if (k === 'hazmat') tr.hazmat = v === '1';
+        else { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0) && !(k === 'vmax' && n === 0)) return; tr[k] = n; }   // обмежувач 0 — вимкнено
         S.truck = tr;
       } else if (id.startsWith('s_')) {
         const k = id.slice(2);

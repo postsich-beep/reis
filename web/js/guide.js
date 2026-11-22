@@ -48,12 +48,17 @@ function saveActive() {
 }
 let flagsSaved = '';
 function saveFlags() { const k = g.passedA + ':' + g.passedV; if (k !== flagsSaved) { flagsSaved = k; saveActive(); } }
-function clearActive() { db.del('kv', ACTIVE_KEY); }
+// Позначка «рейс завершено» пишеться одразу (localStorage — синхронний): якщо застосунок закрили чи оновили
+// в ту ж мить, видалення з бази могло не встигнути — і зупинений рейс «воскресав».
+const DONE_KEY = 'reis.tripDone';
+function clearActive() { try { localStorage.setItem(DONE_KEY, String(Date.now())); } catch (_) {} db.del('kv', ACTIVE_KEY); }
 // Відновити рейс, що йшов до перезапуску (не старший 18 год і не завершений). Повертає true, якщо відновлено.
 export async function resumeActive() {
   try {
     const s = await db.get('kv', ACTIVE_KEY);
     if (!s || !s.route || !s.trip || Date.now() - s.at > ACTIVE_MAX_H * 3600e3 || g.active) return false;
+    let done = 0; try { done = +localStorage.getItem(DONE_KEY) || 0; } catch (_) {}
+    if (done >= s.at) { db.del('kv', ACTIVE_KEY); return false; }
     g.trip = { ...s.trip, route: s.route }; g.active = true; g.arrived = false;
     applyRoute(s.route, true);
     g.passedA = !!s.passedA || g.passedA; g.passedV = !!s.passedV || g.passedV;

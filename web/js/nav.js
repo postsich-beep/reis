@@ -24,7 +24,13 @@ const J_MS = 40 * 60000;
 
 const ema = (o, v, k = 0.1) => o == null ? v : o + (v - o) * k;
 const MAX_SPD = 50;                          // 180 км/год — фура так не їде
-const TRUCK_MAX = 28;                        // ~100 км/год: швидше фура не їде, тож «оцінка за вишками» понад це — шум
+// Обмежувач фури (налаштування «Обмежувач», км/год; 0 — вимкнено, як у легковика). Швидше фура не їде, тож:
+//  • оцінка швидкості без GPS (розрахунок, вишки, збережена) ніколи не більша за обмежувач;
+//  • GPS, що показує на 15 км/год більше за обмежувач, — не наша швидкість: так підміна «затягує» приймач
+//    (точки плавні, а швидкість росте 94 → 130). Саме так на М-03 з'явилось «≈106 оцінка».
+const vmaxKmh = () => { const v = +((S.truck || {}).vmax); return v > 0 ? v : 0; };
+const VMAX = () => vmaxKmh() ? vmaxKmh() / 3.6 : MAX_SPD;          // м/с — стеля для будь-якої оцінки
+const SUS_SPD = () => vmaxKmh() ? (vmaxKmh() + 15) / 3.6 : MAX_SPD; // м/с — вище цього GPS для фури неправдоподібний
 const startT = Date.now();
 let lockT = 0, netInnov = [], manualSpd = null, manualSpdT = 0;
 let turns = [], yawHist = [], lastTurnEv = 0, holdSince = 0;
@@ -194,8 +200,8 @@ function onYaw(yaw) {
 function curSpeed() {
   if (manualSpd != null) return manualSpd;
   if (!moving) return 0;
-  if (vCruise > 0.5) return vCruise;
-  return apSpd != null && Date.now() - apSpdT < 60000 ? apSpd : 0;
+  if (vCruise > 0.5) return Math.min(vCruise, VMAX());
+  return apSpd != null && Date.now() - apSpdT < 60000 ? Math.min(apSpd, VMAX()) : 0;
 }
 export function setSim(on) {      // імітація і справжній GPS не змішуються: стан починаємо з чистого аркуша
   simOn = on; pos.sim = on; net = null; pos.raw = null; pos.pending = null; pos.reason = '';
@@ -216,7 +222,12 @@ function matchRoute(p, spd) {
 function accept(f) {
   const now = Date.now(); f.rt = now;
   let spd = f.spd;
-  if ((spd == null || spd < 0) && pos.raw) { const dt = (now - pos.raw.rt) / 1000; if (dt > 0.3 && dt < 10) spd = hav(pos.raw, f) / dt; }
+  if ((spd == null || spd < 0) && pos.raw) {
+    // Без швидкості у фіксі рахуємо за часом самого фікса, а не за часом, коли він дійшов: Android віддає фікси пачками,
+    // і 25 м за 0,4 с (а насправді за 1 с) давали «183 км/год».
+    const dt = f.t > 0 && pos.raw.t > 0 ? (f.t - pos.raw.t) / 1000 : (now - pos.raw.rt) / 1000;
+    if (dt > 0.3 && dt < 10) spd = Math.min(hav(pos.raw, f) / dt, SUS_SPD());
+  }
   if (spd == null || spd < 0) spd = 0;
   let hdg = pos.hdg || 0;
   if (spd >= 1.5) {
@@ -224,7 +235,8 @@ function accept(f) {
     else if (pos.raw && hav(pos.raw, f) > 3) hdg = bearing(pos.raw, f);
   } else if (pos.raw == null && compass != null) hdg = compass;
   if (spd > 3) { yawRef = yawNow; hdgRef = hdg; }
-  vCruise = vCruise > 0.5 ? vCruise * 0.6 + spd * 0.4 : spd;
+  const sv = Math.min(spd, VMAX());                       // крейсерська — не більша за обмежувач
+  vCruise = vCruise > 0.5 ? vCruise * 0.6 + sv * 0.4 : sv;
   vCruiseT = now; saveMotion(now);
   if (inUkraine(f)) hadUA = true;
   pos.raw = f; lastFixT = now; pos.mode = 'gps';
@@ -257,21 +269,21 @@ function netSpeed(p) {
   for (const r of rows) { const d = r.t - tm; Stt += r.w * d * d; Stx += r.w * d * r.X; Sty += r.w * d * r.Y; }
   if (!(Stt > 0)) return;
   const v = Math.hypot(Stx / Stt, Sty / Stt), sv = Math.sqrt(1 / Stt);
-  if (v > TRUCK_MAX * 1.1) return;                       // фура так не їде — це стрибок між вишками, а не рух
+  if (v > VMAX() * 1.15) return;                         // фура так не їде — це стрибок між вишками, а не рух
   if (v > 2.5 * sv && sv < 4) { apSpd = v; apSpdErr = sv; apSpdT = p.rt; }
   else if (v + 2 * sv < 2.5) { apSpd = 0; apSpdErr = sv; apSpdT = p.rt; }
 }
 // Що показувати на спідометрі: справжня швидкість GPS, оцінка, «стоїть» або «невідомо».
 export function speedView() {
-  const fresh = apSpd != null && Date.now() - apSpdT < 60000;
+  const fresh = apSpd != null && Date.now() - apSpdT < 60000, cap = v => Math.min(v, VMAX()) * 3.6;
   if (pos.mode === 'gps') return { kmh: pos.spd * 3.6, kind: 'gps' };
   if (manualSpd != null) return { kmh: manualSpd * 3.6, kind: manualSpd === 0 ? 'still' : 'manual' };
   if (!moving) return { kmh: 0, kind: 'still' };
-  if (pos.mode === 'dr' && vCruise > 0.5) return { kmh: pos.spd * 3.6, kind: 'est' };
-  if (fresh && apSpd > 0.5 && apSpd <= TRUCK_MAX * 1.1) return { kmh: apSpd * 3.6, kind: 'approx' };
+  if (pos.mode === 'dr' && vCruise > 0.5) return { kmh: cap(pos.spd), kind: 'est' };
+  if (fresh && apSpd > 0.5 && apSpd <= VMAX() * 1.15) return { kmh: cap(apSpd), kind: 'approx' };
   // GPS підмінено, а машина їде: тримаємо останню чесну швидкість (навіть із до перезапуску), поки не мине 15 хв
-  if (pos.mode === 'approx' && vCruise > 0.5 && Date.now() - vCruiseT < 15 * 60000 && Date.now() - pos.spoofAt < 120000) return { kmh: vCruise * 3.6, kind: 'est' };
-  if (pos.mode === 'approx' && pos.spd > 0.5) return { kmh: pos.spd * 3.6, kind: 'approx' };
+  if (pos.mode === 'approx' && vCruise > 0.5 && Date.now() - vCruiseT < 15 * 60000 && Date.now() - pos.spoofAt < 120000) return { kmh: cap(vCruise), kind: 'est' };
+  if (pos.mode === 'approx' && pos.spd > 0.5) return { kmh: cap(pos.spd), kind: 'approx' };
   return { kmh: null, kind: 'none' };
 }
 
@@ -342,6 +354,9 @@ function judge(f) {
   if (f.acc != null && f.acc > 120) bad = 'weak';
   const why = fake(f, now);
   if (why) { bad = why; spoofSeen(why, f); }
+  else if (S.spoof && !f.sim && f.spd != null && f.spd > SUS_SPD()) {         // фура з обмежувачем так не їде — «затягування» підміною
+    bad = 'speed'; if (badRun >= 1 || pos.mode !== 'gps') spoofSeen('speed', f);   // один випадковий сплеск — ще не тривога
+  }
   else if (S.spoof && pos.raw && pos.mode === 'gps') {
     const dt = (now - pos.raw.rt) / 1000, d = hav(pos.raw, f);
     if (!f.sim && d > 200 && d / Math.max(dt, 0.5) > MAX_SPD) { bad = 'jump'; spoofSeen('jump', f); }   // стрибок, якого фура не зробить
@@ -474,7 +489,7 @@ export function start() {
   timer = setInterval(tick, 1000);
   try {                                     // чесна швидкість до перезапуску (не старша 10 хв)
     const m = JSON.parse(localStorage.getItem('reis.motion') || 'null');
-    if (m && m.v > 0.5 && Date.now() - m.t < 10 * 60000) { vCruise = m.v; vCruiseT = m.t; }
+    if (m && m.v > 0.5 && Date.now() - m.t < 10 * 60000) { vCruise = Math.min(m.v, VMAX()); vCruiseT = m.t; }
   } catch (_) {}
   setInterval(() => {                       // раз на 10 с — стан супутників і руху до журналу
     journal.push({ k: 'st', rt: Date.now(), mode: pos.mode, sats: pos.sats ? { ...pos.sats } : null, moving, vCruise: Math.round(vCruise * 10) / 10,

@@ -9,6 +9,8 @@ import { fileURLToPath } from 'node:url';
 import { mkdirSync, existsSync } from 'node:fs';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
+// ONLY=1,2д node tests/e2e.mjs — лише вибрані проходи (для налагодження)
+const ONLY = (process.env.ONLY || '').split(',').filter(Boolean), run = id => !ONLY.length || ONLY.includes(id);
 const SHOTS = process.argv.includes('--shots') ? process.argv[process.argv.indexOf('--shots') + 1] : null;
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
@@ -96,7 +98,7 @@ const ok = (name, cond, extra = '') => { results.push((cond ? 'PASS ' : 'FAIL ')
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 async function newPage(native, opts = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 412, height: 892 }, deviceScaleFactor: 2, isMobile: true, hasTouch: true, locale: 'uk-UA' });
+  const ctx = await browser.newContext({ viewport: opts.viewport || { width: 412, height: 892 }, deviceScaleFactor: opts.dpr || 2, isMobile: true, hasTouch: true, locale: 'uk-UA' });
   const page = await ctx.newPage();
   const errors = [];
   page.on('pageerror', e => errors.push('pageerror: ' + e.message));
@@ -142,7 +144,7 @@ async function newPage(native, opts = {}) {
       },
       offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
       offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {},
-      keepAwake() {}, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}, reloadUi() { window.__nativeCalls.push('reloadUi'); }
+      keepAwake(on) { window.__nativeCalls.push('keepAwake:' + on); }, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() {}, applyWebUpdate() {}, installApk() {}, reloadUi() { window.__nativeCalls.push('reloadUi'); }
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
   await page.goto(BASE);
@@ -153,7 +155,7 @@ const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: jo
 const app = (page, fn, arg) => page.evaluate(fn, arg);
 
 /* ============ прохід 1: застосунок (з імітацією оболонки) ============ */
-try {
+if (run('1')) try {
   const { page, ctx, errors } = await newPage(true);
   ok('запуск без помилок JS', errors.length === 0, errors.join(' | '));
   ok('оболонку попросили стежити за місцем', await app(page, () => window.__nativeCalls.includes('startTracking')));
@@ -221,21 +223,21 @@ try {
   await shot(page, '01b-shower');
   await page.click('#panelClose');
   // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
-  await page.click('#bLayers');
-  ok('кнопка «Шари»: 9 галочок і «вимкнути все»', await page.$$eval('#layers .ly-row', e => e.length) === 9 && /Вимкнути все/.test(await page.textContent('#layers')));
+  await page.click('#bQuick'); await page.click('#quick [data-q="layers"]');
+  ok('швидкі налаштування → «Шари»: 9 галочок і «вимкнути все»', await page.$$eval('#quick .ly-row', e => e.length) === 9 && /Вимкнути все/.test(await page.textContent('#quick')));
   await shot(page, '01d-layers');
   const feats = () => app(page, async () => { const m = window.__app.map.map; const s = await m.getSource('stops').getData(), k = await m.getSource('marks').getData(); return { stops: s.features.map(f => f.properties.t).join(''), marks: k.features.length }; });
-  await page.click('#layers [data-ly="#off"]'); await sleep(200);
+  await page.click('#quick [data-ly="#off"]'); await sleep(200);
   const f0 = await feats();
   ok('«Вимкнути все» — на карті жодної точки й позначки', f0.stops === '' && f0.marks === 0, JSON.stringify(f0));
-  await page.click('#layers [data-ly="fuel"]'); await sleep(200);
+  await page.click('#quick [data-ly="fuel"]'); await sleep(200);
   const f1 = await feats();
   ok('галочка «АЗС» — лише заправки', /^f+$/.test(f1.stops) && f1.marks === 0, JSON.stringify(f1));
-  await page.click('#layers [data-ly="#off"]'); await page.click('#layers [data-ly="#on"]'); await sleep(200);
+  await page.click('#quick [data-ly="#off"]'); await page.click('#quick [data-ly="#on"]'); await sleep(200);
   const f2 = await feats();
   ok('«Увімкнути все» — усі точки повернулися', f2.stops.length === 7 && f2.marks === 1, JSON.stringify(f2));
-  await page.mouse.click(16, 520); await sleep(150);
-  ok('торкання карти закриває «Шари»', await app(page, () => document.getElementById('layers').hidden));
+  await page.mouse.click(4, 450); await sleep(150);       // шари займають майже весь екран — торкаємось карти збоку
+  ok('торкання карти закриває швидкі налаштування', await app(page, () => document.getElementById('quick').hidden));
   await shot(page, '01-start');
 
   // пошук: «Львов» — це Львів, а не село під Бєлгородом
@@ -425,13 +427,13 @@ try {
   await page.click('[data-tg="tg"]');
   ok('перемикач у Лабораторії змінює налаштування', await app(page, () => window.__app.S.tg === false));
   await page.click('#panelClose');
-  await page.click('#bSettings'); await page.waitForSelector('[data-seg="theme:night"]');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('[data-seg="theme:night"]');
   await shot(page, '11-settings');
   await page.click('[data-seg="theme:day"]'); await sleep(300);
-  ok('шестерня → налаштування → тема «День»', await app(page, () => document.body.dataset.theme === 'day' && window.__app.S.theme === 'day'));
+  ok('швидкі налаштування → «Налаштування» → тема «День»', await app(page, () => document.body.dataset.theme === 'day' && window.__app.S.theme === 'day'));
   // прозорість плашок: за замовчуванням нижня панель і кнопки напівпрозорі, без розмиття
   const alpha = sel => app(page, s => { const m = getComputedStyle(document.querySelector(s)).backgroundColor.match(/rgba?\(([^)]+)\)/); const p = m ? m[1].split(',').map(Number) : []; return p.length === 4 ? p[3] : 1; }, sel);
-  const aBottom = await alpha('#bottom'), aRail = await alpha('#bCompass'), aSpeed = await alpha('#speed');
+  const aBottom = await alpha('#bottom'), aRail = await alpha('#bQuick'), aSpeed = await alpha('#speed');
   ok('нижня панель, кнопки і швидкість прозорі (≤ 0,5)', aBottom <= 0.5 && aRail <= 0.5 && aSpeed <= 0.5, `низ ${aBottom}, кнопка ${aRail}, швидкість ${aSpeed}`);
   ok('нижня панель без розмиття', await app(page, () => ['none', ''].includes(getComputedStyle(document.getElementById('bottom')).backdropFilter || 'none')));
   await page.click('[data-seg="glass:low"]'); await sleep(200);
@@ -450,7 +452,7 @@ try {
       document.head.appendChild(st);
     });
     await sleep(200); await shot(page, '13-day-glass');
-    await page.click('#bSettings'); await page.waitForSelector('[data-seg="theme:night"]');
+    await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('[data-seg="theme:night"]');
   }
   await page.click('[data-seg="theme:night"]'); await sleep(300);
   ok('нічний режим', await app(page, () => document.body.dataset.theme === 'night'));
@@ -493,7 +495,7 @@ try {
 } catch (e) { ok('сценарій 1 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2б: перезапуск посеред зони підміни ============ */
-try {
+if (run('2б')) try {
   const { page, ctx, errors } = await newPage(true, { motion: { v: 16.4, t: Date.now() - 90000 } });
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   await emitN('loc', { prov: 'network', lat: 50.0, lon: 35.97, acc: 900, t: Date.now() });
@@ -521,7 +523,7 @@ try {
 } catch (e) { ok('прохід перезапуску дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2в: маршрут без «Поїхали» і перезапуск посеред рейсу ============ */
-try {
+if (run('2в')) try {
   const { page, ctx, errors } = await newPage(true);
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   await emitN('loc', { prov: 'gps', lat: coords[0][0], lon: coords[0][1], acc: 5, spd: 0, t: Date.now() });
@@ -554,7 +556,7 @@ try {
 } catch (e) { ok('прохід «без Поїхали і перезапуск» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2г: без GPS — по маршруту (як BlindDriver) ============ */
-try {
+if (run('2г')) try {
   const { page, ctx, errors } = await newPage(true);
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   const n = coords.length;
@@ -610,8 +612,60 @@ try {
   await ctx.close();
 } catch (e) { ok('прохід «без GPS по маршруту» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
+/* ============ прохід 2д: швидкість фури (обмежувач 90) — оцінка не може бути більшою ============ */
+// Випадок з дороги: «≈106 оцінка» на фурі з обмежувачем 90. Відтворюємо, звідки могла взятися така цифра.
+if (run('2д')) try {
+  const { page, ctx, errors } = await newPage(true, { motion: { v: 31, t: Date.now() - 60000 } });   // збережено з минулого запуску: 112 км/год
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const sv = () => app(page, () => { const v = window.__app.nav.speedView(); return { kmh: v.kmh == null ? null : Math.round(v.kmh), kind: v.kind, mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, vc: Math.round(window.__app.nav.debugState().vCruise * 36) / 10 }; });
+  const D2R = Math.PI / 180, east = (p, m) => ({ lat: p.lat, lon: p.lon + m / (111320 * Math.cos(p.lat * D2R)) });
+  await sleep(1200);
+  // 0) перезапуск у зоні підміни: збережена «чесна» швидкість 112 км/год — не більше обмежувача
+  await emitN('loc', { prov: 'network', lat: 49.59, lon: 34.55, acc: 900, t: Date.now() });
+  for (let i = 0; i < 2; i++) { await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() }); await sleep(150); }
+  const s0 = await sv();
+  ok('швидкість: збережена з минулого запуску 112 км/год → показуємо не більше 90', s0.kmh == null || s0.kmh <= 90, JSON.stringify(s0));
+  // 1) чесний GPS 88 км/год, далі сигнал зник: оцінка ≈ 88
+  let p = { lat: 49.60, lon: 34.40 }, t = Date.now();
+  for (let i = 0; i < 8; i++) { p = east(p, 24.4); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 24.4, brg: 90, t }); await sleep(60); }
+  const s1a = await sv();
+  ok('швидкість: чесний GPS 88 км/год показано як є', s1a.kind === 'gps' && s1a.kmh === 88, JSON.stringify(s1a));
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 9000 });
+  const s1 = await sv();
+  ok('швидкість: GPS зник — оцінка ≈ 88 (як було)', s1.kind === 'est' && s1.kmh >= 84 && s1.kmh <= 90, JSON.stringify(s1));
+  // 2) GPS повернувся, а за хвилину підміна «затягує»: швидкість у фіксах росте 94 → 130 км/год, точки плавні; потім стрибок у Бєлгород
+  for (let i = 0; i < 4; i++) { p = east(p, 24.4); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 24.4, brg: 90, t }); await sleep(250); }
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 6000 }).catch(() => {});
+  const spoof = [26, 28, 30, 32, 34, 36];
+  for (const v of spoof) { p = east(p, v); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 4, spd: v, brg: 90, t }); await sleep(60); }
+  const s2a = await sv();
+  ok('швидкість: GPS показує 130 км/год на фурі з обмежувачем 90 — це не наша швидкість (підміна), на спідометрі її немає', !(s2a.kind === 'gps' && s2a.kmh > 100), JSON.stringify(s2a));
+  for (let i = 0; i < 3; i++) { await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() }); await sleep(150); }
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 9000 });
+  const s2 = await sv();
+  ok('швидкість: після «затягування» підміною оцінка не більша за 90 (було ≈106–112)', s2.kmh != null && s2.kmh <= 90 && s2.kmh >= 80, JSON.stringify(s2));
+  // 3) фікси без швидкості приходять пачкою (раз на 0,4 с, а зняті раз на 1 с): швидкість рахуємо за часом фікса, а не приходу
+  await app(page, () => window.__app.sim.setSpoof(false));
+  for (let i = 0; i < 6; i++) { p = east(p, 24.4); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, brg: 90, t }); await sleep(400); }
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 6000 }).catch(() => {});
+  for (let i = 0; i < 6; i++) { p = east(p, 24.4); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, brg: 90, t }); await sleep(400); }
+  const s3 = await sv();
+  ok('швидкість: фікси без швидкості пачкою — ≈88, а не 220', s3.kind === 'gps' && s3.kmh >= 80 && s3.kmh <= 95, JSON.stringify(s3));
+  // 4) легковик (обмежувач 0 — вимкнено): 120 км/год за GPS — справжня швидкість, не підміна
+  await app(page, () => { window.__app.S.truck = { ...window.__app.S.truck, vmax: 0 }; });
+  for (let i = 0; i < 4; i++) { p = east(p, 33.3); t += 1000; await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 33.3, brg: 90, t }); await sleep(60); }
+  const s4 = await sv();
+  ok('швидкість: обмежувач вимкнено (легковик) — 120 км/год за GPS приймається', s4.kind === 'gps' && s4.kmh === 120, JSON.stringify(s4));
+  await app(page, () => { window.__app.S.truck = { ...window.__app.S.truck, vmax: 90 }; });
+  // 5) маршрут: обмежувач іде у Valhalla як top_speed — час у дорозі для фури, а не для легковика
+  const tk = await app(page, async () => { const r = window.__app.route; return r.truckOptions ? r.truckOptions() : null; });
+  ok('маршрут: обмежувач 90 передано як top_speed', tk && tk.top_speed === 90, JSON.stringify(tk));
+  ok('прохід «швидкість фури» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «швидкість фури» дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
 /* ============ прохід 2ґ: старт рейсу вже в зоні підміни — «На маршрут» ============ */
-try {
+if (run('2ґ')) try {
   const { page, ctx, errors } = await newPage(true);
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   const n = coords.length;
@@ -632,13 +686,161 @@ try {
   await ctx.close();
 } catch (e) { ok('прохід «На маршрут» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
+/* ============ прохід 4: різні екрани — нічого не накладається, кожна кнопка натискається й робить своє ============ */
+// Перевірка в самій сторінці: плашки в межах екрана й одна на одну не налазять; кнопки не перекриті й не замалі для пальця.
+const layoutCheck = () => {
+  const W = innerWidth, H = innerHeight, out = [];
+  const vis = el => !!el && !el.hidden && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+  const R = el => el.getBoundingClientRect();
+  const nm = el => el.id ? '#' + el.id : (el.getAttribute('data-panel') ? 'tab:' + el.getAttribute('data-panel') : el.className ? '.' + String(el.className).split(' ')[0] : el.tagName);
+  const inter = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
+  const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
+  for (const el of top) { const r = R(el); if (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1) out.push('за межами екрана: ' + nm(el) + ' [' + [r.left, r.top, r.right, r.bottom].map(Math.round) + ']'); }
+  for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (inter(R(top[i]), R(top[j]))) out.push('накладаються: ' + nm(top[i]) + ' і ' + nm(top[j]));
+  for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button']) {
+    const els = [...document.querySelectorAll(sel)].filter(vis);
+    for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
+  }
+  for (const b of [...document.querySelectorAll('#bQuick,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#lostLine,#bAcceptGps')].filter(vis)) {
+    const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
+    if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
+    if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
+  }
+  for (const s of ['#tripbar', '#top', '#tabs', '#man']) { const el = document.querySelector(s); if (vis(el) && el.scrollWidth > el.clientWidth + 2) out.push('не влазить по ширині: ' + s); }
+  return out;
+};
+// Справжній дотик пальцем (через протокол DevTools): карта тягнеться так само, як на телефоні
+async function fingerDrag(page, x, y, dx, dy) {
+  const c = await page.context().newCDPSession(page);
+  const pt = (px, py) => [{ x: px, y: py, id: 1, radiusX: 4, radiusY: 4, force: 1 }];
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: pt(x, y) });
+  const N = Math.max(2, Math.floor(Math.hypot(dx, dy) / 15));          // крок ~15 px: палець, що тягне, рушає одразу
+  for (let i = 1; i <= N; i++) { await c.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: pt(x + dx * i / N, y + dy * i / N) }); await sleep(30); }
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await c.detach();
+}
+const SCREENS = [
+  { n: 'S10', w: 360, h: 670, title: 'Samsung S10 (як на відео: 360×670)' }, { n: 'small', w: 360, h: 600, title: 'малий 360×600' },
+  { n: 'tiny', w: 320, h: 568, title: 'дуже малий 320×568' }, { n: 'xiaomi', w: 393, h: 800, title: 'Xiaomi 393×800' },
+  { n: 'tall', w: 412, h: 892, title: 'високий 412×892' }, { n: 'land', w: 670, h: 360, title: 'альбомна 670×360' }, { n: 'tablet', w: 800, h: 1180, dpr: 1, title: 'планшет 800×1180' },
+  { n: 'notch', w: 360, h: 700, st: 34, sb: 24, title: 'виріз угорі й жести внизу (360×700, відступи 34/24)' }
+];
+if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) {
+  try {
+    const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+    const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    if (sc.st) await app(page, ([st, sb]) => { const r = document.documentElement.style; r.setProperty('--st', st + 'px'); r.setProperty('--sb', sb + 'px'); }, [sc.st, sc.sb]);
+    const n = coords.length;
+    const trip = { id: 't-scr', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+      route: { coords, mans: [{ type: 1, ins: 'Рухайтесь по кільцю та поверніть у 1-й зʼїзд на вулицю Довгу-Предовгу Назву', street: '', streets: [], i0: 0, i1: turnIdx[1], len: 2000, time: 140 },
+        { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Пушкінська', streets: [], i0: turnIdx[1], i1: n - 1, len: 24800, time: 1600 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+    await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+    const p0 = coords[40];
+    await emitN('loc', { prov: 'gps', lat: p0[0], lon: p0[1], acc: 5, spd: 24, brg: 270, t: Date.now() });
+    await sleep(900);
+    // найтісніший стан: їдемо без GPS (кнопки ±100), камера попереду, на маневрі довгий текст
+    await app(page, () => { window.__app.nav.nudge(0); const c = document.getElementById('cam'); c.hidden = false; document.getElementById('camMax').textContent = '90'; document.getElementById('camDist').textContent = '350 м'; });
+    await sleep(250);
+    await app(page, () => { const c = document.getElementById('cam'); c.hidden = false; });
+    const L1 = await app(page, layoutCheck);
+    ok(`${T}: у дорозі без GPS нічого не накладається й не перекрите`, L1.length === 0, L1.join('; '));
+    if (sc.st) {
+      const ins = await app(page, () => { const R = s => document.querySelector(s).getBoundingClientRect(); return { top: R('#top').top, rail: R('#rail').top, tabs: R('#tabs').bottom, H: innerHeight }; });
+      ok(`${T}: плашки не заходять під виріз угорі й під смугу жестів унизу`, ins.top >= sc.st && ins.rail >= sc.st && ins.tabs <= ins.H - sc.sb + 1, JSON.stringify(ins));
+    }
+    // меню точки на карті (довге натискання): у межах екрана, нічого не перекриває
+    await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), coords[60]); await sleep(200);
+    const Lk = await app(page, layoutCheck);
+    ok(`${T}: меню точки на карті в межах екрана`, await app(page, () => !document.getElementById('pick').hidden) && Lk.length === 0, Lk.join('; '));
+    await page.click('#pick [data-k="x"]');
+    await shot(page, `a-${sc.n}-1-drive`);
+    // зсунули карту пальцем — зʼявилась «Моє місце»
+    { const [cx, cy] = await app(page, () => { document.getElementById('toasts').innerHTML = ''; const land = innerWidth > innerHeight, b = document.getElementById('bottom').getBoundingClientRect();
+        const tp = document.getElementById('top').getBoundingClientRect();
+        return land ? [Math.round(innerWidth * 0.3), Math.round(innerHeight * 0.55)] : [Math.round(innerWidth * 0.5), Math.round((tp.bottom + b.top) / 2)]; });
+      const what = await app(page, ([x, y]) => { const e = document.elementFromPoint(x, y); return e ? (e.id || String(e.className) || e.tagName) : '—'; }, [cx, cy]);
+      ok(`${T}: між плашками є вільна карта, яку можна тягнути пальцем`, /maplibregl-canvas/.test(what), what);
+      await fingerDrag(page, cx, cy, -50, -60); }
+    await sleep(250);
+    const L2 = await app(page, layoutCheck);
+    ok(`${T}: карту зсунуто — «Моє місце» видно, нічого не накладається`, !(await app(page, () => document.getElementById('bCenter').hidden)) && L2.length === 0, L2.join('; '));
+    await page.click('#bCenter');
+    ok(`${T}: «Моє місце» повертає стеження й ховається`, await app(page, () => window.__app.map.view.follow && document.getElementById('bCenter').hidden));
+    // швидкі налаштування: відкрити, кожна плитка робить своє
+    await page.click('#bQuick'); await sleep(300);
+    const qb = await app(page, () => { const q = document.getElementById('quick'), b = document.getElementById('bottom').getBoundingClientRect();   // без анімації: розмітка, а не кадр
+      return { open: !q.hidden, top: q.offsetTop, bottom: q.offsetTop + q.offsetHeight, H: innerHeight, W: innerWidth, left: q.offsetLeft, right: q.offsetLeft + q.offsetWidth, bt: b.top, tiles: q.querySelectorAll('.q-tile').length, land: innerWidth > innerHeight }; });
+    ok(`${T}: швидкі налаштування відкрились, 9 плиток, у межах екрана й не під нижньою панеллю`, qb.open && qb.tiles === 9 && qb.top >= 0 && qb.left >= 0 && qb.right <= qb.W && (qb.land ? qb.bottom <= qb.H : qb.bottom <= qb.bt + 1), JSON.stringify(qb));
+    await shot(page, `a-${sc.n}-2-quick`);
+    const st = () => app(page, () => { const A = window.__app; return { voice: A.S.voice, v3d: A.S.view3d, north: A.map.view.north, follow: A.map.view.follow, rec: !!A.S.rec, theme: A.S.theme, awake: A.S.keepAwake !== false, zb: A.map.view.zoomBias, open: !document.getElementById('quick').hidden, panel: A.ui ? null : document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent, badge: !!document.querySelector('#bQuick .q-badge') }; });
+    const tap = async k => { await page.click(`#quick [data-q="${k}"]`); await sleep(120); return st(); };
+    const s0 = await st();
+    let s1 = await tap('voice'); ok(`${T}: плитка «Звук» вимикає голос, на кнопці значок`, s1.voice === !s0.voice && s1.badge === !s1.voice && s1.open, JSON.stringify(s1));
+    s1 = await tap('voice'); ok(`${T}: «Звук» знову вмикає`, s1.voice === s0.voice && !s1.badge);
+    s1 = await tap('3d'); ok(`${T}: плитка «Вигляд» 3D ↔ 2D`, s1.v3d === !s0.v3d); await tap('3d');
+    s1 = await tap('north'); ok(`${T}: плитка «Карта» північ ↔ за рухом`, s1.north === !s0.north); await tap('north');
+    s1 = await tap('rec'); ok(`${T}: плитка «Запис треку» вмикає запис, на кнопці червона крапка`, s1.rec && s1.badge, JSON.stringify(s1)); s1 = await tap('rec'); ok(`${T}: і вимикає`, !s1.rec);
+    const th = [(await tap('theme')).theme, (await tap('theme')).theme, (await tap('theme')).theme];
+    ok(`${T}: плитка «Тема» по колу: день → ніч → авто`, th.join() === 'day,night,auto', th.join());
+    s1 = await tap('awake'); ok(`${T}: плитка «Екран» — гасне сам / не гасне (команда оболонці)`, s1.awake === !s0.awake && await app(page, v => window.__nativeCalls.includes('keepAwake:' + v), s1.awake)); await tap('awake');
+    const z0 = s0.zb; s1 = await tap('zin'); const z1 = s1.zb; s1 = await tap('zout'); s1 = await tap('zout');
+    ok(`${T}: масштаб + і −`, z1 === z0 + 1 && s1.zb === z0 - 1, `${z0} → ${z1} → ${s1.zb}`); await tap('zin');
+    await page.click('#quick [data-q="layers"]');
+    ok(`${T}: «Шари» — 9 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 9 && q.getBoundingClientRect().bottom <= innerHeight; }));
+    await page.click('#quick [data-ly="fuel"]'); ok(`${T}: галочка в «Шарах» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
+    await page.click('#quick [data-ly="fuel"]');
+    await page.click('#quick [data-q="back"]'); ok(`${T}: «Назад» із шарів — до плиток`, await app(page, () => document.querySelectorAll('#quick .q-tile').length === 9));
+    await app(page, () => { window.__app.map.view.lastTouch = Date.now(); window.__app.map.setFollow(false); });
+    s1 = await tap('center'); ok(`${T}: плитка «Моє місце» — стежить і шторка закрилась`, s1.follow && !s1.open, JSON.stringify(s1));
+    await page.click('#bQuick'); await page.click('#quick [data-q="settings"]');
+    ok(`${T}: плитка «Налаштування» відкриває налаштування`, await app(page, () => !document.getElementById('panel').hidden && /Налаштування/.test(document.getElementById('panelTitle').textContent) && document.getElementById('quick').hidden));
+    const Lp = await app(page, () => { const p = document.getElementById('panel').getBoundingClientRect(); return { top: p.top, bottom: p.bottom, H: innerHeight, W: innerWidth, right: p.right }; });
+    ok(`${T}: панель у межах екрана`, Lp.top >= 0 && Lp.bottom <= Lp.H + 1 && Lp.right <= Lp.W + 1, JSON.stringify(Lp));
+    await page.click('#panelClose');
+    await page.click('#bQuick'); await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває шторку`, await app(page, () => document.getElementById('quick').hidden));
+    await page.click('#bQuick'); ok(`${T}: системна «Назад» закриває шторку`, await app(page, () => window.__reisBack() && document.getElementById('quick').hidden));
+    // вкладки внизу: кожна відкриває свою панель і закривається
+    for (const [tab, re] of [['trip', /Рейс/], ['feed', /Події/], ['chat', /Чат/], ['lab', /Лаб/]]) {
+      await page.click(`#tabs button[data-panel="${tab}"]`);
+      const ttl = await app(page, () => document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent);
+      ok(`${T}: вкладка «${tab}» відкриває панель`, re.test(ttl), ttl);
+      await page.click(`#tabs button[data-panel="${tab}"]`);
+      ok(`${T}: повторний дотик закриває «${tab}»`, await app(page, () => document.getElementById('panel').hidden));
+    }
+    // ±100 і спідометр без GPS
+    const rdA = await app(page, () => window.__app.nav.pos.rd); await page.click('#bFwd100'); const rdB = await app(page, () => window.__app.nav.pos.rd);
+    ok(`${T}: ↑100 натискається`, rdB - rdA >= 99, Math.round(rdB - rdA) + ' м');
+    await page.click('#bBack100'); ok(`${T}: ↓100 натискається`, (await app(page, () => window.__app.nav.pos.rd)) < rdB);
+    await page.click('#speed');
+    const sp = await app(page, () => { const b = document.getElementById('spdPop'), r = b.getBoundingClientRect(); return { open: !b.hidden, top: r.top, bottom: r.bottom, H: innerHeight, right: r.right, W: innerWidth }; });
+    ok(`${T}: спідометр → вибір швидкості в межах екрана`, sp.open && sp.top >= 0 && sp.bottom <= sp.H && sp.right <= sp.W, JSON.stringify(sp));
+    await page.click('#spdPop [data-v="80"]'); ok(`${T}: вибір 80 км/год`, await app(page, () => window.__app.nav.manualSpeed() === 80 && document.getElementById('spdPop').hidden), String(await app(page, () => window.__app.nav.manualSpeed())));
+    if (sc.n === 'S10') {
+      // довге натискання пальцем на карту — меню точки; а тягнути карту — не довге натискання
+      const [lx, ly] = await app(page, () => { const tp = document.getElementById('top').getBoundingClientRect(), b = document.getElementById('bottom').getBoundingClientRect(); return [Math.round(innerWidth / 2), Math.round((tp.bottom + b.top) / 2)]; });
+      const c = await page.context().newCDPSession(page);
+      await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: lx, y: ly, id: 1 }] }); await sleep(900);
+      await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await c.detach(); await sleep(200);
+      ok(`${T}: довге натискання на карту відкриває меню точки («Я тут»)`, await app(page, () => !document.getElementById('pick').hidden && /Я тут/.test(document.getElementById('pick').textContent)));
+      await page.click('#pick [data-k="x"]');
+      await fingerDrag(page, lx, ly, 40, 50); await sleep(900);
+      ok(`${T}: потягнути карту — не довге натискання, меню не відкривається`, await app(page, () => document.getElementById('pick').hidden));
+      // шторка сама ховається, якщо її забули відкритою (15 с)
+      await page.click('#bQuick'); await sleep(15600);
+      ok(`${T}: забута відкритою шторка ховається сама за 15 с`, await app(page, () => document.getElementById('quick').hidden));
+    }
+    ok(`${T}: без помилок JS`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  } catch (e) { ok(`екран ${sc.title}: перевірка дійшла до кінця`, false, String(e.message).split('\n').slice(0, 12).join(' / ').slice(0, 900)); }
+}
+
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
-try {
+if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
   const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);
   ok('офлайн-карта: стиль Protomaps із файлу PMTiles завантажився', okSrc && rangeHits > 0, 'запитів шматками: ' + rangeHits);
   ok('офлайн-карта: шари маршруту на місці', await app(page, () => !!window.__app.map.map.getLayer('route-line') && !!window.__app.map.map.getLayer('route-done')));
-  await page.click('#bSettings'); await page.waitForSelector('#offSec');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
   const offTxt = await page.textContent('#offSec');
   ok('налаштування: розділ офлайн-карти показує стан і вибір карти', /У телефоні/.test(offTxt) && /Онлайн/.test(offTxt), offTxt.slice(0, 120));
   await shot(page, '12-offline');
@@ -653,7 +855,7 @@ try {
 } catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
-try {
+if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);
   ok('браузерна версія запускається без помилок', errors.length === 0, errors.join(' | '));

@@ -28,19 +28,14 @@
 </header>
 <div id="toasts"></div>
 
+<!-- одна кнопка швидких налаштувань замість стовпчика з 9 кнопок: на вузьких і коротких екранах нічого не накладається -->
 <nav id="rail">
-  <button class="rb" id="bSettings"></button>
-  <button class="rb" id="bLayers"></button>
-  <button class="rb" id="bCompass"></button>
-  <button class="rb" id="b3d">3D</button>
-  <button class="rb" id="bVoice"></button>
-  <button class="rb rec" id="bRec">REC</button>
+  <button class="rb" id="bQuick" aria-haspopup="dialog" aria-expanded="false"></button>
 </nav>
-<div id="layers" hidden></div>
+<div id="quick" role="dialog" hidden></div>
+<!-- «Моє місце» зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->
 <div id="zoom">
-  <button class="rb" id="bZin">+</button>
-  <button class="rb" id="bZout">−</button>
-  <button class="rb" id="bCenter"></button>
+  <button class="rb" id="bCenter" hidden></button>
 </div>
 
 <div id="speed"><b id="spdVal">0</b><span id="spdUnit"></span></div>

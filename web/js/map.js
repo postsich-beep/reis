@@ -101,6 +101,11 @@ export function initMap() {
   // Стиль не завантажився (немає мережі й кешу) — показуємо хоча б маршрут на порожньому тлі.
   styleTimer = setTimeout(() => { if (!map.isStyleLoaded() && !map.getSource('route')) { view.blank = true; map.setStyle(BLANK); bus.emit('mapBlank', true); } }, 12000);
   map.on('movestart', e => { if (e.originalEvent) { view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); } });
+  // Палець на карті — камера не смикається за машиною, інакше на повільному телефоні чи великому екрані
+  // плавне «стеження» щосекунди перериває жест і карту не вдається зсунути.
+  const cont = map.getCanvasContainer(), down = () => { view.down = true; view.touchT = Date.now(); }, up = () => { if (view.down) { view.down = false; view.touchT = Date.now(); } };
+  cont.addEventListener('pointerdown', down, true); cont.addEventListener('touchstart', down, { capture: true, passive: true });
+  for (const ev of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) window.addEventListener(ev, up, true);
   map.on('moveend', e => { if (e.originalEvent) view.lastTouch = Date.now(); });
   setupLongPress();
   puckEl = document.createElement('div'); puckEl.className = 'puck';
@@ -206,6 +211,7 @@ export function zoomBy(d) {
 }
 function follow(force) {
   if (!map || pos.lat == null || (document.hidden && !force) || !view.follow) return;
+  if (!force && (view.down && Date.now() - view.touchT < 8000 || Date.now() - (view.touchT || 0) < 700)) return;   // палець на карті
   const kmh = pos.spd * 3.6;
   let zoom = clamp(16.8 - kmh / 45, 14.4, 16.8);
   if (g.active && g.next && g.distNext < 350) zoom = Math.max(zoom, 16.3);
@@ -397,16 +403,21 @@ export function drawStops() {
 }
 
 /* ---------- довге натискання: вибір точки на карті ---------- */
+// Довге натискання на карту — меню точки («Я тут», «Їхати сюди»). Усе на подіях сторінки, а не карти:
+// на повільному телефоні чи великому екрані події карти запізнюються, і «тягну карту» ставало «довгим натисканням».
 function setupLongPress() {
-  let tm = null, start = null;
-  const cancel = () => { clearTimeout(tm); tm = null; };
-  map.on('touchstart', e => {
-    cancel(); if (e.originalEvent.touches.length !== 1) return;
-    start = e.point;
-    tm = setTimeout(() => { tm = null; bus.emit('mapPick', { lat: e.lngLat.lat, lon: e.lngLat.lng }); }, 650);
-  });
-  map.on('touchmove', e => { if (tm && start && Math.hypot(e.point.x - start.x, e.point.y - start.y) > 12) cancel(); });
-  map.on('touchend', cancel); map.on('touchcancel', cancel);
+  let tm = null, s0 = null;
+  const cont = map.getCanvasContainer(), cancel = () => { clearTimeout(tm); tm = null; };
+  cont.addEventListener('touchstart', ev => {
+    cancel(); if (ev.touches.length !== 1) return;
+    const t = ev.touches[0], t0 = Date.now(); s0 = { x: t.clientX, y: t.clientY };
+    const fire = () => { tm = null; const r = cont.getBoundingClientRect(), ll = map.unproject([s0.x - r.left, s0.y - r.top]); bus.emit('mapPick', { lat: ll.lat, lon: ll.lng }); };
+    // таймер спізнився (телефон був зайнятий малюванням) — спершу даємо дійти рухам пальця, що стоять у черзі
+    tm = setTimeout(() => { tm = Date.now() - t0 > 850 ? setTimeout(fire, 150) : (fire(), null); }, 650);
+  }, { capture: true, passive: true });
+  cont.addEventListener('touchmove', ev => { const t = ev.touches[0]; if (tm && (ev.touches.length !== 1 || !t || Math.hypot(t.clientX - s0.x, t.clientY - s0.y) > 12)) cancel(); }, { capture: true, passive: true });
+  cont.addEventListener('touchend', cancel, true); cont.addEventListener('touchcancel', cancel, true);
+  map.on('movestart', e => { if (e.originalEvent) cancel(); });
   map.on('contextmenu', e => bus.emit('mapPick', { lat: e.lngLat.lat, lon: e.lngLat.lng }));
 }
 export function showPick(p) {

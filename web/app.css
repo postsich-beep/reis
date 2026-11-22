@@ -299,9 +299,6 @@ body[data-theme="night"]{
 .pick-links{flex-wrap:wrap;gap:6px}
 .pick-links .btn.sm{flex:0 0 auto}
 /* ---- шари карти ---- */
-#layers{position:absolute;right:84px;top:calc(var(--st) + var(--th,140px) + 18px);z-index:6;width:min(260px,calc(100vw - 104px));
-  max-height:calc(100vh - var(--st) - var(--th,140px) - 140px);overflow:auto;padding:10px;border-radius:18px;
-  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
 .ly-head{font:600 13px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin:2px 6px 8px}
 .ly-row{display:flex;align-items:center;gap:12px;width:100%;min-height:50px;padding:0 8px;border:0;border-radius:12px;background:transparent;color:var(--ink);font:500 17px var(--f-ui);text-align:left}
 .ly-row:active{background:rgba(var(--glass2-rgb),.6)}
@@ -312,7 +309,6 @@ body[data-theme="night"]{
 .ly-box{flex:none;width:28px;height:28px;border-radius:8px;border:2px solid var(--ink-2);display:grid;place-items:center}
 .ly-row.on .ly-box{background:var(--ink);border-color:var(--ink);color:var(--panel)}
 .ly-box svg{width:20px;height:20px}
-#layers .btn{margin-top:8px}
 #pick .btn.sm svg{width:20px;height:20px}
 /* ---- «На маршрут» і швидкість від водія ---- */
 .man{position:relative}
@@ -357,3 +353,59 @@ body[data-theme="night"]{
 .ev.dim{opacity:.7}
 .ev .meta .ev-d{font-weight:700;color:var(--ink)}
 .evm.far{opacity:.7}
+/* ---- швидкі налаштування (1.0.19): одна кнопка замість стовпчика, шторка з плитками зверху вниз ---- */
+#rail{gap:0}
+#bQuick{position:relative}
+#bQuick.muted{color:var(--red)}
+.q-badge{position:absolute;right:-3px;top:-3px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;background:var(--red);color:#fff;border:2px solid var(--panel)}
+.q-badge svg{width:13px;height:13px;filter:none!important}
+.q-badge.rec{width:14px;height:14px;right:0;top:0;animation:pulse 1.6s ease-in-out infinite}
+#quick{position:absolute;left:10px;right:10px;top:calc(var(--st) + 8px);z-index:8;max-height:calc(100% - var(--st) - var(--bh,150px) - 16px);overflow:auto;overscroll-behavior:contain;
+  padding:6px 10px 12px;border-radius:20px;background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);
+  -webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:qdown .18s ease-out}
+@keyframes qdown{from{transform:translateY(-14px);opacity:0}to{transform:none;opacity:1}}
+.q-head{display:flex;align-items:center;gap:6px;min-height:48px}
+.q-head b{flex:1;min-width:0;font:600 17px var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-left:4px}
+.q-x{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:var(--ink)}
+.q-x svg{width:24px;height:24px}
+.q-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.q-tile{min-height:80px;padding:8px 4px 6px;border-radius:16px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;text-align:center;min-width:0}
+.q-tile svg{width:28px;height:28px}
+.q-tile .q-txt{font:800 22px/28px var(--f-num)}
+.q-l{font:600 14px/1.15 var(--f-ui);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-s{font:400 12px/1.15 var(--f-ui);color:var(--ink-2);max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.q-tile.on{background:var(--ink);color:var(--panel)} .q-tile.on .q-s{color:var(--panel);opacity:.8}
+.q-tile.warn{background:var(--red);color:#fff} .q-tile.warn .q-s{color:#fff;opacity:.9}
+.q-tile.rec{background:var(--red);color:#fff} .q-tile.rec .q-s{color:#fff}
+.q-tile:active,.q-zoom button:active{transform:scale(.96)}
+.q-zoom{display:flex;align-items:center;gap:10px;margin-top:10px}
+.q-zoom span{flex:1;text-align:center;font:600 14px var(--f-ui);color:var(--ink-2)}
+.q-zoom button{flex:none;width:88px;height:52px;border-radius:16px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);font:700 30px/1 var(--f-num)}
+.q-ly .ly-row{min-height:52px}
+.q-ly .btn{margin-top:8px}
+#quick .q-tile,#quick .q-zoom button,#quick .q-x{text-shadow:none}
+@media (orientation:landscape){
+  #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
+  .q-tile{min-height:70px}
+}
+@media (max-width:340px){
+  .q-grid{grid-template-columns:repeat(3,1fr);gap:6px}
+  .q-tile{min-height:72px} .q-l{font-size:13px} .q-s{font-size:11px}
+}
+/* адаптивність (1.0.19): «Моє місце» не налазить на ⓘ; рядок втрати GPS — достатньо високий для пальця */
+#zoom{bottom:calc(var(--bh,150px) + 30px)}
+.tb-lost{min-height:30px;line-height:30px;margin-top:0}
+@media (orientation:landscape){
+  #rail{right:10px;top:calc(var(--st) + 10px)}
+  #zoom{bottom:30px}
+  #spdPop{bottom:126px;max-height:calc(100% - var(--st) - 136px);overflow:auto}
+}
+/* меню точки: не залазить на кнопку швидких налаштувань; на коротких екранах опускається на спідометр (він під ним на час вибору) */
+#pick{max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 208px);overflow:auto}
+@media (orientation:portrait) and (max-height:720px){
+  #pick{bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 88px)}
+  body:has(#pick:not([hidden])) :is(#speed,#cam,#attr,#zoom){visibility:hidden}
+}
+@media (orientation:landscape){
+  #pick{left:auto;right:10px;width:calc(46% - 20px);bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--bh,150px) - 84px);overflow:auto}   /* нижче кнопки швидких налаштувань */
+}

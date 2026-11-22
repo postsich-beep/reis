@@ -78,9 +78,10 @@ export const oblastOf = s => { if (!s) return null; const o = OBLASTS.find(o => 
 export const oblastName = id => { const o = OBLASTS.find(o => o.id === id); return o ? (S.lang === 'ru' ? o.ru : o.uk) : id; };
 
 /* ---------- маршрут ---------- */
-function truckOptions() {
-  const t = S.truck;
-  return { height: +t.height, width: +t.width, length: +t.length, weight: +t.weight, axle_load: +t.axle, hazmat: !!t.hazmat };
+export function truckOptions() {
+  const t = S.truck, o = { height: +t.height, width: +t.width, length: +t.length, weight: +t.weight, axle_load: +t.axle, hazmat: !!t.hazmat };
+  if (+t.vmax > 0) o.top_speed = Math.round(+t.vmax);      // обмежувач: час у дорозі рахується для фури, а не для легковика
+  return o;
 }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
 export async function requestRoute(pts, heading, costing = 'truck') {

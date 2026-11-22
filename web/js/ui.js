@@ -38,7 +38,8 @@ function staticLabels() {
   tabs.forEach(b => { b.innerHTML = ICON[b.dataset.panel] + '<span>' + t(names[b.dataset.panel]) + '</span>'; });
   $('bMic').innerHTML = ICON.mic; $('bMic').setAttribute('aria-label', t('micHint'));
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
-  $('bCenter').innerHTML = ICON.center;
+  $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
+  $('bQuick').setAttribute('aria-label', t('quickTitle'));
   railState();
 }
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
@@ -67,26 +68,80 @@ function layersHtml() {
     return `<button class="ly-row${on ? ' on' : ''}" data-ly="${k}" role="checkbox" aria-checked="${on}">${dot(ty, k)}<span class="grow">${t(lbl)}</span><span class="ly-box">${on ? ICON.check : ''}</span></button>`;
   }).join('') + `<button class="btn sm wide" data-ly="${anyOn ? '#off' : '#on'}">${anyOn ? t('lyAllOff') : t('lyAllOn')}</button>`;
 }
-function layersOpen(open) {
-  const box = $('layers'); box.hidden = !open; $('bLayers').classList.toggle('on', open);
-  if (open) box.innerHTML = layersHtml();
-}
 function layersClick(e) {
-  const b = e.target.closest('[data-ly]'); if (!b) return;
+  const b = e.target.closest('[data-ly]'); if (!b) return false;
   const k = b.dataset.ly;
   if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; }
   else setLayer(k, !layerOn(k));
-  $('layers').innerHTML = layersHtml();
+  return true;
+}
+
+/* ---------- швидкі налаштування: одна кнопка → шторка з великими плитками (як шторка Android) ----------
+   Звук, 3D, північ/курс, моє місце, шари, запис, тема, екран, налаштування, масштаб. Сама ховається за 15 с без дотиків,
+   щоб у дорозі не лишилась відкритою. Значок на кнопці показує, що звук вимкнено чи йде запис. */
+const Q_IDLE = 15000;
+let quickView = 'main', quickTimer = null;
+const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
+function quickHtml() {
+  const head = (title, back) => `<div class="q-head">${back ? `<button class="q-x" data-q="back" aria-label="${t('back')}">${ICON.back}</button>` : ''}<b>${title}</b><button class="q-x" data-q="close" aria-label="${t('close')}">${ICON.x}</button></div>`;
+  if (quickView === 'layers') return head(t('lyTitle'), true) + `<div class="q-ly">${layersHtml().replace(/^<div class="ly-head">.*?<\/div>/, '')}</div>`;
+  const tile = (k, icon, label, state, on, extra = '') => `<button class="q-tile${on ? ' on' : ''}${extra}" data-q="${k}" aria-pressed="${!!on}">${icon}<span class="q-l">${label}</span><span class="q-s">${state}</span></button>`;
+  const nOn = LAYERS.filter(([k]) => layerOn(k)).length, th = S.theme || 'auto';
+  return head(t('quickTitle')) + `<div class="q-grid">
+    ${tile('voice', S.voice ? ICON.vol : ICON.mute, t('qVoice'), S.voice ? t('qOn') : t('qOff'), S.voice, S.voice ? '' : ' warn')}
+    ${tile('3d', `<b class="q-txt">${S.view3d ? '3D' : '2D'}</b>`, t('qView'), S.view3d ? t('q3d') : t('q2d'), S.view3d)}
+    ${tile('north', view.north ? ICON.north : ICON.head, t('qOrient'), view.north ? t('qNorthUp') : t('qHeadUp'), view.north)}
+    ${tile('center', ICON.center, t('qCenter'), view.follow ? t('qFollowOn') : t('qFollowOff'), view.follow)}
+    ${tile('layers', ICON.layers, t('qLayers'), nOn + ' / ' + LAYERS.length, false)}
+    ${tile('rec', ICON.rec, t('qRec'), S.rec ? t('qRecOn') : t('qOff'), S.rec, S.rec ? ' rec' : '')}
+    ${tile('theme', th === 'night' ? ICON.moon : th === 'day' ? ICON.sun : ICON.auto, t('qTheme'), t(th === 'night' ? 'themeNight' : th === 'day' ? 'themeDay' : 'themeAuto'), false)}
+    ${tile('awake', ICON.awake, t('qAwake'), S.keepAwake !== false ? t('qAwakeOn') : t('qAwakeOff'), S.keepAwake !== false)}
+    ${tile('settings', ICON.gear, t('qSettings'), t('qAll'), false)}
+  </div>
+  <div class="q-zoom"><button data-q="zout" aria-label="${t('qZoomOut')}">−</button><span>${t('qZoom')}</span><button data-q="zin" aria-label="${t('qZoomIn')}">+</button></div>`;
+}
+function quickRender() { const box = $('quick'); if (!box.hidden) box.innerHTML = quickHtml(); }
+function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => quickOpen(false), Q_IDLE); }
+export function quickOpen(open) {
+  const box = $('quick');
+  if (open) { quickView = 'main'; box.hidden = false; box.innerHTML = quickHtml(); $('spdPop').hidden = true; quickIdle(); }
+  else { box.hidden = true; clearTimeout(quickTimer); }
+  $('bQuick').classList.toggle('on', !!open); $('bQuick').setAttribute('aria-expanded', String(!!open));
+}
+function quickClick(e) {
+  quickIdle();
+  if (quickView === 'layers' && layersClick(e)) { quickRender(); return; }
+  const b = e.target.closest('[data-q]'); if (!b) return;
+  const k = b.dataset.q;
+  if (k === 'close') return quickOpen(false);
+  if (k === 'back') { quickView = 'main'; return quickRender(); }
+  if (k === 'layers') { quickView = 'layers'; return quickRender(); }
+  if (k === 'voice') { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); }
+  else if (k === '3d') { S.view3d = !S.view3d; setFollow(true); }
+  else if (k === 'north') { view.north = !view.north; setFollow(true); }
+  else if (k === 'center') { setFollow(true); quickOpen(false); return; }
+  else if (k === 'rec') toggleRec();
+  else if (k === 'theme') { S.theme = THEME_NEXT[S.theme || 'auto']; applyTheme(); }
+  else if (k === 'awake') { S.keepAwake = S.keepAwake === false; P.keepAwake(S.keepAwake); }
+  else if (k === 'settings') { quickOpen(false); currentPanel() === 'settings' ? closePanel() : openPanel('settings'); return; }
+  else if (k === 'zin') zoomBy(1);
+  else if (k === 'zout') zoomBy(-1);
+  quickRender();
+}
+function toggleRec() {
+  S.rec = !S.rec;
+  if (S.rec) toast(t('recOn'), '', 2500);
+  else if (track.pts.length > 1) { const n = exportGpx(); toast(n ? t('recSaved', trackKm().toFixed(1), n) : t('recOff'), 'green', 6000); }
+  else toast(t('recOff'), '', 2000);
 }
 
 function railState() {
-  $('bCompass').innerHTML = view.north ? ICON.north : ICON.head; $('bCompass').classList.toggle('on', view.north);
-  $('b3d').classList.toggle('on', !!S.view3d); $('b3d').textContent = S.view3d ? '3D' : '2D';
-  $('bSettings').innerHTML = ICON.gear; $('bSettings').setAttribute('aria-label', t('settings'));
-  $('bLayers').innerHTML = ICON.layers; $('bLayers').setAttribute('aria-label', t('lyTitle'));
-  $('bVoice').innerHTML = S.voice ? ICON.vol : ICON.mute; $('bVoice').classList.toggle('off', !S.voice);
-  $('bRec').classList.toggle('on', !!S.rec);
-  $('bCenter').classList.toggle('need', !view.follow);
+  const qb = $('bQuick');
+  qb.innerHTML = ICON.quick + (!S.voice ? `<i class="q-badge mute">${ICON.mute}</i>` : S.rec ? '<i class="q-badge rec"></i>' : '');
+  qb.classList.toggle('muted', !S.voice);
+  const c = $('bCenter'), need = !view.follow;
+  if (c.hidden === need) { c.hidden = !need; c.classList.toggle('need', need); }
+  quickRender();
 }
 
 const WHY = { timeout: 'whyTimeout', spoof: 'whySpoof', weak: 'whyWeak', manual: 'whyManual' };
@@ -729,6 +784,7 @@ export function initUI() {
   });
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
+    if (!$('quick').hidden) { quickOpen(false); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
     if (currentPanel()) { closePanel(); return true; }
     return false;
@@ -737,21 +793,9 @@ export function initUI() {
   $('strip').onclick = () => openPanel('feed');
   $('panelClose').onclick = closePanel;
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => { b.onclick = () => currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel); });
-  $('bCompass').onclick = () => { view.north = !view.north; setFollow(true); railState(); };
-  $('b3d').onclick = () => { S.view3d = !S.view3d; setFollow(true); };
-  $('bSettings').onclick = () => { layersOpen(false); currentPanel() === 'settings' ? closePanel() : openPanel('settings'); };
-  $('bLayers').onclick = e => { e.stopPropagation(); layersOpen($('layers').hidden); };
-  $('layers').onclick = e => { e.stopPropagation(); layersClick(e); };
-  document.addEventListener('pointerdown', e => { if (!$('layers').hidden && !e.target.closest('#layers,#bLayers')) layersOpen(false); });
-  bus.on('settings', k => { if (!$('layers').hidden && /^(mapStops|mapStopTypes|mapEvents|mapHazards|roughMap|cams)$/.test(k)) $('layers').innerHTML = layersHtml(); });
-  $('bVoice').onclick = () => { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); };
-  $('bRec').onclick = () => {
-    S.rec = !S.rec;
-    if (S.rec) toast(t('recOn'), '', 2500);
-    else if (track.pts.length > 1) { const n = exportGpx(); toast(n ? t('recSaved', trackKm().toFixed(1), n) : t('recOff'), 'green', 6000); }
-    else toast(t('recOff'), '', 2000);
-  };
-  $('bZin').onclick = () => zoomBy(1); $('bZout').onclick = () => zoomBy(-1);
+  $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden); };
+  $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
+  document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
   // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
   for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
