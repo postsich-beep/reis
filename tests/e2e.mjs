@@ -401,10 +401,12 @@ if (run('1')) try {
   const w1 = await whole();
   ok('вибір: увесь маршрут видно цілком, без прокрутки (обидва варіанти між верхньою плашкою і шторкою)', w1.n > 20 && w1.out === 0 && w1.under === 0, JSON.stringify(w1));
   ok('вибір: зверху шторки А → С (звідки й куди)', /А\s*Харків.*С\s*Полтава/.test(w1.head), w1.head);
-  await page.click('#routePick [data-rp="zin"]'); await sleep(500);
+  // на повільному сервері GitHub анімація масштабу триває довше — чекаємо, доки карта зупиниться (до 4 с), а не фіксовані 0,5 с
+  const settle = z0 => page.waitForFunction(z0 => { const m = window.__app.map.map; return !m.isMoving() && Math.abs(m.getZoom() - z0) > 0.3; }, z0, { timeout: 4000 }).catch(() => {});
+  await page.click('#routePick [data-rp="zin"]'); await settle(w1.zoom);
   const w2 = await whole();
   ok('вибір: «+» наближає карту', w2.zoom > w1.zoom + 0.5, `${w1.zoom} → ${w2.zoom}`);
-  await page.click('#routePick [data-rp="zout"]'); await page.click('#routePick [data-rp="zout"]'); await sleep(500);
+  await page.click('#routePick [data-rp="zout"]'); await page.click('#routePick [data-rp="zout"]'); await settle(w2.zoom); await sleep(300);
   ok('вибір: «−» віддаляє', (await whole()).zoom < w2.zoom - 1.2);
   await page.click('#routePick [data-rp="fit"]'); await sleep(800);
   const w3 = await whole();
