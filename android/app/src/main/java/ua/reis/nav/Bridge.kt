@@ -54,13 +54,18 @@ class Bridge(private val act: MainActivity) {
 
     private fun emit(type: String, o: JSONObject) = act.emit(type, o.toString())
 
+    // Якісний голос із завантажуваного пакета (sherpa-onnx, Piper). Не вибрано чи не вдалося — системний голос телефону.
+    private val neural = NeuralTts(act.applicationContext) { t, o -> emit(t, o) }
+    private class VoiceSel(val pack: String, val sid: Int, val lang: String)
+    @Volatile private var voiceSel: VoiceSel? = null
+
     /* ---------- загальне ---------- */
     @JavascriptInterface
     fun info(): String = JSONObject()
         .put("native", true).put("app", BuildConfig.VERSION_NAME).put("code", BuildConfig.VERSION_CODE)
         .put("web", WebStore.activeVersion).put("bundledWeb", WebStore.bundledVersion)
         .put("sdk", Build.VERSION.SDK_INT).put("model", Build.MANUFACTURER + " " + Build.MODEL)
-        .put("repo", BuildConfig.UPDATE_REPO).put("nativeRev", BuildConfig.NATIVE_REV).put("inst", true).toString()
+        .put("repo", BuildConfig.UPDATE_REPO).put("nativeRev", BuildConfig.NATIVE_REV).put("inst", true).put("voices", 1).toString()
 
     @JavascriptInterface
     fun ready() { act.onJsReady() }
@@ -152,6 +157,20 @@ class Bridge(private val act: MainActivity) {
 
     @JavascriptInterface
     fun speak(text: String, lang: String, rate: Float, id: String) {
+        val v = voiceSel
+        if (v != null && lang.lowercase().startsWith(v.lang) && neural.installed(v.pack)) {
+            main.post { try { tts?.stop() } catch (_: Exception) {} }
+            neural.speak(v.pack, v.sid, text, rate, id) { err ->
+                emit("voice", JSONObject().put("state", "fallback").put("error", err))
+                systemSpeak(text, lang, rate, id)
+            }
+            return
+        }
+        neural.stop()
+        systemSpeak(text, lang, rate, id)
+    }
+
+    private fun systemSpeak(text: String, lang: String, rate: Float, id: String) {
         main.post {
             if (ttsFailed) { emit("tts", JSONObject().put("id", id).put("state", "error")); return@post }
             withTts {
@@ -171,7 +190,32 @@ class Bridge(private val act: MainActivity) {
     }
 
     @JavascriptInterface
-    fun stopSpeak() { main.post { try { tts?.stop() } catch (_: Exception) {} } }
+    fun stopSpeak() { neural.stop(); main.post { try { tts?.stop() } catch (_: Exception) {} } }
+
+    /* ---------- голоси: системний або якісний із пакета ---------- */
+    /** pack = "" — системний голос; інакше пакет (напр. "uk") і диктор sid; lang — для якої мови інтерфейсу (напр. "uk"). */
+    @JavascriptInterface
+    fun setVoice(pack: String, sid: Int, lang: String) {
+        if (pack.isEmpty()) { voiceSel = null; neural.unload(); return }
+        voiceSel = VoiceSel(pack, sid, lang.lowercase())
+        neural.preload(pack)
+    }
+
+    @JavascriptInterface
+    fun voiceStatus(): String = neural.status().toString()
+
+    @JavascriptInterface
+    fun voiceDownload(pack: String) {
+        if (BuildConfig.UPDATE_REPO.isEmpty()) return
+        val safe = pack.filter { it.isLetterOrDigit() || it == '-' || it == '_' }
+        neural.download(safe, "https://github.com/" + BuildConfig.UPDATE_REPO + "/releases/download/voices/voice-" + safe + ".zip") { u -> open(u, 30000) }
+    }
+
+    @JavascriptInterface
+    fun voiceCancel() = neural.cancelDownload()
+
+    @JavascriptInterface
+    fun voiceDelete(pack: String) = neural.delete(pack.filter { it.isLetterOrDigit() || it == '-' || it == '_' })
 
     /* ---------- розпізнавання мови ---------- */
     private fun sttError(code: String) = emit("stt", JSONObject().put("state", "error").put("code", code))
@@ -495,6 +539,7 @@ class Bridge(private val act: MainActivity) {
 
     fun shutdown() {
         try { tts?.stop(); tts?.shutdown() } catch (_: Exception) {}
+        try { neural.unload() } catch (_: Throwable) {}
         try { sr?.destroy() } catch (_: Exception) {}
         io.shutdownNow()
     }

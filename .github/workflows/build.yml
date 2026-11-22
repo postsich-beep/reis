@@ -51,6 +51,21 @@ jobs:
           cp /tmp/bma/sprites/v4/light.json /tmp/bma/sprites/v4/light.png /tmp/bma/sprites/v4/light@2x.json /tmp/bma/sprites/v4/light@2x.png web/vendor/sprites/ || echo "значків немає"
           du -sh web/vendor/glyphs web/vendor/sprites || true
 
+      - name: Рушій якісного голосу (sherpa-onnx v1.13.6, лише arm64-v8a і armeabi-v7a)
+        run: |
+          set -e
+          V=v1.13.6
+          F=sherpa-onnx-$V-android.tar.bz2
+          curl -fsSL --retry 3 -o /tmp/$F "https://github.com/k2-fsa/sherpa-onnx/releases/download/$V/$F" \
+            || curl -fsSL --retry 3 -o /tmp/$F "https://huggingface.co/csukuangfj2/sherpa-onnx-libs/resolve/main/$F"
+          mkdir -p /tmp/so && tar xjf /tmp/$F -C /tmp/so
+          for abi in arm64-v8a armeabi-v7a; do
+            mkdir -p android/app/src/main/jniLibs/$abi
+            cp -v /tmp/so/jniLibs/$abi/libsherpa-onnx-jni.so android/app/src/main/jniLibs/$abi/
+            if [ -f /tmp/so/jniLibs/$abi/libonnxruntime.so ]; then cp -v /tmp/so/jniLibs/$abi/libonnxruntime.so android/app/src/main/jniLibs/$abi/; fi
+          done
+          du -sh android/app/src/main/jniLibs/*
+
       - name: Інтерфейс усередину APK
         run: |
           mkdir -p android/app/src/main/assets

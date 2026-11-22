@@ -148,6 +148,8 @@ function settingsHtml() {
 
   <div class="sec">${t('secSound')}</div>
   <div class="list">${tog('voice')}${tog('vibrate')}</div>
+  <div class="sec">${t('secVoice')}</div>
+  <div id="voiceSec">${voiceHtml()}</div>
   <div class="muted" style="margin:10px 2px 6px">${t('setRate')}</div>
   ${seg('rate', RATES.map(([k, r]) => [k, t('rate_' + k), Math.abs((S.ttsRate || 1) - r) < 0.05]))}
   <div class="btns" style="margin-top:0"><button class="btn wide" data-act="testVoice">${t('testVoice')}</button></div>
@@ -188,6 +190,8 @@ definePanel('settings', {
     body.innerHTML = settingsHtml();
     body.onclick = e => {
       const row = e.target.closest('[data-tg]'), b = e.target.closest('button');
+      const vr = e.target.closest('[data-voice]'); if (vr) { selectVoice(vr.dataset.voice); return; }
+      if (b && /^v(Dl|Cancel|Del)$/.test(b.dataset.act || '')) { voiceAct(b); return; }
       if (row) {
         const k = row.dataset.tg; S[k] = !S[k];
         const sw = row.querySelector('.sw'); sw.classList.toggle('on', !!S[k]); sw.setAttribute('aria-checked', !!S[k]);
@@ -354,6 +358,45 @@ definePanel('diag', {
   update(body) { const lb = $('logBox'), st = lb ? lb.scrollTop : 0; body.innerHTML = diagHtml(); const nb = $('logBox'); if (nb) nb.scrollTop = st; }
 });
 
+/* =====================  ГОЛОС: телефону або якісний із пакета  ===================== */
+// Пакет «uk» (Piper ukrainian_tts) має трьох дикторів: 0 — Лада, 1 — Микита, 2 — Тетяна.
+const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta'], ['uk:0', 'uk', 0, 'vLada']];
+const vst = { dl: null };
+const fmtMB = b => Math.max(1, Math.round((b || 0) / 1e6)) + ' МБ';
+export function applyVoice() {
+  const v = VOICES.find(x => x[0] === (S.ttsVoice || 'system'));
+  if (!v || !v[1]) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
+}
+function voiceHtml() {
+  if (!P.isNative) return `<div class="muted">${t('vWeb')}</div>`;
+  if (!P.hasVoices()) return `<div class="muted">${t('vOldShell')}</div>`;
+  const st = P.voiceStatus() || {}, have = st.packs && st.packs.uk, cur = S.ttsVoice || 'system';
+  const dl = vst.dl || (st.dl && st.dl.pack === 'uk' ? { pct: st.dl.pct } : null);
+  const rows = VOICES.map(([id, pack, , nk, dk]) => `<button class="vrow${cur === id ? ' on' : ''}" data-voice="${id}" aria-pressed="${cur === id}"><i class="vdot"></i><span class="grow"><b>${t(nk)}</b><small>${pack ? t('vNeuralD') + (have ? '' : ' · ' + t('vNeedPack')) : t(dk)}</small></span></button>`).join('');
+  let pk;
+  if (dl) pk = `<div class="vbar"><i style="width:${Math.max(3, dl.pct)}%"></i></div><div class="vdl"><span class="muted">${dl.unzip ? t('vUnzip') : t('vDlNow', dl.pct >= 0 ? dl.pct + '%' : '')}</span><button class="btn sm" data-act="vCancel">${t('vCancel')}</button></div>`;
+  else if (have) pk = `<div class="vdl"><span class="muted">${t('vPackHave', fmtMB(have.size))}</span><button class="btn sm" data-act="vDel">${t('vDel')}</button></div>`;
+  else pk = `<div class="muted">${t('vPackSize')}</div><div class="btns"><button class="btn pri wide" data-act="vDl">${t('vDl')}</button></div>`;
+  return `<div class="list vlist">${rows}</div><div class="card vpack"><b>${t('vPack')}</b>${pk}</div>` +
+    (S.lang === 'ru' ? `<div class="muted" style="margin-top:6px">${t('vUkOnly')}</div>` : '') + (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '');
+}
+function voiceRefresh() { const el = $('voiceSec'); if (el) el.innerHTML = voiceHtml(); }
+function voiceDl(pack) { vst.dl = { pct: 0 }; if (!P.voiceDownload(pack)) vst.dl = null; voiceRefresh(); }
+function selectVoice(id) {
+  const v = VOICES.find(x => x[0] === id); if (!v) return;
+  S.ttsVoice = id; applyVoice();
+  const st = P.voiceStatus() || {};
+  if (v[1] && !(st.packs && st.packs[v[1]])) { if (!vst.dl && !(st.dl && st.dl.pack)) voiceDl(v[1]); }
+  else setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), v[1] ? 600 : 0);
+  voiceRefresh();
+}
+function voiceAct(b) {
+  const a = b.dataset.act;
+  if (a === 'vDl') voiceDl('uk');
+  else if (a === 'vCancel') P.voiceCancel();
+  else if (a === 'vDel') { if (b.dataset.sure) P.voiceDelete('uk'); else { b.dataset.sure = '1'; b.textContent = t('vDelSure'); } }
+}
+
 /* =====================  ПРО ЗАСТОСУНОК І ОНОВЛЕННЯ  ===================== */
 export const upd = { state: 'idle', apk: null, web: null, error: '', webReady: false, webName: '', apkSt: '', pct: -1, checkedAt: 0 };
 function aboutHtml() {
@@ -406,6 +449,18 @@ export function initLab() {
     if (calm()) { updReload(); return; }
     clearInterval(calmTimer); calmTimer = setInterval(() => { if (calm()) { clearInterval(calmTimer); updReload(); } }, 20000);
   });
+  bus.on('native:voice', d => {
+    const s = d && d.state;
+    if (s === 'dl') vst.dl = { pct: d.pct };
+    else if (s === 'unzip') vst.dl = { pct: 92, unzip: true };
+    else if (s === 'ready') { vst.dl = null; applyVoice(); toast(t('vReady'), 'green', 5000); if ((S.ttsVoice || 'system') !== 'system') setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), 1800); }
+    else if (s === 'error' || s === 'cancel') { vst.dl = null; if (s === 'error') toast(t('vErr', d.error === 'space' ? t('vNoSpace') : (d.error || '')), 'yellow', 8000); }
+    else if (s === 'deleted') vst.dl = null;
+    else if (s === 'fallback') log('warn', 'якісний голос не спрацював: ' + (d.error || ''));
+    else if (s === 'loaded') log('info', `голос завантажено в памʼять за ${d.ms} мс`);
+    voiceRefresh();
+  });
+  applyVoice();
   bus.on('native:apk', d => {
     upd.apkSt = d.state || ''; if (d.pct != null) upd.pct = d.pct; if (d.error) { upd.error = d.error; log('warn', 'оновлення APK: ' + d.error); }
     updBar();

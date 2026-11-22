@@ -515,3 +515,15 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
 .rp-btns{flex-wrap:wrap}
 .rp-btns .btn.pri{flex:1 1 100%}
 .rp-btns .btn{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* Налаштування → Голос (1.1.2) */
+.vlist{gap:6px}
+.vrow{display:flex;align-items:center;gap:12px;width:100%;text-align:left;padding:10px 12px;border-radius:14px;background:var(--panel-2);min-height:56px}
+.vrow b{display:block;font-size:16px}.vrow small{display:block;color:var(--ink-2);font-size:13px;margin-top:2px}
+.vdot{flex:none;width:22px;height:22px;border-radius:50%;border:2px solid var(--ink-2)}
+.vrow.on{outline:2px solid var(--amber)}
+.vrow.on .vdot{border-color:var(--amber);background:radial-gradient(circle,var(--amber) 0 5px,transparent 6px)}
+.vpack{margin-top:10px}
+.vpack b{display:block;margin-bottom:6px}
+.vbar{height:10px;border-radius:5px;background:var(--panel-2);overflow:hidden;margin:6px 0}
+.vbar i{display:block;height:100%;background:var(--green);transition:width .3s}
+.vdl{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:4px}

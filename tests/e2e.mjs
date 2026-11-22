@@ -155,6 +155,9 @@ async function newPage(native, opts = {}) {
       },
       offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
       offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {}, apkInBrowser() { window.__nativeCalls.push('apkInBrowser'); },
+      // якісні голоси: стан пакета живе в window.__voice
+      voiceStatus: () => JSON.stringify(window.__voice || { packs: {} }), setVoice(p, sid, l) { window.__nativeCalls.push('setVoice:' + p + ':' + sid + ':' + l); },
+      voiceDownload(p) { window.__nativeCalls.push('voiceDownload:' + p); window.__voice = { packs: {}, dl: { pack: p, pct: 0 } }; }, voiceCancel() { window.__nativeCalls.push('voiceCancel'); }, voiceDelete(p) { window.__nativeCalls.push('voiceDelete:' + p); window.__voice = { packs: {} }; cb('voice', { state: 'deleted', pack: p }); },
       keepAwake(on) { window.__nativeCalls.push('keepAwake:' + on); }, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() { window.__nativeCalls.push('checkUpdate'); }, applyWebUpdate() { window.__nativeCalls.push('applyWebUpdate'); }, installApk() { window.__nativeCalls.push('installApk'); }, reloadUi() { window.__nativeCalls.push('reloadUi'); }
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
@@ -404,11 +407,11 @@ if (run('1')) try {
   await shot(page, '03-drive');
   // пройдене: за замовчуванням ховаємо — на карті лише шлях попереду; за налаштуванням — блідо
   const pr = await app(page, async () => { const m = window.__app.map.map, g = window.__app.guide.g;
-    const r = await m.getSource('route').getData(), dn = await m.getSource('route-done').getData();
-    const first = (r.features || [r])[0].geometry.coordinates[0], here = window.__app.nav.pos;
-    const off = window.__app.core.hav({ lat: first[1], lon: first[0] }, here);
+    const r = await m.getSource('route-near').getData(), dn = await m.getSource('route-done').getData();
+    const first = (r.features || [r])[0].geometry.coordinates[0], here = window.__app.nav.pos, cur = window.__app.map.camState.cur;
+    const off = window.__app.core.hav({ lat: first[1], lon: first[0] }, cur);
     return { off: Math.round(off), rd: Math.round(here.rd), done: dn.geometry ? dn.geometry.coordinates.length : (dn.features || []).length }; });
-  ok('пройдена частина маршруту схована: лінія починається від машини', pr.rd > 20 && pr.off < 60 && pr.done === 0, JSON.stringify(pr));
+  ok('пройдена частина маршруту схована: лінія починається просто під стрілкою', pr.rd > 20 && pr.off < 8 && pr.done === 0, JSON.stringify(pr));
   await app(page, () => { window.__app.S.passed = 'grey'; });
   await sleep(2300);
   const done = await app(page, async () => { const s = window.__app.map.map.getSource('route-done'); const d = await s.getData(); return d && d.geometry ? d.geometry.coordinates.length : 0; });
@@ -1071,8 +1074,9 @@ const camDrive = (page, o) => app(page, async o => {
     const cs = A.map.camState.cur, ll = m.project([cs.lon, cs.lat]), rd = A.nav.pos.rd;
     const ah = R.at(Math.min(R.total, (A.map.camState.dd ?? rd) + 80)), pa = m.project([ah.lon, ah.lat]);
     const hit = document.elementFromPoint(c.left + a.x, c.top + a.y);
-    const S0 = A.map.camState;
-    out.push({ drift, dd: S0.dd, ft: S0.ft, x: Math.round(r.left + r.width / 2 - c.left - a.x), y: Math.round(r.top + r.height / 2 - c.top - a.y), rot: Math.round(rot * 10) / 10,
+    const S0 = A.map.camState, nd = m.getSource('route-near')._data, f0 = nd && nd.features && nd.features[0];
+    const gap = f0 && S0.cur ? Math.round(Math.hypot((f0.geometry.coordinates[0][0] - S0.cur.lon) * 71500, (f0.geometry.coordinates[0][1] - S0.cur.lat) * 111320) * 10) / 10 : null;
+    out.push({ gap, drift, dd: S0.dd, ft: S0.ft, x: Math.round(r.left + r.width / 2 - c.left - a.x), y: Math.round(r.top + r.height / 2 - c.top - a.y), rot: Math.round(rot * 10) / 10,
       ux: Math.round(pa.x - ll.x), uy: Math.round(pa.y - ll.y), turn: o.turns.some(t => Math.abs(t - rd) < 150), f: A.map.view.follow, mode: A.nav.pos.mode, rd: Math.round(rd),
       cov: hit && !hit.closest('.puck') && !hit.classList.contains('maplibregl-canvas') ? (hit.id || String(hit.className).split(' ')[0] || hit.tagName) : '' });
   }
@@ -1088,6 +1092,8 @@ function camJudge(T, what, out) {
   ok(`${T}: ${what} — на прямій маршрут попереду йде вгору, а не вбік`, str.length >= 5 && bad.length === 0, `прямих ${str.length}, вбік ${bad.length}` + (bad[0] ? ` (rd ${bad[0].rd}: ux=${bad[0].ux}, uy=${bad[0].uy})` : ''));
   const cov = fol.filter(s => s.cov);
   ok(`${T}: ${what} — стрілку нічого не закриває`, cov.length === 0, cov.slice(0, 3).map(s => s.cov).join(', '));
+  const gp = fol.filter(s => s.gap != null), wg = gp.reduce((w, s) => Math.max(w, s.gap), 0);
+  ok(`${T}: ${what} — лінія маршруту зникає просто під стрілкою, плавно (розрив ≤ 4 м у кожному замірі)`, gp.length >= 10 && wg <= 4, `замірів ${gp.length}, найбільший розрив ${wg} м`);
   const last = fol.slice(-5);
   ok(`${T}: ${what} — стрілка на своїй висоті (у нижній частині вільної карти)`, last.length && last.every(s => s.drift <= 2), last.map(s => s.drift).join(','));
 }
@@ -1134,7 +1140,7 @@ if (run('7')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     if (await app(page, () => window.__app.map.view.follow)) { await sleep(400); await fingerDrag(page, cx, cy, 60, 60); }
     const off = await app(page, () => !window.__app.map.view.follow);
     await page.click('#bCenter'); await sleep(700);
-    const r4 = await camDrive(page, { d0: 0, v: 0, ms: 2500, turns, warm: 300 });
+    const r4 = await camDrive(page, { d0: 0, v: 0, ms: 3600, turns, warm: 300 });
     ok(`${T}: зсунули карту — стеження вимкнулось`, off);
     camJudge(T, 'після «Моє місце»', r4.out);
     ok(`${T}: без помилок JS`, errors.length === 0, errors.join(' | '));
@@ -1182,6 +1188,42 @@ if (run('8')) try {
   ok('прохід «оновлення» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід «оновлення» дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 9: голос — телефону або якісний із пакета ============ */
+if (run('9')) try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const calls = () => app(page, () => window.__nativeCalls.slice());
+  const vs = () => app(page, () => ({ rows: [...document.querySelectorAll('#voiceSec .vrow')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), on: (document.querySelector('#voiceSec .vrow.on') || {}).dataset?.voice, text: document.getElementById('voiceSec').textContent.replace(/\s+/g, ' ') }));
+  await sleep(300);
+  ok('голос: за замовчуванням — голос телефону (оболонці сказано «системний»)', (await calls()).includes('setVoice::0:'));
+  await page.click('#tabs button[data-panel="settings"]'); await page.waitForSelector('#voiceSec .vrow');
+  let v = await vs();
+  ok('Налаштування → Голос: телефону, Тетяна (жіночий), Микита (чоловічий), Лада', v.rows.length === 4 && /Голос телефону/.test(v.rows[0]) && /Тетяна — жіночий/.test(v.rows[1]) && /Микита — чоловічий/.test(v.rows[2]) && v.on === 'system', JSON.stringify(v.rows));
+  ok('якісних голосів ще немає — «потрібен пакет», кнопка «Завантажити пакет»', /потрібен пакет/.test(v.rows[1]) && /Завантажити пакет/.test(v.text));
+  await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200);
+  let c = await calls(); v = await vs();
+  ok('вибрали Микиту — пакет почав завантажуватись сам, вибір запамʼятано', c.includes('voiceDownload:uk') && c.includes('setVoice:uk:1:uk') && v.on === 'uk:1', c.slice(-3).join());
+  await emitN('voice', { state: 'dl', pack: 'uk', pct: 37 }); await sleep(150); v = await vs();
+  ok('видно, скільки завантажено, і є «Скасувати»', /Завантажую… 37%/.test(v.text) && /Скасувати/.test(v.text), v.text.slice(0, 160));
+  await page.screenshot({ path: SHOTS ? join(SHOTS, '17-voice-dl.png') : '/dev/null' }).catch(() => {});
+  await page.click('#voiceSec [data-act="vCancel"]'); ok('«Скасувати» передано оболонці', (await calls()).includes('voiceCancel'));
+  await app(page, () => { window.__voice = { packs: { uk: { size: 87300000, ver: 1 } } }; });
+  await emitN('voice', { state: 'ready', pack: 'uk', size: 87300000 }); await sleep(300); v = await vs();
+  ok('пакет завантажено — «Завантажено · 87 МБ», «потрібен пакет» зник, повідомлення', /Завантажено · 87 МБ/.test(v.text) && !/потрібен пакет/.test(v.text) && /Голос завантажено/.test(await page.textContent('#toasts')), v.text.slice(0, 200));
+  await shot(page, '17-voice');
+  await page.click('#voiceSec .vrow[data-voice="uk:2"]'); await sleep(900); c = await calls();
+  ok('вибрали Тетяну — оболонці sid 2, і звучить пробна фраза', c.includes('setVoice:uk:2:uk') && await app(page, () => window.__spoken.some(s => /пʼятсот метрів/.test(s))));
+  await page.click('#voiceSec .vrow[data-voice="system"]'); await sleep(150);
+  ok('назад на голос телефону', (await calls()).slice(-3).includes('setVoice::0:') && (await vs()).on === 'system');
+  await page.click('#voiceSec [data-act="vDel"]'); await page.click('#voiceSec [data-act="vDel"]'); await sleep(200);
+  ok('«Видалити пакет» — з підтвердженням', (await calls()).includes('voiceDelete:uk') && /Завантажити пакет/.test((await vs()).text));
+  await app(page, () => { window.__app.S.lang = 'ru'; }); await page.click('#panelClose'); await page.click('#tabs button[data-panel="settings"]'); await page.waitForSelector('#voiceSec .vrow');
+  ok('російський інтерфейс: пояснення, що якісний голос — український', /говорит по-украински/.test((await vs()).text));
+  await app(page, () => { window.__app.S.lang = 'uk'; });
+  ok('прохід «голос» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «голос» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
 if (run('3')) try {

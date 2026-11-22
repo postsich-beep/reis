@@ -47,4 +47,6 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     lint { abortOnError = false; checkReleaseBuilds = false }
+    // рушій голосу (.so) — стиснутим у APK: менше качати; Android розпакує під час встановлення
+    packaging { jniLibs { useLegacyPackaging = true } }
 }

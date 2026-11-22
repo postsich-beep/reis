@@ -192,6 +192,9 @@ function addLayers() {
   map.addSource('route', { type: 'geojson', data: EMPTY });
   map.addSource('route-alts', { type: 'geojson', data: EMPTY });
   map.addSource('route-done', { type: 'geojson', data: EMPTY });
+  // короткий шматок біля стрілки (до ~700 м): оновлюється разом зі стрілкою, тож лінія зникає під нею плавно, а не стрибками
+  map.addSource('route-near', { type: 'geojson', data: EMPTY });
+  map.addSource('done-near', { type: 'geojson', data: EMPTY });
   map.addSource('poi', { type: 'geojson', data: EMPTY });
   map.addSource('stops', { type: 'geojson', data: EMPTY });
   map.addSource('acc', { type: 'geojson', data: EMPTY });
@@ -206,12 +209,16 @@ function addLayers() {
   map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } });
   map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } });
   map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f) bus.emit('altTap', f.properties.k); });
-  map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
-  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) } });
+  const casePaint = { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) }, linePaint = { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) };
+  map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: casePaint });
+  map.addLayer({ id: 'route-near-case', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: casePaint });
+  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: linePaint });
+  map.addLayer({ id: 'route-near-line', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: linePaint });
   // ґрунт і погане покриття на маршруті — червоний пунктир поверх
   map.addLayer({ id: 'route-bad', type: 'line', source: 'route-bad', layout: { 'line-join': 'round' }, paint: { 'line-color': '#e5484d', 'line-width': w(3, 5, 9), 'line-dasharray': [1.2, 1.2] } });
   // пройдене — світло-сіро-блакитне поверх синього
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
+  map.addLayer({ id: 'done-near', type: 'line', source: 'done-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
   // похибка позиції — лише тонкий пунктирний контур, без заливки
   map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
   // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
@@ -344,6 +351,7 @@ function frame(ts) {
     const p = R.at(cam.dd); cam.cur = { lat: p.lat, lon: p.lon };
     const b = routeBrg(R, cam.dd); if (b != null) cam.tBrg = b;
     if (cam.v > 0.2 || Math.abs(err) > 0.3) more = true;
+    if (ts - prog.t >= 45 || !more) { prog.t = ts; progressAt(cam.dd, false); }
   } else if (cam.dur > 0) {
     const k = Math.min(1, (ts - cam.t0) / cam.dur);
     cam.cur = { lat: cam.from.lat + (cam.to.lat - cam.from.lat) * k, lon: cam.from.lon + (cam.to.lon - cam.from.lon) * k };
@@ -419,41 +427,59 @@ function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
   doneD = -1; doneT = 0; setDone(EMPTY);
-  if (!g.route) { src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); if (previewCoords && previewTrip) drawPins(previewTrip); return; }
+  if (!g.route) { clearNear(); src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); if (previewCoords && previewTrip) drawPins(previewTrip); return; }
   src.setData(routeData(g.route.coords, g.route));
   drawHazards();
   const tr = g.trip; if (!tr) return;
   drawPins(tr);
-  drawProgress();
+  prog.idx = null; progressAt(progD(), true);
 }
 function setDone(data) { const s = map && map.getSource && map.getSource('route-done'); if (s) s.setData(data); }
 // Пройдена частина маршруту — окрема світла лінія від старту до машини. Оновлюється не частіше ніж раз на 2 с.
 // Залишок маршруту від машини до кінця (з категоріями доріг) — коли пройдене ховаємо.
-function remainData(rd) {
-  const idx = g.idx, rc = S.routeCats !== false ? routeCats(g.route) : null, f = [];
+function remainData(rd, end) {
+  const idx = g.idx, rc = S.routeCats !== false ? routeCats(g.route) : null, f = [], E = end == null ? idx.total : end;
   const line = (a, b, c) => { const cs = idx.slice(a, b); if (cs.length >= 2) f.push({ type: 'Feature', properties: c ? { c } : {}, geometry: { type: 'LineString', coordinates: cs } }); };
-  if (rc) { for (const s of rc.segs) { const d0 = idx.cum[Math.min(s.i0, idx.cum.length - 1)], d1 = idx.cum[Math.min(s.i1, idx.cum.length - 1)]; if (d1 > rd) line(Math.max(d0, rd), d1, s.c); } }
-  else line(rd, idx.total);
+  if (rc) { for (const s of rc.segs) { const d0 = idx.cum[Math.min(s.i0, idx.cum.length - 1)], d1 = idx.cum[Math.min(s.i1, idx.cum.length - 1)]; if (d1 > rd && d0 < E) line(Math.max(d0, rd), Math.min(d1, E), s.c); } }
+  else line(rd, E);
   return { type: 'FeatureCollection', features: f };
 }
-function drawProgress() {
-  if (!map || !g.idx) return;
-  const rd = pos.rd == null ? 0 : pos.rd, now = Date.now();
-  if (Math.abs(rd - doneD) < 10 || (now - doneT < 2000 && Math.abs(rd - doneD) < 300)) return;
-  doneD = rd; doneT = now;
-  if (S.passed !== 'grey') {                 // пройдене ховаємо: на карті лише шлях попереду
-    setDone(EMPTY);
-    const src = map.getSource('route'); if (src && g.route) src.setData(rd < 5 ? routeData(g.route.coords, g.route) : remainData(rd));
-    return;
-  }
-  if (rd < 5) { setDone(EMPTY); return; }
-  let c = g.idx.slice(0, rd);
+// Лінія маршруту біля стрілки. Великий шматок (уся решта маршруту чи все пройдене) перемальовуємо рідко — раз на ~700 м;
+// короткий шматок між стрілкою й межею великого — щокадру (≈20 разів/с), тому лінія «з'їдається» під стрілкою плавно.
+const prog = { B0: null, A0: null, idx: null, mode: '', t: 0 };
+const progD = () => (cam.onR && cam.idx === g.idx && cam.dd != null) ? cam.dd : (pos.rd || 0);
+function doneData(d) {
+  let c = g.idx.slice(0, d);
   if (c.length > 3000) {                    // давню частину проріджуємо, останні 600 точок — повністю
     const head = c.slice(0, c.length - 600), k = Math.ceil(head.length / 2400);
     c = head.filter((_, i) => i % k === 0).concat(c.slice(c.length - 600));
   }
-  setDone({ type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } });
+  return c.length >= 2 ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } } : EMPTY;
 }
+function progressAt(d, force) {
+  if (!map || !g.idx || !g.route) return;
+  const R = g.idx, grey = S.passed === 'grey', sR = map.getSource('route'), sN = map.getSource('route-near'), sD = map.getSource('done-near');
+  if (!sR || !sN || !sD) return;
+  if (prog.idx !== R || prog.mode !== (grey ? 'g' : 'h')) { prog.idx = R; prog.mode = grey ? 'g' : 'h'; prog.B0 = prog.A0 = null; force = true; }
+  d = clamp(d, 0, R.total);
+  if (!grey) {                               // пройдене ховаємо: на карті лише шлях попереду
+    if (force || prog.B0 == null || d > prog.B0 - 150 || d < prog.B0 - 900) {
+      prog.B0 = Math.min(R.total, d + 700);
+      sR.setData(prog.B0 >= R.total ? EMPTY : remainData(prog.B0));
+      setDone(EMPTY); sD.setData(EMPTY);
+    }
+    sN.setData(d < prog.B0 ? remainData(d, prog.B0) : EMPTY);
+  } else {                                   // пройдене — блідою лінією поверх
+    if (force || prog.A0 == null || d - prog.A0 > 700 || d < prog.A0) {
+      prog.A0 = d; sR.setData(routeData(g.route.coords, g.route)); sN.setData(EMPTY);
+      setDone(d < 5 ? EMPTY : doneData(d));
+    }
+    const c = d > prog.A0 + 0.5 ? R.slice(prog.A0, d) : [];
+    sD.setData(c.length >= 2 ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: c } } : EMPTY);
+  }
+}
+function drawProgress() { progressAt(progD(), false); }
+function clearNear() { for (const id of ['route-near', 'done-near']) { const s = map && map.getSource && map.getSource(id); if (s) s.setData(EMPTY); } prog.idx = null; }
 
 /* ---------- події на карті: Telegram, погода, тривоги ---------- */
 const EV_ICON = {

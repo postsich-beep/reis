@@ -93,6 +93,13 @@ export function speak(text) {
     } catch (_) { res(); }
   });
 }
+/* ---------- якісні голоси (оболонка з 1.1.2): пакет моделі в телефоні, системний голос — запасний ---------- */
+export const hasVoices = () => !!(N && typeof N.voiceStatus === 'function');
+export function setVoice(pack, sid, lang) { if (hasVoices()) { try { N.setVoice(pack || '', sid | 0, lang || ''); } catch (_) {} } }
+export function voiceStatus() { if (hasVoices()) { try { return JSON.parse(N.voiceStatus()); } catch (_) {} } return null; }
+export function voiceDownload(pack) { if (hasVoices()) { try { N.voiceDownload(pack); return true; } catch (_) {} } return false; }
+export function voiceCancel() { if (hasVoices()) { try { N.voiceCancel(); } catch (_) {} } }
+export function voiceDelete(pack) { if (hasVoices()) { try { N.voiceDelete(pack); } catch (_) {} } }
 export function stopSpeak() {
   if (N) { try { N.stopSpeak(); } catch (_) {} } else if (window.speechSynthesis) window.speechSynthesis.cancel();
   if (ttsResolve) { const r = ttsResolve; ttsResolve = null; r(); }
