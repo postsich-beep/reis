@@ -282,7 +282,8 @@ try {
   ok('рейс активний', true);
   { const q = routeReqs[0] || {}, tk = (q.costing_options || {}).truck || {};
     ok('запит маршруту: профіль фури з габаритами, мова підказок українська', q.costing === 'truck' && tk.height === 4 && tk.weight === 40 && q.language === 'uk-UA' && q.locations.length === 2 && q.locations[0].type === 'break', JSON.stringify({ c: q.costing, tk, l: q.language })); }
-  ok('сказано «маршрут побудовано»', await app(page, () => window.__spoken.some(s => /Маршрут побудовано/.test(s))));
+  // черга голосу могла бути зайнята (тривога, подія) — даємо їй договорити; на CI це бувало повільніше
+  ok('сказано «маршрут побудовано»', await page.waitForFunction(() => window.__spoken.some(s => /Маршрут побудовано/.test(s)), null, { timeout: 8000 }).then(() => true, () => false), JSON.stringify(await app(page, () => window.__spoken.slice(-5))));
 
   // імітація руху
   await app(page, () => { window.__app.sim.setSpeed(60); window.__app.sim.start(); });
