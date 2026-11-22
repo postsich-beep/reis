@@ -212,7 +212,7 @@ try {
   await page.click('#pick [data-k="x"]');
   // душ: позначка водія на АЗС без душу в базі
   await app(page, () => window.__app.bus.emit('stopTap', { i: 2 }));
-  ok('картка АЗС: кнопка «Тут є душ»', /Тут є душ/.test(await page.textContent('#pick')));
+  ok('картка АЗС без душу в базі: душ не стверджується, є лише дія «позначити»', /Я бачив тут душ — позначити/.test(await page.textContent('#pick')) && !/·[^·]*душ/.test(await page.textContent('#pick .muted')));
   await page.click('#pick [data-k="shower"]'); await sleep(200);
   const shm = await app(page, async () => { const d = await window.__app.map.map.getSource('marks').getData(); return { n: window.__app.showers.myShowers().length, f: d.features.length, all: window.__app.showers.allShowers().length }; });
   ok('позначка душу збережена й намальована на карті; усього душів: OKKO, окремий душ і позначка', shm.n === 1 && shm.f === 1 && shm.all === 3, JSON.stringify(shm));
@@ -220,6 +220,22 @@ try {
   ok('«Рейс» без маршруту: найближчий душ', /Найближчий душ/.test(await page.textContent('#panelBody')) && /ваша позначка/.test(await page.textContent('#panelBody')));
   await shot(page, '01b-shower');
   await page.click('#panelClose');
+  // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
+  await page.click('#bLayers');
+  ok('кнопка «Шари»: 9 галочок і «вимкнути все»', await page.$$eval('#layers .ly-row', e => e.length) === 9 && /Вимкнути все/.test(await page.textContent('#layers')));
+  await shot(page, '01d-layers');
+  const feats = () => app(page, async () => { const m = window.__app.map.map; const s = await m.getSource('stops').getData(), k = await m.getSource('marks').getData(); return { stops: s.features.map(f => f.properties.t).join(''), marks: k.features.length }; });
+  await page.click('#layers [data-ly="#off"]'); await sleep(200);
+  const f0 = await feats();
+  ok('«Вимкнути все» — на карті жодної точки й позначки', f0.stops === '' && f0.marks === 0, JSON.stringify(f0));
+  await page.click('#layers [data-ly="fuel"]'); await sleep(200);
+  const f1 = await feats();
+  ok('галочка «АЗС» — лише заправки', /^f+$/.test(f1.stops) && f1.marks === 0, JSON.stringify(f1));
+  await page.click('#layers [data-ly="#off"]'); await page.click('#layers [data-ly="#on"]'); await sleep(200);
+  const f2 = await feats();
+  ok('«Увімкнути все» — усі точки повернулися', f2.stops.length === 7 && f2.marks === 1, JSON.stringify(f2));
+  await page.mouse.click(16, 520); await sleep(150);
+  ok('торкання карти закриває «Шари»', await app(page, () => document.getElementById('layers').hidden));
   await shot(page, '01-start');
 
   // пошук: «Львов» — це Львів, а не село під Бєлгородом

@@ -111,7 +111,7 @@ export function initMap() {
   bus.on('hazards', drawHazards);
   bus.on('rough', drawRough);
   bus.on('marks', drawMarks);
-  bus.on('settings', k => { if (k === 'mapStopTypes') drawMarks(); });
+  bus.on('settings', k => { if (k === 'mapStopTypes' || k === 'mapStops') drawMarks(); if (k === 'mapEvents') drawEvents(); if (k === 'mapHazards') drawHazards(); if (k === 'cams') drawStops(); });
   bus.on('settings', k => { if (k === 'roughMap') drawRough(); });
   bus.on('settings', k => { if (k === 'routeCats') drawRoute(); if (k === 'truck') drawHazards(); });
   bus.on('guide', drawProgress);
@@ -282,7 +282,7 @@ export function drawEvents() {
   if (!map) return;
   for (const m of evMarks.values()) m.seen = false;
   const now = Date.now();
-  if (S.lookahead) {
+  if (S.lookahead && S.mapEvents !== false) {
     for (const it of feed.items) {
       if (it.filtered || !it.level || it.vote === -1 || it.lat == null || it.src === 'stop' || now - it.time > 3 * 3600e3) continue;
       const cls = (it.src === 'wx' ? 'wx ' : '') + it.level + (it.locKind === 'area' ? ' area' : '');
@@ -327,7 +327,7 @@ export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; vie
 
 function drawMarks() {
   const src = map && map.getSource && map.getSource('marks'); if (!src) return;
-  const on = (S.mapStopTypes || {}).shower !== false;
+  const on = (S.mapStopTypes || {}).shower !== false && S.mapStops !== false;
   src.setData({ type: 'FeatureCollection', features: on ? showers.myShowers().map(m => ({ type: 'Feature', properties: { id: m.id }, geometry: { type: 'Point', coordinates: [m.lon, m.lat] } })) : [] });
 }
 function drawRough() {
@@ -341,7 +341,7 @@ function drawHazards() {
   for (const m of hzMarks) m.remove(); hzMarks = [];
   const bad = map && map.getSource && map.getSource('route-bad'); if (!bad) return;
   const route = g.route || previewR;
-  if (!route) { bad.setData(EMPTY); return; }
+  if (!route || S.mapHazards === false) { bad.setData(EMPTY); return; }
   const list = hazardsAlong(route), idx = indexOf(route), f = [];
   for (const x of list) {
     if (x.kind === 'u' || x.kind === 's') {

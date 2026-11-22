@@ -41,10 +41,49 @@ function staticLabels() {
   $('bCenter').innerHTML = ICON.center;
   railState();
 }
+/* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
+const LAYERS = [
+  ['fuel', 'f', 'lyFuel'], ['food', 'e', 'lyFood'], ['park', 'p', 'lyPark'], ['motel', 'm', 'lyMotel'], ['shower', 'h', 'lyShower'], ['cam', 'c', 'lyCam'],
+  ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
+];
+const layerOn = k => k[0] === '@' ? S[k.slice(1)] !== false : S.mapStops !== false && (S.mapStopTypes || {})[k] !== false;
+function setLayer(k, v) {
+  if (k[0] === '@') { S[k.slice(1)] = v; return; }
+  const m = { ...(S.mapStopTypes || {}) }; m[k] = v;
+  if (v && S.mapStops === false) {                     // увімкнули один шар після «вимкнути все» в налаштуваннях — інші лишаються вимкненими
+    for (const [kk] of LAYERS) if (kk[0] !== '@' && kk !== k) m[kk] = false;
+    S.mapStops = true;
+  }
+  S.mapStopTypes = m;
+  if (k === 'cam' && v && !S.cams) S.cams = true;
+}
+function layersHtml() {
+  const dot = (ty, k) => k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
+    : k === '@mapHazards' ? '<span class="sdot hz">20</span>' : k === '@roughMap' ? '<span class="sdot" style="background:linear-gradient(90deg,#2f9e62 33%,#f6bd16 33% 66%,#e5484d 66%)"></span>'
+    : `<span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
+  const anyOn = LAYERS.some(([k]) => layerOn(k));
+  return `<div class="ly-head">${t('lyTitle')}</div>` + LAYERS.map(([k, ty, lbl]) => {
+    const on = layerOn(k);
+    return `<button class="ly-row${on ? ' on' : ''}" data-ly="${k}" role="checkbox" aria-checked="${on}">${dot(ty, k)}<span class="grow">${t(lbl)}</span><span class="ly-box">${on ? ICON.check : ''}</span></button>`;
+  }).join('') + `<button class="btn sm wide" data-ly="${anyOn ? '#off' : '#on'}">${anyOn ? t('lyAllOff') : t('lyAllOn')}</button>`;
+}
+function layersOpen(open) {
+  const box = $('layers'); box.hidden = !open; $('bLayers').classList.toggle('on', open);
+  if (open) box.innerHTML = layersHtml();
+}
+function layersClick(e) {
+  const b = e.target.closest('[data-ly]'); if (!b) return;
+  const k = b.dataset.ly;
+  if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; }
+  else setLayer(k, !layerOn(k));
+  $('layers').innerHTML = layersHtml();
+}
+
 function railState() {
   $('bCompass').innerHTML = view.north ? ICON.north : ICON.head; $('bCompass').classList.toggle('on', view.north);
   $('b3d').classList.toggle('on', !!S.view3d); $('b3d').textContent = S.view3d ? '3D' : '2D';
   $('bSettings').innerHTML = ICON.gear; $('bSettings').setAttribute('aria-label', t('settings'));
+  $('bLayers').innerHTML = ICON.layers; $('bLayers').setAttribute('aria-label', t('lyTitle'));
   $('bVoice').innerHTML = S.voice ? ICON.vol : ICON.mute; $('bVoice').classList.toggle('off', !S.voice);
   $('bRec').classList.toggle('on', !!S.rec);
   $('bCenter').classList.toggle('need', !view.follow);
@@ -412,7 +451,7 @@ function onMapPick(p) {
   const pts = g.active ? '' : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
   box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
     ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
-    <div class="row"><button class="btn wide" data-k="shower">${ICON.shower}${t('showerHere')}</button></div>`;
+    <div class="row"><button class="btn sm" data-k="shower">${ICON.shower}${t('showerMarkAction')}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
@@ -494,7 +533,7 @@ function onStopTap(x) {
     ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
     : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
   const mine = showers.myShowerAt({ lat, lon }, 60);
-  const shBtn = ty === 'c' ? '' : `<div class="row"><button class="btn wide${mine ? ' sh-on' : ''}" data-k="shower">${ICON.shower}${mine ? t('showerMine') : f & F.SHOWER ? t('showerConfirm') : t('showerHere')}</button></div>`;
+  const shBtn = ty === 'c' ? '' : `<div class="row"><button class="btn sm${mine ? ' sh-on' : ''}" data-k="shower">${ICON.shower}${mine ? t('showerMine') : t('showerMarkAction')}</button></div>`;
   box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER || mine ? ';border-color:#06b6d4' : ''}"></span><div class="grow"><div class="t">${esc(title)}</div>
     <div class="muted">${esc((name ? kindL : '') + (name && feats.length ? ' · ' : '') + feats.join(', ') + (mine && !(f & F.SHOWER) ? (feats.length || name ? ' · ' : '') + t('showerMineShort') : ''))}${dist}</div></div></div>
     ${inf.html}${inf.links}
@@ -651,7 +690,11 @@ export function initUI() {
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => { b.onclick = () => currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel); });
   $('bCompass').onclick = () => { view.north = !view.north; setFollow(true); railState(); };
   $('b3d').onclick = () => { S.view3d = !S.view3d; setFollow(true); };
-  $('bSettings').onclick = () => currentPanel() === 'settings' ? closePanel() : openPanel('settings');
+  $('bSettings').onclick = () => { layersOpen(false); currentPanel() === 'settings' ? closePanel() : openPanel('settings'); };
+  $('bLayers').onclick = e => { e.stopPropagation(); layersOpen($('layers').hidden); };
+  $('layers').onclick = e => { e.stopPropagation(); layersClick(e); };
+  document.addEventListener('pointerdown', e => { if (!$('layers').hidden && !e.target.closest('#layers,#bLayers')) layersOpen(false); });
+  bus.on('settings', k => { if (!$('layers').hidden && /^(mapStops|mapStopTypes|mapEvents|mapHazards|roughMap|cams)$/.test(k)) $('layers').innerHTML = layersHtml(); });
   $('bVoice').onclick = () => { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); };
   $('bRec').onclick = () => {
     S.rec = !S.rec;

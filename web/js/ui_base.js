@@ -38,6 +38,8 @@ export const ICON = {
   q: I('<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.6 2.6 0 1 1 3.6 2.4c-.7.4-1.1 1-1.1 1.8M12 17v.2"/>'),
   here: I('<circle cx="12" cy="12" r="3" fill="currentColor"/><circle cx="12" cy="12" r="8"/>'),
   send: I('<path d="M4 12 20 4l-5 16-3.5-6.5Z"/>'),
+  layers: I('<path d="M12 3 3 8l9 5 9-5-9-5Z"/><path d="m3 12.5 9 5 9-5"/><path d="m3 17 9 5 9-5"/>'),
+  check: I('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
   trash: I('<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>'),
   shower: I('<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.5 8h7"/><path d="M12 12v.01M15 12v.01M18 12v.01M12.5 15v.01M15.5 15v.01M18.5 15v.01M13 18v.01M16 18v.01M19 18v.01"/>'),
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),

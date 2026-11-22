@@ -297,6 +297,22 @@ body[data-theme="night"]{
 .pick-info b{font-weight:600;color:var(--ink-2)}
 .pick-links{flex-wrap:wrap;gap:6px}
 .pick-links .btn.sm{flex:0 0 auto}
+/* ---- шари карти ---- */
+#layers{position:absolute;right:84px;top:calc(var(--st) + var(--th,140px) + 18px);z-index:6;width:min(260px,calc(100vw - 104px));
+  max-height:calc(100vh - var(--st) - var(--th,140px) - 140px);overflow:auto;padding:10px;border-radius:18px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.ly-head{font:600 13px var(--f-ui);letter-spacing:.06em;text-transform:uppercase;color:var(--ink-2);margin:2px 6px 8px}
+.ly-row{display:flex;align-items:center;gap:12px;width:100%;min-height:50px;padding:0 8px;border:0;border-radius:12px;background:transparent;color:var(--ink);font:500 17px var(--f-ui);text-align:left}
+.ly-row:active{background:rgba(var(--glass2-rgb),.6)}
+.ly-row .sdot{width:16px;height:16px;flex:none}
+.ly-row .sdot.hz{width:auto;height:18px;padding:0 3px;border-radius:5px;background:#fff;border:2px solid var(--red);color:#b4161b;font:600 10px/14px var(--f-ui)}
+.ly-row:not(.on){color:var(--ink-2)}
+.ly-row:not(.on) .sdot{opacity:.35}
+.ly-box{flex:none;width:28px;height:28px;border-radius:8px;border:2px solid var(--ink-2);display:grid;place-items:center}
+.ly-row.on .ly-box{background:var(--ink);border-color:var(--ink);color:var(--panel)}
+.ly-box svg{width:20px;height:20px}
+#layers .btn{margin-top:8px}
+#pick .btn.sm svg{width:20px;height:20px}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}

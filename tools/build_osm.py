@@ -144,7 +144,7 @@ def own_facs(t):
     return out
 
 
-FAC_R = {'sv': 350, 'ra': 200, 'p': 200, 'f': 120, 'm': 150, 'h': 120}
+FAC_R = {'sv': 350, 'ra': 200, 'p': 200, 'f': 60, 'm': 100, 'h': 60}       # для АЗС — лише її власна територія
 
 
 def info_of(typ, oid, tags):
@@ -260,16 +260,20 @@ def main(pbf, stops_out, places_out, hazards_out=None):
         return r.oblasts[int(hit[0])][0] if len(hit) else None
 
     rtree = STRtree(r.roads)
-    def near_road(lat, lon):
-        return len(rtree.query(Point(lon * KX, lat * KY), predicate='dwithin', distance=FOOD_NEAR_M)) > 0
+    def near_road(lat, lon, dist=FOOD_NEAR_M):
+        return len(rtree.query(Point(lon * KX, lat * KY), predicate='dwithin', distance=dist)) > 0
 
     # піт-стопи
-    rows, food_far = [], 0
+    rows, food_far, shower_far = [], 0, 0
     for typ, oid, tags, lat, lon in r.items:
         if oblast(lat, lon) is None:
             continue
         if tags.get('amenity') in FOOD and not near_road(lat, lon):
             food_far += 1
+            continue
+        # душ без прив'язки до траси — зазвичай пляжний чи в кемпінгу, водію фури не підходить
+        if stop_kind(tags, typ == 'n') == 'shower' and not near_road(lat, lon, 300):
+            shower_far += 1
             continue
         x = stop_row({'type': 'node' if typ == 'n' else 'way', 'id': oid, 'tags': tags, 'lat': lat, 'lon': lon})
         if x:
@@ -300,7 +304,7 @@ def main(pbf, stops_out, places_out, hazards_out=None):
     rows.sort(key=lambda x: (x[2], x[0], x[1]))
     print('з довідкою:', with_info, 'зон сервісу з переліком зручностей:', sum(1 for x in rows if x[2] == 's' and len(x) > 6 and x[6].get('fa')), file=sys.stderr)
     print('піт-стопи:', len(rows), dict(Counter(x[2] for x in rows)), f'(їжа далеко від трас відкинута: {food_far})', file=sys.stderr)
-    print('з душем:', sum(1 for x in rows if x[3] & 2), dict(Counter(x[2] for x in rows if x[3] & 2)), file=sys.stderr)
+    print('з душем:', sum(1 for x in rows if x[3] & 2), dict(Counter(x[2] for x in rows if x[3] & 2)), f'(душі далеко від трас відкинуто: {shower_far})', file=sys.stderr)
 
     # населені пункти
     prow = []

@@ -37,12 +37,15 @@ jobs:
           # далі відомі шляхи й дзеркало openstreetmap.fr. На кожну невдачу друкуємо код відповіді.
           cands=$(curl -fsSL --retry 3 https://download.geofabrik.de/index-v1.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(f['properties']['urls']['pbf'] for f in d['features'] if f['properties'].get('id')=='ukraine'))" || true)
           echo "каталог Geofabrik: ${cands:-немає}"
+          # «latest» у Geofabrik перенаправляє на файл із датою; якщо того ще/вже немає — пробуємо файли попередніх днів
+          for d in 0 1 2 3 4 5 6 7; do day=$(date -u -d "-$d day" +%y%m%d); cands="$cands https://download.geofabrik.de/europe/ukraine/ukraine-$day.osm.pbf https://download.geofabrik.de/europe/ukraine-$day.osm.pbf"; done
           cands="$cands https://download.geofabrik.de/europe/ukraine/ukraine-latest.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine.osm.pbf"
           ok=""
           for round in 1 2 3; do
             for u in $cands; do
               code=$(curl -sIL -o /dev/null -w '%{http_code} %{url_effective}' "$u" || true)
               echo "перевірка: $u → $code"
+              case "$code" in 200*) ;; *) continue;; esac
               if curl -fSL --retry 3 --retry-delay 20 -o ukraine.osm.pbf "$u" && [ "$(stat -c %s ukraine.osm.pbf)" -gt 300000000 ]; then echo "звідки: $u"; ok=1; break 2; fi
               echo "не вдалося: $u"
             done
