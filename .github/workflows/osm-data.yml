@@ -33,10 +33,10 @@ jobs:
 
       - name: Вивантаження України з Geofabrik
         run: |
-          # Geofabrik, а якщо він недоступний (буває під час оновлення) — дзеркало openstreetmap.fr
+          # Geofabrik (з 19.11.2026 файли країн лежать у теці країни), старий шлях, далі дзеркало openstreetmap.fr
           ok=""
           for round in 1 2 3; do
-            for u in https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf; do
+            for u in https://download.geofabrik.de/europe/ukraine/ukraine-latest.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine.osm.pbf; do
               if curl -fsSL --retry 3 --retry-delay 20 -o ukraine.osm.pbf "$u" && [ "$(stat -c %s ukraine.osm.pbf)" -gt 300000000 ]; then echo "звідки: $u"; ok=1; break 2; fi
               echo "не вдалося: $u"
             done
