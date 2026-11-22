@@ -124,16 +124,17 @@ export function parseTrip(trip) {
 export async function regionsAlong(idx, onStep) {
   const regions = [], towns = [], foreign = [];
   const stepM = Math.max(15000, Math.min(30000, idx.total / 12)), n = Math.floor(idx.total / stepM);
-  let last = null;
+  let last = null, prevD = null;
   for (let i = 0; i <= n; i++) {
     const d = Math.min(idx.total, i * stepM), p = idx.at(d);
     try {
       const r = await reverse(p.lat, p.lon);
       const id = r && oblastOf(r.state);
       if (r && r.city && !towns.some(x => x.name === r.city)) towns.push({ name: r.city, lat: +p.lat.toFixed(5), lon: +p.lon.toFixed(5), d: Math.round(d) });
-      if (id && id !== last) { regions.push({ id, d }); last = id; }
+      if (id && id !== last) { regions.push(prevD == null ? { id, d } : { id, d, d0: prevD }); last = id; }   // d0 — попередня точка: межа десь між ними
       if (r && r.cc && r.cc !== 'UA' && !foreign.includes(r.cc)) foreign.push(r.cc);     // маршрут виходить за кордон
     } catch (e) { log('warn', 'reverse: ' + e.message); }
+    prevD = d;
     if (onStep) onStep(i, n);
     await sleep(350);
   }

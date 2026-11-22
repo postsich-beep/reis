@@ -3,7 +3,7 @@ import { bus, log, S, db, isNight, clamp, sleep } from './core.js';
 import { pos } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
-import { feed } from './feed.js';
+import { feed, relevance, zoneRegions } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { offlineActive, offlineStyle } from './offline.js';
 import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
@@ -302,13 +302,14 @@ export function drawEvents() {
   for (const m of evMarks.values()) m.seen = false;
   const now = Date.now();
   if (S.lookahead && S.mapEvents !== false) {
-    for (const it of feed.items) {
-      if (it.filtered || !it.level || it.vote === -1 || it.lat == null || it.src === 'stop' || now - it.time > 3 * 3600e3) continue;
-      const cls = (it.src === 'wx' ? 'wx ' : '') + it.level + (it.locKind === 'area' ? ' area' : '');
+    for (const it of feed.items) {                         // лише те, що тут і попереду: пройдене й далеке не захаращує карту
+      if (it.lat == null || it.src === 'stop') continue;
+      const r = relevance(it, now); if (!r.show) continue;
+      const cls = (it.src === 'wx' ? 'wx ' : '') + it.level + (it.locKind === 'area' ? ' area' : '') + (r.tier === 'far' ? ' far' : '');
       evMarker(it.id, it, cls, it.src === 'wx' ? EV_ICON.wx : EV_ICON[it.level], it.sum || it.text);
     }
-    if (S.air) for (const id of Object.keys(feed.air || {})) {
-      const c = OBLAST_CENTER[id]; if (!c) continue;
+    if (S.air) for (const { id } of zoneRegions()) {
+      const c = OBLAST_CENTER[id]; if (!c || !(feed.air || {})[id]) continue;
       evMarker('air:' + id, { lat: c[0], lon: c[1] }, 'air', EV_ICON.air, oblastName(id));
     }
   }

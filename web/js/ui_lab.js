@@ -165,7 +165,8 @@ function settingsHtml() {
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
 
   <div class="sec">${t('setAhead')}</div><div class="form">
-    ${num('s_aheadH', t('setAheadH'), S.aheadH, '0.5')}${num('s_stopKm', t('setStopKm'), S.stopKm, '5')}</div>
+    ${num('s_aheadH', t('setAheadH'), S.aheadH, '0.5')}${num('s_nearKm', t('setNearKm'), S.nearKm, '10')}${num('s_stopKm', t('setStopKm'), S.stopKm, '5')}</div>
+  <div class="muted" style="margin-top:6px">${t('setNearHint')}</div>
 
   <div class="sec">Claude</div><div class="form">
     <label class="full">${t('setKey')}<input id="s_apiKey" type="password" autocomplete="off" value="${esc(S.apiKey)}" placeholder="sk-ant-…"></label>
@@ -233,7 +234,7 @@ definePanel('settings', {
         S.truck = tr;
       } else if (id.startsWith('s_')) {
         const k = id.slice(2);
-        if (['aheadH', 'stopKm'].includes(k)) { const n = parseFloat(String(v).replace(',', '.')); if (n > 0) S[k] = n; }
+        if (['aheadH', 'stopKm', 'nearKm'].includes(k)) { const n = parseFloat(String(v).replace(',', '.')); if (n > 0) S[k] = n; }
         else S[k] = String(v).trim();
         if (k === 'styleUrl' && !offlineActive()) setMapStyle(S.styleUrl);
       }

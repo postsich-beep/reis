@@ -1,6 +1,6 @@
 // Погода на маршруті на той час, коли фура туди доїде (Open-Meteo, без ключа):
 // ожеледиця, сніг, туман, сильний вітер, гроза. Події йдуть у стрічку й на карту.
-import { bus, log, S, fmtDur, clamp, RouteIndex } from './core.js';
+import { bus, log, S, clamp, RouteIndex } from './core.js';
 import * as places from './places.js';
 import { getJson, online } from './platform.js';
 import { pos } from './nav.js';
@@ -94,7 +94,7 @@ export async function checkWeather(force) {
         seen.add('heat');
         const town = nearestTown(p) || places.nearest(p.lat, p.lon);
         bus.emit('feedPush', {
-          src: 'wx', level: 'yellow', text: t('wxEvent', p.eta < 1800 ? t('wxNow') : t('wxIn', fmtDur(p.eta)), town ? t('wxNear', town) : '', t('wxHeat'), Math.round(tmpK)),
+          src: 'wx', level: 'yellow', text: t('wxEvent', town ? t('wxAt', town) : t('wxRoute'), '', t('wxHeat'), Math.round(tmpK)),
           lat: p.lat, lon: p.lon, locName: town, locKind: 'wx', key: 'wx:heat:' + p.lat.toFixed(1) + ':' + p.lon.toFixed(1) + ':' + Math.floor(when / 10800), quiet: true
         });
       }
@@ -104,7 +104,7 @@ export async function checkWeather(force) {
       if (seen.has(cond)) return;                             // одна подія на тип умов — найближча попереду
       seen.add(cond);
       const town = nearestTown(p), temp = hr.temperature_2m[k];
-      const text = t('wxEvent', p.eta < 1800 ? t('wxNow') : t('wxIn', fmtDur(p.eta)), town ? t('wxNear', town) : '', what, temp != null ? Math.round(temp) : '?');
+      const text = t('wxEvent', town ? t('wxAt', town) : t('wxRoute'), '', what, temp != null ? Math.round(temp) : '?');   // «через N км» підставляє шторка — живе, а не на момент прогнозу
       bus.emit('feedPush', {
         src: 'wx', level, text, lat: p.lat, lon: p.lon, locName: town, locKind: 'wx',
         key: 'wx:' + cond + ':' + p.lat.toFixed(1) + ':' + p.lon.toFixed(1) + ':' + Math.floor(when / 10800),

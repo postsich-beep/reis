@@ -1,8 +1,8 @@
 // Стрічка подій: Telegram-канали регіонів попереду, повітряні тривоги, фільтр «дорожньо важливе», навчання від оцінок.
-import { bus, log, S, db, uid, fmtDur, sleep, hav } from './core.js';
+import { bus, log, S, db, uid, sleep, hav } from './core.js';
 import { http, isNative, online, notify, vibrate } from './platform.js';
 import { pos } from './nav.js';
-import { g, say } from './guide.js';
+import { g, say, distWords } from './guide.js';
 import { oblastOf, oblastName, reverse, OBLASTS, OBLAST_CENTER, placeSearch, townName } from './route.js';
 import { askClaude, hasKey } from './ai.js';
 import { t } from './i18n.js';
@@ -46,6 +46,8 @@ const GREEN = [
 const UNSURE = /можлив|возможн|попередньо|предварительно|ймовірно|вероятно|за неперевірен|по непроверен|уточнюєть|уточняет|нібито|якобы/;
 const ROAD = /дорог|трас|шосе|шоссе|автодор|міст|мост|рух|движен|проїзд|проезд|вулиц|улиц|перехрест|перекрест|розв['’ʼ]язк|развязк|кільцев|кольцев|об['’ʼ]їзд|объезд|блокпост|кпп|пункт\S* пропуск|в['’ʼ]їзд|въезд|виїзд|выезд|фур|вантаж|грузов|затор|пробк|дтп|[мнртmhpt][-– ]?\d{2}(\D|$)|(^|\s)e\s?\d{2,3}/;
 const HARD = /вибух|взрыв|приліт|прилет|обстріл|обстрел|теракт|ракет|шахед|бпла|дрон|балістик|баллистик/;
+// Довгі перешкоди, про які варто знати й за сотні кілометрів: перекриття, зруйнований чи закритий міст, ремонт з обмеженням руху, заборона для фур
+const IMPORTANT = /перекри|перекры|рух (заблок|закрит|зупин)|движение (заблок|закрыт|останов)|проїзд (неможлив|заборон|закрит)|проезд (невозмож|запрещ|закрыт)|(міст|мост|шляхопровід|путепровод)\S* (зруйн|разруш|закрит|закрыт|пошкодж|поврежд)|(зруйн|разруш|пошкодж|поврежд)\S* (міст|мост|шляхопровід|путепровод)|ремонт\S* (дорог|мост|міст|траси|трассы|шляхопровод|путепровод|покритт|покрыт|полотн)|капітальн\S* ремонт|капитальн\S* ремонт|реверсивн|(обмежен|заборон)\S* (рух|проїзд|в['’ʼ]їзд)\S* (для )?(вантаж|фур)|(ограничен|запрещ)\S* (движен|проезд|въезд)\S* (для )?(груз|фур)/;
 const SPAM = /реклам|знижк|скидк|розіграш|розыгрыш|вакансі|ваканси|продам|купл[юя]|підпис(атися|уйтесь)|подпис(аться|ывайтесь)|промокод|казино|курс валют|гороскоп/;
 
 const stems = s => [...new Set((s.toLowerCase().match(/[a-zа-яіїєґё']{4,}/g) || []).map(w => w.slice(0, 5)))];
@@ -70,7 +72,8 @@ export function classify(text, ch) {
   const town = feed.towns.some(x => { const n = townName(x); return n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))); });
   if (town) score += 1.5;
   score += learned(s, ch);
-  return { level, score, road: road || hard };
+  const imp = !!level && level !== 'green' && IMPORTANT.test(s) && !UNSURE.test(s);
+  return { level, score, road: road || hard, imp };
 }
 const VISIBLE = 1.2;
 
@@ -102,7 +105,13 @@ async function findPlace(word) {
   geoCache.set(key, hit || 0); saveGeo();
   return hit;
 }
-const locQueue = []; let locBusy = false;
+const locQueue = [], pendAlert = new Map(); let locBusy = false, locCur = null;
+// Про подію з Telegram говоримо, лише коли зрозуміло, де вона: позаду — мовчимо, далеко — скажемо, коли під'їдемо.
+function placeThenAlert(it, silent) {
+  if (it.lat != null || (it.locTried && !locQueue.includes(it) && locCur !== it && !pendAlert.has(it.id))) { alertUser(it, silent); return; }
+  pendAlert.set(it.id, !!silent);
+  if (!it.locTried) locate(it);
+}
 export function locate(it) {
   if (!it || it.lat != null || it.locTried) return;
   it.locTried = true; locQueue.push(it);
@@ -111,7 +120,7 @@ export function locate(it) {
 async function runLocate() {
   locBusy = true;
   while (locQueue.length) {
-    const it = locQueue.shift(), s = norm(it.text);
+    const it = locCur = locQueue.shift(), s = norm(it.text);
     let p = null, kind = 'town';
     // 1) місто з маршруту
     for (const x of feed.towns) { if (typeof x !== 'object' || x.lat == null) continue; const n = norm(x.name); if (n.length > 3 && s.includes(n.slice(0, Math.max(4, n.length - 2)))) { p = x; break; } }
@@ -121,8 +130,10 @@ async function runLocate() {
       for (const w of words) { p = await findPlace(w); if (p) break; }
     }
     // 3) лише область — позначка в обласному центрі
-    if (!p) { const o = OBLASTS.find(x => x.re.test(it.text.toLowerCase())); if (o && OBLAST_CENTER[o.id]) { p = { name: oblastName(o.id), lat: OBLAST_CENTER[o.id][0], lon: OBLAST_CENTER[o.id][1] }; kind = 'area'; } }
+    if (!p) { const o = OBLASTS.find(x => x.re.test(it.text.toLowerCase())); if (o && OBLAST_CENTER[o.id]) { p = { name: oblastName(o.id), lat: OBLAST_CENTER[o.id][0], lon: OBLAST_CENTER[o.id][1] }; kind = 'area'; it.oblast = o.id; } }
     if (p) { it.lat = p.lat; it.lon = p.lon; it.locName = p.name; it.locKind = kind; save(); bus.emit('feed', feed); }
+    locCur = null;
+    if (pendAlert.has(it.id)) { const silent = pendAlert.get(it.id); pendAlert.delete(it.id); alertUser(it, silent); }
   }
   locBusy = false;
 }
@@ -150,18 +161,158 @@ function add(it, quiet) {
   if (it.key && seenKeys.has(it.key)) return null;
   if (it.key) seenKeys.add(it.key);
   const item = { id: uid(), time: Date.now(), seen: false, vote: null, filtered: false, sum: '', ...it };
+  delete item.quiet;
+  if (quiet && item.src !== 'tg') item.hush = true;           // тихе з самого початку (погода «жовта», спека): лише шторка й карта
   feed.items.push(item); if (feed.items.length > 300) feed.items.splice(0, 50);
   if (!item.filtered && item.level && !quiet) alertUser(item);
   save(); bus.emit('feed', feed);
   if (item.src === 'tg' && !item.filtered && item.level) locate(item);
   return item;
 }
-function alertUser(item) {
+// Єдині ворота для тостів і голосу. silent — показати, але не говорити (перше опитування після запуску).
+function alertUser(item, silent) {
+  const r = relevance(item);
+  if (!r.show) return;                                       // позаду, застаріло чи ще далеко — скажемо, коли буде до 100 км
+  const lbl = relLabel(item, r), body = item.sum || item.text;
+  if (r.tier === 'far') {                                    // важливе далеко попереду: один тихий тост без голосу, голос — на підʼїзді
+    if (!item.farSaid) { item.farSaid = true; if (!silent && !item.hush) bus.emit('toast', { level: item.level, text: (lbl ? lbl + ' · ' : '') + body, id: item.id }); }
+    return;
+  }
+  item.said = Date.now(); item.saidAt = r.ahead == null ? null : Math.round(r.ahead);
+  if (silent || item.hush) return;
   const text = item.voice || item.sum || item.text;
-  bus.emit('toast', { level: item.level, text: item.sum || item.text, id: item.id });
-  if (item.level === 'red') { say(t('voiceAttention') + ' ' + short(text, 220)); vibrate(400); if (document.hidden && S.notify !== false) notify(t('appName'), short(text, 160)); }
-  else if (item.level === 'yellow') say(short(text, 200));
+  const pre = r.ahead != null && r.ahead >= 2000 && item.src !== 'stop' && item.src !== 'drive' ? t('voiceIn', distWords(r.ahead)) + ' ' : '';
+  if (r.tier === 'unknown' && item.level !== 'red') { bus.emit('toast', { level: item.level, text: body, id: item.id }); return; }   // невідомо де — без голосу
+  bus.emit('toast', { level: item.level, text: (lbl ? lbl + ' · ' : '') + body, id: item.id });
+  if (item.level === 'red') { say(t('voiceAttention') + ' ' + pre + short(text, 220)); vibrate(400); if (document.hidden && S.notify !== false) notify(t('appName'), (lbl ? lbl + ' · ' : '') + short(text, 160)); }
+  else if (item.level === 'yellow') say(pre + short(text, 200));
   else if (item.voice) say(item.voice);
+}
+
+/* ---------- доречність: лише тут і попереду ---------- */
+// Водію потрібне те, що буде на його шляху найближчим часом, а не те, що вже позаду.
+// Збираємо заздалегідь (канали областей попереду), а говоримо вчасно: коли до події ≤ S.nearKm (100 км).
+// Далі цієї межі — лише довгі перешкоди (перекриття, міст, ремонт з обмеженням): тихо в шторці, голосом — на підʼїзді.
+const BEHIND = 3000, OFF_MAX = 20000, REMIND = 20000;
+export const nearM = () => Math.max(20, +S.nearKm || 100) * 1000;
+function ttl(it) {
+  if (it.src === 'air') return it.level === 'green' ? 20 * 60e3 : 12 * 3600e3;   // жовта тривога живе, поки тривога триває
+  if (it.imp) return 12 * 3600e3;
+  if (it.src === 'stop') return 40 * 60e3;
+  if (it.src === 'wx' || it.src === 'drive') return 3 * 3600e3;
+  return it.level === 'red' ? 3 * 3600e3 : it.level === 'green' ? 3600e3 : 2 * 3600e3;
+}
+const onTrip = () => g.active && g.idx && pos.rd != null;
+// Межа області — посередині між точкою, де вже інша область, і попередньою (області визначаємо що 15–30 км)
+const regStart = (R, i) => i === 0 ? 0 : R[i].d0 != null ? (R[i].d0 + R[i].d) / 2 : R[i].d;
+// Області на шляху: та, де машина, і ті, куди вʼїдемо в межах near. Без рейсу — лише та, де машина.
+export function zoneRegions(near = nearM()) {
+  if (onTrip() && feed.regions.length) {
+    const rd = pos.rd, R = feed.regions, out = [];
+    for (let i = 0; i < R.length; i++) {
+      const s = regStart(R, i), e = i + 1 < R.length ? regStart(R, i + 1) : Infinity;
+      if (e <= rd || s - rd > near) continue;
+      if (!out.some(o => o.id === R[i].id)) out.push({ id: R[i].id, dist: Math.max(0, s - rd) });
+    }
+    return out;
+  }
+  return feed.here ? [{ id: feed.here, dist: 0 }] : [];
+}
+function regionPos(id) {
+  if (!(onTrip() && feed.regions.length)) return feed.here ? (id === feed.here ? { ahead: 0 } : null) : { unknown: true };
+  const rd = pos.rd, R = feed.regions; let best = null, passed = false;
+  for (let i = 0; i < R.length; i++) {
+    if (R[i].id !== id) continue;
+    const s = regStart(R, i), e = i + 1 < R.length ? regStart(R, i + 1) : Infinity;
+    if (e <= rd) { passed = true; continue; }
+    const a = Math.max(0, s - rd); if (!best || a < best.ahead) best = { ahead: a };
+  }
+  return best || (passed ? { behind: true } : null);
+}
+const locCache = new WeakMap();
+function routePos(it) {
+  let c = locCache.get(it);
+  if (!c || c.idx !== g.idx || c.lat !== it.lat || c.lon !== it.lon) {
+    const l = g.idx.locate({ lat: it.lat, lon: it.lon }, null);
+    c = { idx: g.idx, lat: it.lat, lon: it.lon, d: l ? l.d : null, off: l ? l.off : Infinity }; locCache.set(it, c);
+  }
+  return c;
+}
+function tierOf(a, it, area) {
+  if (a < -BEHIND) return { show: false, tier: 'behind', ahead: a };
+  if (a <= 1500) return { show: true, tier: 'here', ahead: Math.max(0, a), area };
+  if (a <= nearM()) return { show: true, tier: 'near', ahead: a, area };
+  return it.imp ? { show: true, tier: 'far', ahead: a, area } : { show: false, tier: 'later', ahead: a };
+}
+function byRegion(id, it) {
+  const r = regionPos(id);
+  if (!r) return { show: false, tier: 'away' };
+  if (r.unknown) return { show: true, tier: 'unknown' };
+  if (r.behind) return { show: false, tier: 'behind' };
+  return tierOf(r.ahead, it, true);
+}
+// → { show, tier: here|near|far|unknown (видно) або behind|later|away|old|off (не видно), ahead — метрів до події по маршруту }
+export function relevance(it, now = Date.now()) {
+  if (!it || !it.level || it.filtered || it.vote === -1) return { show: false, tier: 'off' };
+  if (now - it.time > ttl(it)) return { show: false, tier: 'old' };
+  if (it.src === 'air') {
+    if (it.level === 'yellow' && feed.airAt && !feed.air[it.region]) return { show: false, tier: 'old' };   // тривога вже скінчилась
+    return byRegion(it.region, it);
+  }
+  if (it.src === 'drive') return { show: true, tier: 'here', ahead: 0 };
+  if (it.lat != null && it.locKind !== 'area') {
+    if (onTrip()) {
+      const c = routePos(it);
+      if (c.d == null || c.off > (it.src === 'tg' ? OFF_MAX : 3000)) return { show: false, tier: 'away' };
+      return tierOf(c.d - pos.rd, it, false);
+    }
+    if (pos.lat != null) {                                   // без рейсу напрямку не знаємо — лише довкола машини
+      const dd = hav(it, pos), near = nearM() / 2;
+      if (dd <= near) return { show: true, tier: dd < 1500 ? 'here' : 'near', ahead: dd, around: true };
+      return it.imp && dd <= nearM() * 3 ? { show: true, tier: 'far', ahead: dd, around: true } : { show: false, tier: 'away' };
+    }
+    return { show: true, tier: 'unknown' };
+  }
+  const reg = it.oblast || it.region;
+  if (reg) return byRegion(reg, it);
+  return { show: true, tier: 'unknown' };
+}
+// Підпис відстані для шторки й тостів: «Тут», «через 34 км», «за 12 км» (без рейсу, по прямій)
+export function relLabel(it, r) {
+  if (!r || r.ahead == null || it.src === 'stop' || it.src === 'drive') return '';
+  if (r.tier === 'here' || r.ahead < 1500) return r.area ? '' : t('evHere');
+  const km = Math.max(1, Math.round(r.ahead / 1000));
+  return r.around ? t('evAround', km) : t('evIn', km);
+}
+const RANK = { red: 3, yellow: 2, green: 1 };
+const relRank = (i, r) => r.tier === 'far' ? 1.5 : RANK[i.level] || 0;
+// Головне (тут і попереду) та інше (відсіяне, позаду, далеко) — для шторки й панелі стрічки
+export function feedLists(now = Date.now()) {
+  const main = [], rest = [];
+  for (const i of feed.items) { const r = relevance(i, now); (r.show ? main : rest).push([i, r]); }
+  main.sort((a, b) => (relRank(b[0], b[1]) - relRank(a[0], a[1])) || ((a[1].ahead ?? 5e4) - (b[1].ahead ?? 5e4)) || (b[0].time - a[0].time));
+  rest.sort((a, b) => b[0].time - a[0].time);
+  return { main, rest };
+}
+// Раз на 10 с: подія, до якої під'їхали ближче 100 км, озвучується; червона — ще раз за 20 км; тривоги областей попереду — так само
+let relSig = '';
+export function watch() {
+  if (!S.lookahead) return;
+  airCheck();
+  const now = Date.now(); let sig = '';
+  for (const it of feed.items) {
+    const r = relevance(it, now);
+    if (!r.show) continue;
+    sig += it.id + r.tier[0];
+    if (it.hush || it.aiWait || pendAlert.has(it.id)) continue;
+    if (!it.said && r.tier !== 'far') alertUser(it);
+    else if (it.said && it.level === 'red' && !it.rem && it.saidAt > 2 * REMIND && r.ahead != null && r.ahead <= REMIND && !r.area) {
+      it.rem = true;
+      say(t('voiceAttention') + ' ' + t('voiceIn', distWords(r.ahead)) + ' ' + short(it.voice || it.sum || it.text, 200));
+      bus.emit('toast', { level: 'red', text: relLabel(it, r) + ' · ' + (it.sum || it.text), id: it.id });
+    }
+  }
+  if (sig !== relSig) { relSig = sig; save(); bus.emit('feed', feed); }
 }
 const short = (s, n) => { s = String(s).replace(/\s+/g, ' ').replace(/https?:\S+/g, '').trim(); return s.length > n ? s.slice(0, n - 1).replace(/\s\S*$/, '') + '…' : s; };
 
@@ -286,8 +437,11 @@ async function pollRound() {
       for (const m of fresh) {
         const c2 = classify(m.text, m.ch);
         const filtered = !c2.level || c2.score < VISIBLE || (c.region === 'all' && !mentionsRoute(m.text));
-        const it = add({ src: 'tg', ...m, level: c2.level, score: c2.score, filtered }, first || S.aiFilter && hasKey() && c2.road);
-        if (it && S.aiFilter && hasKey() && (c2.road || c2.level)) aiQueue.push(it);
+        const ai = S.aiFilter && hasKey() && (c2.road || c2.level);
+        const it = add({ src: 'tg', ...m, region: c.region !== 'all' ? c.region : undefined, level: c2.level, score: c2.score, imp: c2.imp, filtered, start: first || undefined, aiWait: ai || undefined }, true);
+        if (!it) continue;
+        if (ai) aiQueue.push(it);
+        else if (!filtered && c2.level) placeThenAlert(it, first);
       }
     } catch (e) { feed.chStatus[c.name] = 'err'; feed.tgErr = e.message; log('warn', 'Telegram @' + c.name + ': ' + e.message); }
     await sleep(1500);
@@ -305,7 +459,8 @@ async function runAi() {
   const lang = S.lang === 'ru' ? 'російською' : 'українською';
   const system = `Ти фільтр дорожніх новин для водія вантажівки в Україні. Для кожного повідомлення визнач, чи впливає воно на проїзд дорогами: перекриття, ДТП, затори, мости, об'їзди, вибухи й обстріли біля доріг, погода на дорозі, блокпости.
 Рівні: red — підтверджена перешкода руху; yellow — попередження або непідтверджене; green — проїзд відновлено чи корисна для водія новина; none — доріг не стосується (виробництво, політика, реклама).
-Відповідай лише JSON-масивом без пояснень: [{"i":номер,"level":"red|yellow|green|none","sum":"суть до 12 слів ${lang}","place":"назва населеного пункту в називному відмінку, де сталася подія, або порожньо"}]`;
+imp: true — лише для довгих перешкод, про які варто знати й за сотні кілометрів (перекриття траси, зруйнований чи закритий міст, ремонт з обмеженням руху, заборона для вантажівок); ДТП, затор, тривога — false.
+Відповідай лише JSON-масивом без пояснень: [{"i":номер,"level":"red|yellow|green|none","imp":true|false,"sum":"суть до 12 слів ${lang}","place":"назва населеного пункту в називному відмінку, де сталася подія, або порожньо"}]`;
   const user = `Населені пункти на маршруті: ${feed.towns.slice(0, 25).map(townName).join(', ') || 'невідомо'}.
 ${liked.length ? 'Водій позначив корисним: ' + JSON.stringify(liked) + '\n' : ''}${disliked.length ? 'Водій позначив непотрібним: ' + JSON.stringify(disliked) + '\n' : ''}Повідомлення:
 ${JSON.stringify(batch.map((b, i) => ({ i, ch: b.ch, text: short(b.text, 600) })))}`;
@@ -314,12 +469,18 @@ ${JSON.stringify(batch.map((b, i) => ({ i, ch: b.ch, text: short(b.text, 600) })
     const arr = JSON.parse(out.slice(out.indexOf('['), out.lastIndexOf(']') + 1));
     for (const r of arr) {
       const it = batch[r.i]; if (!it) continue;
+      it.aiWait = false;
       if (r.level === 'none') { it.filtered = true; }
-      else if (['red', 'yellow', 'green'].includes(r.level)) { it.level = r.level; it.filtered = it.vote === -1; it.sum = r.sum || ''; it.ai = true; if (r.place) it.place = String(r.place).slice(0, 60); alertUser(it); locate(it); }
+      else if (['red', 'yellow', 'green'].includes(r.level)) {
+        it.level = r.level; it.filtered = it.vote === -1; it.sum = r.sum || ''; it.ai = true; it.imp = r.level !== 'green' && (r.imp === true || (r.imp == null && it.imp));
+        if (r.place && it.lat == null) { it.place = String(r.place).slice(0, 60); it.locTried = false; }
+        if (!it.filtered) placeThenAlert(it, it.start);
+      }
     }
+    for (const it of batch) if (it.aiWait) { it.aiWait = false; if (!it.filtered && it.level) placeThenAlert(it, it.start); }
   } catch (e) {
     log('warn', 'ШІ-фільтр: ' + e.message);
-    for (const it of batch) if (!it.filtered && it.level) alertUser(it);      // ШІ недоступний — показуємо за словником
+    for (const it of batch) { it.aiWait = false; if (!it.filtered && it.level) placeThenAlert(it, it.start); }      // ШІ недоступний — за словником
   }
   aiBusy = false; save(); bus.emit('feed', feed);
   if (aiQueue.length) setTimeout(runAi, 1500);
@@ -354,33 +515,42 @@ async function fetchAir() {
   if (!hits && !/WARNING STATUS|no active|немає/i.test(r.text)) log('warn', 'тривоги: формат зведення змінився');
   return out;
 }
+// Тривога цікава лише там, де машина, і в областях, куди вʼїдемо за ≤ 100 км. Тривогу області далі попереду
+// скажемо, коли до неї лишиться 100 км (якщо ще триватиме); відбій — лише для областей, про тривогу в яких казали.
+const airSaid = {};
+function airCheck() {
+  if (!S.air || !feed.airAt) return;
+  const zone = zoneRegions(), now = Date.now();
+  for (const z of zone) {
+    const on = feed.air[z.id];
+    if (on && !airSaid[z.id]) {
+      airSaid[z.id] = true;
+      add({ src: 'air', level: 'yellow', region: z.id, key: 'air:' + z.id + ':' + Math.floor(now / 6e5), text: t('airOn', oblastName(z.id)) + (on.part ? ' ' + t('airPart') : '') });
+    }
+  }
+  for (const id of Object.keys(airSaid)) if (!feed.air[id]) {
+    delete airSaid[id];
+    if (zone.some(z => z.id === id)) add({ src: 'air', level: 'green', region: id, key: 'airoff:' + id + ':' + Math.floor(now / 6e5), text: t('airOff', oblastName(id)) });
+  }
+}
 let airBusy = false;
 export async function pollAir() {
   if (airBusy || !S.air || !online()) return;
   if (!isNative && !S.alertsToken) { feed.airErr = 'web'; return; }
   airBusy = true;
   try {
-    const now = await fetchAir(), prev = feed.air, first = feed.airAt === 0;
-    const rel = regionsAhead();
-    for (const r of rel) {
-      const on = !!now[r.id], was = !!prev[r.id];
-      if (on && (!was || first)) add({ src: 'air', level: 'yellow', region: r.id, key: 'air:' + r.id + ':' + Math.floor(Date.now() / 6e5),
-        text: t('airOn', oblastName(r.id)) + (now[r.id].part ? ' ' + t('airPart') : '') + (r.eta > 60 ? ' ' + t('airEta', fmtDur(r.eta)) : '') });
-      else if (!on && was && !first) add({ src: 'air', level: 'green', region: r.id, key: 'airoff:' + r.id + ':' + Math.floor(Date.now() / 6e5), text: t('airOff', oblastName(r.id)) });
-    }
-    feed.air = now; feed.airAt = Date.now(); feed.airErr = '';
+    feed.air = await fetchAir(); feed.airAt = Date.now(); feed.airErr = '';
+    airCheck();
   } catch (e) { feed.airErr = e.message; log('warn', 'тривоги: ' + e.message); }
   airBusy = false; bus.emit('feed', feed);
 }
 
 /* ---------- стан для шторки ---------- */
 export function strip() {
-  const now = Date.now();
-  const act = feed.items.filter(i => !i.filtered && i.level && i.vote !== -1 && now - i.time < 2 * 3600e3);
-  const c = { red: 0, yellow: 0, green: 0 }; for (const i of act) c[i.level]++;
-  const rank = { red: 3, yellow: 2, green: 1 };
-  const top = act.slice().sort((a, b) => (rank[b.level] - rank[a.level]) || (b.time - a.time))[0] || null;
-  return { top, counts: c, unseen: act.filter(i => !i.seen).length };
+  const { main } = feedLists();
+  const c = { red: 0, yellow: 0, green: 0 }; for (const [i] of main) c[i.level]++;
+  const [top, r] = main[0] || [null, null];
+  return { top, label: top ? relLabel(top, r) : '', counts: c, unseen: main.filter(([i]) => !i.seen).length };
 }
 export function markSeen() { let ch = false; for (const i of feed.items) if (!i.seen) { i.seen = true; ch = true; } if (ch) { save(); bus.emit('feed', feed); } }
 export function clearFeed() { feed.items = []; save(); bus.emit('feed', feed); }
@@ -388,6 +558,9 @@ export function clearFeed() { feed.items = []; save(); bus.emit('feed', feed); }
 export async function init() {
   const st = await db.get('kv', 'feed');
   if (st) { feed.items = (st.items || []).filter(i => Date.now() - i.time < 24 * 3600e3); seenKeys = new Set(st.seen || []); }
+  for (const i of feed.items) { if (i.said === undefined) i.said = i.time; i.aiWait = false; }    // записи з попередніх версій уже сказані
+  bus.on('route', () => { relSig = ''; setTimeout(watch, 1500); });
+  setInterval(watch, 10000);
   bus.on('feedPush', it => add(it, it.quiet));
   if ((S.chDefVer || 0) < CH_DEF_VER) { addDefaultChannels(); S.chDefVer = CH_DEF_VER; S.channelsSeeded = true; }
   bus.emit('feed', feed);

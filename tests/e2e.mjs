@@ -338,6 +338,27 @@ try {
   ok('після «Потрібно» подія повернулась', (await app(page, () => document.getElementById('strip').dataset.level)) === 'red');
   await page.click('#panelClose');
 
+  // доречність: лише тут і попереду до S.nearKm; далі — тихо й лише важливе; тривоги — лише свої області
+  const rel = await app(page, async () => {
+    const A = window.__app, f = A.feed, idx = A.guide.g.idx, rd = A.nav.pos.rd;
+    A.S.nearKm = 20;
+    const p1 = idx.at(Math.min(idx.total - 300, rd + 22500)), n0 = window.__spoken.length, m0 = document.querySelectorAll('.evm').length;
+    A.bus.emit('feedPush', { src: 'tg', ch: 'test', level: 'yellow', text: 'Затор на трасі М-03 біля Тестового', key: 't-later', lat: p1.lat, lon: p1.lon, locKind: 'town' });
+    A.bus.emit('feedPush', { src: 'tg', ch: 'test', level: 'red', imp: true, text: 'Перекрито рух на мосту М-03 біля Тестового, міст пошкоджено', key: 't-far', lat: p1.lat, lon: p1.lon, locKind: 'town' });
+    f.feed.air.lviv = { part: false }; f.feed.air.poltava = { part: false };
+    f.watch(); await new Promise(r => setTimeout(r, 400));
+    const it = k => f.feed.items.find(i => i.key === k), main = f.feedLists().main.map(([i]) => i.key || i.src + ':' + i.region);
+    return { rd: Math.round(rd), later: f.relevance(it('t-later')).tier, far: f.relevance(it('t-far')).tier, main, spoke: window.__spoken.slice(n0),
+      toasts: document.getElementById('toasts').textContent, marks: document.querySelectorAll('.evm').length - m0, farMark: document.querySelectorAll('.evm.far').length,
+      air: f.feed.items.filter(i => i.src === 'air' && i.level === 'yellow').map(i => i.region), airMarks: document.querySelectorAll('.evm.air').length,
+      zone: f.zoneRegions().map(z => z.id + ':' + Math.round(z.dist)), strip: document.getElementById('stripText').textContent };
+  });
+  ok('подія за межею 100 км (тут 20) — не в шторці, не на карті й не озвучена: скажемо на підʼїзді', rel.later === 'later' && !rel.main.includes('t-later') && !rel.spoke.some(s => /Затор/.test(s)), JSON.stringify({ later: rel.later, spoke: rel.spoke }));
+  ok('важливе далеко (перекриття, міст) — у шторці й на карті тихо: тост без голосу', rel.far === 'far' && rel.main.includes('t-far') && rel.farMark === 1 && rel.marks === 2 && /через 2\d км · Перекрито рух на мосту/.test(rel.toasts) && !rel.spoke.some(s => /на мосту/.test(s)), JSON.stringify({ far: rel.far, marks: rel.marks, farMark: rel.farMark, spoke: rel.spoke, t: rel.toasts.slice(0, 200) }));
+  ok('ближча подія важливіша за далеку: у шторці ДТП за кілька км', /^через \d+ км · Перекрито рух на трасі/.test(rel.strip), rel.strip);
+  ok('тривога: області на шляху (Харківська тут, Полтавська попереду) — так; Львівська — ні', rel.air.includes('poltava') && !rel.air.includes('lviv') && rel.airMarks === 2 && rel.spoke.some(s => /^Через .*кілометр.*Полтавська/.test(s)), JSON.stringify({ air: rel.air, airMarks: rel.airMarks, zone: rel.zone, spoke: rel.spoke }));
+  await shot(page, '05b-relevance');
+
   // втрата GPS → розрахунок → ±100 м → повернення
   const rd0 = await app(page, () => { window.__app.sim.setLost(true); return window.__app.nav.pos.rd; });
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 12000 });
@@ -369,6 +390,15 @@ try {
 
   // камера, стоянка, далі швидко до фінішу
   await app(page, () => window.__app.sim.setSpeed(1400));
+  await page.waitForFunction(() => window.__app.nav.pos.rd > 17000 && window.__app.nav.pos.mode === 'gps', null, { timeout: 120000 });
+  await app(page, () => window.__app.feed.watch());          // у житті — раз на 10 с (на 90 км/год це 250 м); тут 1400 км/год
+  const pass = await app(page, () => { const f = window.__app.feed, it = k => f.feed.items.find(i => k(i)), main = f.feedLists().main.map(([i]) => i);
+    const dtp = it(i => /Перекрито рух на трасі/.test(i.text)), kh = it(i => i.src === 'air' && i.region === 'kharkiv' && i.level === 'yellow');
+    return { rd: Math.round(window.__app.nav.pos.rd), dtp: f.relevance(dtp).tier, kh: kh ? f.relevance(kh).tier : 'none', inMain: main.includes(dtp), strip: document.getElementById('stripText').textContent,
+      red: document.querySelectorAll('.evm.red').length, spoke: window.__spoken.filter(s => /Затор на трасі|на мосту/.test(s)) }; });
+  ok('проїхали ДТП — воно позаду: зникло зі шторки й карти', pass.dtp === 'behind' && !pass.inMain && !/на трасі М-03 біля Чуг/.test(pass.strip) && pass.red === 1, JSON.stringify(pass));
+  ok('виїхали з Харківщини — її тривога більше не показується', pass.kh === 'behind', pass.kh);
+  ok('під’їхали ближче межі — далекі події озвучено з відстанню', pass.spoke.some(s => /^Через .*кілометр.*Затор/.test(s)) && pass.spoke.some(s => /^Увага\. Через .*кілометр.*на мосту/.test(s)), JSON.stringify(pass.spoke));
   await page.waitForFunction(() => window.__app.guide.g.arrived, null, { timeout: 240000 });
   const fin = await app(page, () => ({ spoken: window.__spoken, feed: window.__app.feed.feed.items.filter(i => i.src === 'stop').map(i => i.text), man: document.getElementById('manDist').textContent, cams: window.__app.poi.poi.cams.length, stops: window.__app.poi.poi.stops.length }));
   ok('камеру і стоянки з бази піт-стопів прив’язано до маршруту', fin.cams === 1 && fin.stops === 3, `камер ${fin.cams}, стоянок ${fin.stops}`);

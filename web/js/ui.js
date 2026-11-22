@@ -4,7 +4,7 @@ import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed } from './nav.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
-import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
+import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
 import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
@@ -168,7 +168,7 @@ function hud() {
   const snapOn = g.active && !!g.route && pos.mode !== 'gps' && (pos.mode === 'approx' || !pos.onRoute);
   const sb = $('manSnap');
   if (sb.hidden === snapOn) { sb.hidden = !snapOn; if (snapOn) sb.innerHTML = ICON.pin + '<span>' + t('snapRoute') + '</span>'; }
-  if (man.hidden === show) { man.hidden = !show; stripEl.classList.toggle('alone', !show); requestAnimationFrame(layoutVars); }
+  if (man.hidden === show) { man.hidden = !show; stripEl.classList.toggle('alone', !show); stripUpdate(); requestAnimationFrame(layoutVars); }
 
   // нижній рядок
   if (g.arrived) { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = t('tripDone'); }
@@ -202,11 +202,16 @@ export async function resumeTrip() {
   return true;
 }
 
+// Шторка під карткою маневру: лише те, що тут і попереду. Коли нічого немає — ховається, щоб не закривати карту
+// (без рейсу лишається маленькою плашкою — нею відкривається стрічка).
 function stripUpdate() {
   const s = strip(), el = $('strip');
-  const off = !S.lookahead;
+  const off = !S.lookahead, calm = off || !s.top, manOn = !$('man').hidden;
   el.dataset.level = s.top && !off ? s.top.level : 'none';
-  $('stripText').textContent = off ? t('stripOff') : s.top ? (s.top.sum || s.top.text).replace(/\s+/g, ' ').slice(0, 140) : t('stripEmpty');
+  el.classList.toggle('calm', calm);
+  const hide = calm && manOn;
+  if (el.hidden !== hide) { el.hidden = hide; $('top').classList.toggle('nostrip', hide); requestAnimationFrame(layoutVars); }
+  $('stripText').textContent = off ? t('stripOff') : s.top ? ((s.label ? s.label + ' · ' : '') + (s.top.sum || s.top.text)).replace(/\s+/g, ' ').slice(0, 140) : t('stripEmpty');
   const c = s.counts;
   $('stripCounts').innerHTML = off ? '' : ['red', 'yellow', 'green'].filter(k => c[k]).map(k => `<i class="c-${k}">${c[k]}</i>`).join('');
   const tab = document.querySelector('#tabs button[data-panel="feed"]');
@@ -591,10 +596,18 @@ function onStopTap(x) {
 let feedTab = 'main';
 const SRC = { tg: 'Telegram', air: 'srcAir', stop: 'srcStop', drive: 'srcDrive', sys: 'srcSys', wx: 'srcWx' };
 function ago(ts) { const s = (Date.now() - ts) / 1000; return s < 90 ? t('justNow') : s < 3600 ? Math.round(s / 60) + ' ' + t('minAgo') : fmtClock(new Date(ts)); }
-function evHtml(i) {
+// Чому подія не в головному: позаду, застаріло, не на маршруті, ще далеко
+function whyHtml(i, r) {
+  if (!r) return '';
+  if (r.show) { const l = relLabel(i, r); return (l ? `<span class="ev-d">${esc(l)}</span>` : '') + (r.tier === 'far' ? `<span>${t('evFar')}</span>` : ''); }
+  const k = { behind: 'evBehind', old: 'evOld', away: 'evAway', off: 'evOff' }[r.tier];
+  if (r.tier === 'later') return `<span>${esc(t('evLater', Math.round(r.ahead / 1000)))}</span>`;
+  return k && !(r.tier === 'off' && i.filtered === false && !i.level) ? `<span>${t(k)}</span>` : '';
+}
+function evHtml([i, r]) {
   const src = i.src === 'tg' ? '@' + i.ch : t(SRC[i.src] || 'srcSys');
   const v = i.vote;
-  return `<div class="ev ${i.level || ''}"><div class="meta"><span>${esc(src)}</span><span>${ago(i.time)}</span>${i.ai ? '<span>Claude</span>' : ''}</div>
+  return `<div class="ev ${i.level || ''}${r && !r.show ? ' dim' : ''}"><div class="meta">${whyHtml(i, r)}<span>${esc(src)}</span><span>${ago(i.time)}</span>${i.ai ? '<span>Claude</span>' : ''}</div>
     ${i.sum ? `<div class="sum">${esc(i.sum)}</div>` : ''}<div class="txt cl" data-exp="1">${esc(i.text)}</div>
     <div class="votes"><button class="up${v === 1 ? ' on' : ''}" data-v="${i.id}:1">${ICON.like}${t('need')}</button><button class="down${v === -1 ? ' on' : ''}" data-v="${i.id}:-1">${ICON.dislike}${t('noNeed')}</button><button class="und${v === 0 ? ' on' : ''}" data-v="${i.id}:0">${ICON.q}${t('undecided')}</button></div></div>`;
 }
@@ -608,21 +621,19 @@ function feedStatus() {
     else parts.push(t('tgStat', n) + (feed.tgAt ? ', ' + ago(feed.tgAt) : '') + (feed.tgErr && feed.tgErr !== 'web' ? ' · ' + t('errShort') : ''));
   }
   if (S.air) {
-    const on = regionsAhead().filter(r => feed.air[r.id]).map(r => oblastName(r.id));
+    const on = zoneRegions().filter(r => feed.air[r.id]).map(r => oblastName(r.id) + (r.dist > 1500 ? ' · ' + t('evIn', Math.round(r.dist / 1000)) : ''));
     parts.push(feed.airErr ? t('airErr') : feed.airAt ? (on.length ? t('airNow', on.join(', ')) : t('airNone')) : t('airWait'));
   }
   return parts.join(' · ');
 }
 function feedHtml() {
-  const hot = i => i.level === 'red' && Date.now() - i.time < 3600e3 ? 1 : 0;
-  const main = feed.items.filter(i => !i.filtered && i.level && i.vote !== -1).slice(-60).sort((a, b) => (hot(b) - hot(a)) || (b.time - a.time));
-  const rest = feed.items.filter(i => i.filtered || !i.level || i.vote === -1).slice(-60).reverse();
+  const L = feedLists(), main = L.main.slice(0, 60), rest = L.rest.slice(0, 60);
   const list = feedTab === 'main' ? main : rest;
   return `<div class="muted" style="margin-bottom:10px">${esc(feedStatus())}</div>
     <div class="seg"><button data-tab="main" class="${feedTab === 'main' ? 'on' : ''}">${t('feedMain')} ${main.length || ''}</button><button data-tab="rest" class="${feedTab === 'rest' ? 'on' : ''}">${t('feedRest')} ${rest.length || ''}</button></div>
     <div class="list">${list.map(evHtml).join('') || `<div class="muted">${feedTab === 'main' ? t('feedEmpty') : t('feedRestEmpty')}</div>`}</div>
     <div class="btns"><button class="btn sm" data-act="refresh">${t('refreshNow')}</button><button class="btn sm" data-act="channels">${t('channels')}</button></div>
-    <div class="muted" style="margin-top:10px">${t('feedHint')}</div>`;
+    <div class="muted" style="margin-top:10px">${t('feedHint', Math.round(nearM() / 1000))}</div>`;
 }
 definePanel('feed', {
   title: () => t('tabFeed'),
@@ -675,6 +686,7 @@ definePanel('chat', {
 export function initUI() {
   applyGlass(); staticLabels(); layoutVars(); hud(); stripUpdate();
   window.addEventListener('resize', layoutVars);
+  setInterval(stripUpdate, 10000);                       // відстань до події в шторці зменшується, поки їдемо
   setInterval(() => { hud(); if (currentPanel() === 'trip' && g.active) refresh('trip'); }, 1000);
   bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });

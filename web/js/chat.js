@@ -4,7 +4,7 @@ import { askClaude, hasKey } from './ai.js';
 import { listen, stopListen, canListen, speak, stopSpeak } from './platform.js';
 import { pos } from './nav.js';
 import { g } from './guide.js';
-import { feed, regionsAhead } from './feed.js';
+import { feed, regionsAhead, zoneRegions, feedLists, relLabel, nearM } from './feed.js';
 import { poi, stopsAhead, stopLabel } from './poi.js';
 import { oblastName, tripTitle } from './route.js';
 import * as showers from './showers.js';
@@ -25,10 +25,10 @@ function context() {
   } else L.push('Активного рейсу немає.');
   const ra = regionsAhead();
   if (ra.length) L.push('Області на шляху: ' + ra.map(r => oblastName(r.id) + (r.eta > 60 ? ' (через ' + fmtDur(r.eta) + ')' : ' (зараз)')).join(', '));
-  const air = Object.keys(feed.air || {});
-  L.push(feed.airAt ? ('Повітряна тривога зараз: ' + (air.length ? air.map(oblastName).join(', ') : 'немає даних про активні тривоги на маршруті')) : 'Дані про повітряні тривоги не завантажені.');
-  const ev = feed.items.filter(i => !i.filtered && i.level && Date.now() - i.time < 3 * 3600e3).slice(-8);
-  L.push(ev.length ? 'Події у стрічці за 3 години:\n' + ev.map(i => `- [${i.level}] ${cut(i.sum || i.text)}`).join('\n') : 'У стрічці подій немає нових записів.');
+  const air = Object.keys(feed.air || {}), zone = zoneRegions().filter(z => (feed.air || {})[z.id]);
+  L.push(feed.airAt ? ('Повітряна тривога тут і попереду (до ' + Math.round(nearM() / 1000) + ' км): ' + (zone.length ? zone.map(z => oblastName(z.id) + (z.dist > 1500 ? ' — в’їзд через ' + fmtDist(z.dist) : ' — тут')).join(', ') : 'немає') + (air.length > zone.length ? `; ще в ${air.length - zone.length} областях поза шляхом` : '')) : 'Дані про повітряні тривоги не завантажені.');
+  const ev = feedLists().main.slice(0, 8);
+  L.push(ev.length ? 'Події тут і попереду (пройдене відкинуто):\n' + ev.map(([i, r]) => `- [${i.level}${r.tier === 'far' ? ', далеко, але важливо' : ''}] ${relLabel(i, r) ? relLabel(i, r) + ': ' : ''}${cut(i.sum || i.text)}`).join('\n') : 'Тут і попереду подій немає.');
   const st = stopsAhead(3).slice(0, 4);
   if (st.length) L.push('Стоянки для фур попереду: ' + st.map(s => stopLabel(s).title + ' через ' + fmtDist(s.d - (pos.rd || 0))).join('; '));
   const sh = g.active && g.route ? showers.along(g.route, g.idx).filter(x => x.d >= (pos.rd || 0)).slice(0, 3).map(x => (x.name || 'душ') + ' через ' + fmtDist(x.d - (pos.rd || 0)))
