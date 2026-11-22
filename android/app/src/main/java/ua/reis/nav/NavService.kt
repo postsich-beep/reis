@@ -15,6 +15,7 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import android.location.GnssMeasurementsEvent
 import android.location.GnssStatus
 import android.location.Location
 import android.location.LocationListener
@@ -145,6 +146,28 @@ class NavService : Service(), SensorEventListener {
         }
     }
 
+    // Сирі вимірювання GNSS: підсилення приймача (AGC) і сила сигналу (C/N0). Глушіння — AGC і C/N0 падають;
+    // підміна — сильний «чистий» сигнал при зниженому AGC. Рішення ухвалює веб-частина з власним еталоном телефона.
+    private var lastMeasMs = 0L
+    private val measCallback = object : GnssMeasurementsEvent.Callback() {
+        @Suppress("DEPRECATION")
+        override fun onGnssMeasurementsReceived(event: GnssMeasurementsEvent) {
+            val now = System.currentTimeMillis()
+            if (now - lastMeasMs < 2000) return
+            lastMeasMs = now
+            var agcSum = 0.0; var agcN = 0; var cnSum = 0.0; var cnN = 0
+            for (m in event.measurements) {
+                if (m.hasAutomaticGainControlLevelDb()) { agcSum += m.automaticGainControlLevelDb; agcN++ }
+                val cn = m.cn0DbHz
+                if (cn > 0) { cnSum += cn; cnN++ }
+            }
+            val o = JSONObject().put("n", event.measurements.size)
+            if (agcN > 0) o.put("agc", agcSum / agcN)
+            if (cnN > 0) o.put("cn0", cnSum / cnN)
+            emit("gnssq", o)
+        }
+    }
+
     private val ticker = object : Runnable {
         override fun run() {
             val o = JSONObject()
@@ -229,6 +252,9 @@ class NavService : Service(), SensorEventListener {
             try {
                 lm.registerGnssStatusCallback(gnssCallback, handler)
             } catch (e: Exception) { Log.w("Reis", "gnss status", e) }
+            try {
+                lm.registerGnssMeasurementsCallback(measCallback, handler)
+            } catch (e: Exception) { Log.w("Reis", "gnss measurements", e) }
         }
         if (fine || coarse) {
             try {
@@ -289,6 +315,7 @@ class NavService : Service(), SensorEventListener {
         try { lm.removeUpdates(netListener) } catch (_: Exception) {}
         try { lm.removeUpdates(fusedListener) } catch (_: Exception) {}
         try { lm.unregisterGnssStatusCallback(gnssCallback) } catch (_: Exception) {}
+        try { lm.unregisterGnssMeasurementsCallback(measCallback) } catch (_: Exception) {}
         try { sm.unregisterListener(this) } catch (_: Exception) {}
         try { wakeLock?.let { if (it.isHeld) it.release() } } catch (_: Exception) {}
         started = false

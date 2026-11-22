@@ -1,7 +1,7 @@
 // Панелі «Лабораторія», «Налаштування», «Telegram-канали», «GPS», «Діагностика», «Про застосунок».
 import { bus, log, getLog, S, VERSION, fmtClock, fmtMS } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, debugState, speedView, gpsJournal } from './nav.js';
+import { pos, nudge, acceptPending, debugState, speedView, gpsJournal, gq } from './nav.js';
 import { g, say } from './guide.js';
 import { feed, resetLearning, clearFeed, tgAvailable, addDefaultChannels } from './feed.js';
 import { OBLASTS, oblastName } from './route.js';
@@ -286,6 +286,11 @@ function gpsHtml() {
   rows.push([t('gpsSpoofDet'), (S.spoof ? t('on') : t('off')) + (pos.spoofAt ? ' · ' + t('spoofLast', fmtClock(new Date(pos.spoofAt))) : '')]);
   if (pos.spoofAt) rows.push([t('spoofWhat'), t('spoofWhy_' + pos.spoofWhy) + ' · ' + pos.spoofProv + ' · ' + pos.spoofLat.toFixed(3) + ', ' + pos.spoofLon.toFixed(3) + (pos.spoofSpd != null ? ' · ' + Math.round(pos.spoofSpd * 3.6) + ' ' + t('kmh') : '')]);
   if (pos.mode === 'dr') { rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]); }
+  if (gq.t && Date.now() - gq.t < 15000) {
+    const f1 = x => x == null ? '—' : x.toFixed(1).replace('.', ',');
+    rows.push([t('gpsSignal'), `AGC ${f1(gq.agc)}${gq.agcBase != null ? ' (' + t('gpsNorm') + ' ' + f1(gq.agcBase) + ')' : ''} · C/N0 ${f1(gq.cn0)} · ${t('gq_' + (gq.verdict || 'ok'))}`]);
+  }
+  if (d.turns) rows.push([t('gpsTurns'), String(d.turns)]);
   const sv = speedView();
   rows.push([t('gpsSpeedSrc'), sv.kind === 'none' ? '—' : Math.round(sv.kmh || 0) + ' ' + t('kmh') + ' · ' + t('spdKind_' + sv.kind) + (sv.kind === 'approx' && d.apSpdErr != null ? ' ±' + Math.round(d.apSpdErr * 3.6 * 2) : '')]);
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';

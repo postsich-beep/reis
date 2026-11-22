@@ -128,7 +128,7 @@ function update() {
     if (hav(pos, g.trip.a) > 400 && online()) { reroute(true); return; }
   }
   if (!pos.onRoute) {
-    g.offRoute = pos.off > 80;
+    g.offRoute = pos.mode === 'gps' && pos.off > 80;      // «поза маршрутом» — лише за справжнім GPS, не за вишками
     const far = pos.off > 1500;              // далеко від маршруту — перебудовуємо, навіть якщо машина стоїть
     if (pos.mode === 'gps' && pos.off > 80 && (pos.spd >= 1.5 || far)) {
       if (!offSince) offSince = now;
@@ -160,7 +160,7 @@ function update() {
       lastManI = i;
     }
     announce();
-    if (g.remain < 45 && !g.arrived) {
+    if (g.remain < 45 && !g.arrived && pos.mode === 'gps') {          // прибуття — лише за справжнім GPS
       g.arrived = true; g.active = false; clearActive(); say(t('voiceArrived'), { urgent: true });
       bus.emit('arrived', g);
     }

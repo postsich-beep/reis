@@ -242,7 +242,7 @@ function wpEl(cls, txt) { const d = document.createElement('div'); d.className =
 function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
-  doneD = -1; setDone(EMPTY);
+  doneD = -1; doneT = 0; setDone(EMPTY);
   if (!g.route) { src.setData(previewCoords ? routeData(previewCoords, previewR) : EMPTY); drawHazards(); return; }
   src.setData(routeData(g.route.coords, g.route));
   drawHazards();

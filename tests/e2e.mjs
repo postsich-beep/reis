@@ -302,7 +302,7 @@ try {
   await app(page, () => { window.__app.S.passed = 'grey'; });
   await sleep(2300);
   const done = await app(page, async () => { const s = window.__app.map.map.getSource('route-done'); const d = await s.getData(); return d && d.geometry ? d.geometry.coordinates.length : 0; });
-  ok('за налаштуванням «блідо» пройдене малюється окремою лінією', done >= 2, 'точок ' + done);
+  ok('за налаштуванням «блідо» пройдене малюється окремою лінією', done >= 2, 'точок ' + done + ' ' + JSON.stringify(await app(page, () => ({ rd: window.__app.nav.pos.rd, mode: window.__app.nav.pos.mode, passed: window.__app.S.passed, on: window.__app.nav.pos.onRoute }))));
   await app(page, () => { window.__app.S.passed = 'hide'; });
 
   // стрічка: Telegram + тривога
@@ -521,6 +521,85 @@ try {
   ok('прохід «без Поїхали і перезапуск» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід «без Поїхали і перезапуск» дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 2г: без GPS — по маршруту (як BlindDriver) ============ */
+try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length;
+  const trip = { id: 't-blind', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  const at = d => app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(d); return { lat: p.lat, lon: p.lon, brg: p.brg }; }, d);
+  const gps = async (d, extra = {}) => { const p = await at(d); await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 22, brg: p.brg, t: Date.now(), ...extra }); };
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await gps(15978); await sleep(1000);
+  // 1) вишки помиляються на 7 км, а GPS лежить на маршруті — це справжній GPS, не підміна (випадок на М-03)
+  const p7 = await at(16000);
+  await emitN('loc', { prov: 'network', lat: p7.lat + 0.063, lon: p7.lon, acc: 1500, t: Date.now() });
+  await gps(16000); await sleep(150);
+  const r1 = await app(page, () => ({ mode: window.__app.nav.pos.mode, why: window.__app.nav.pos.spoofWhy || '', off: window.__app.guide.g.offRoute }));
+  ok('вишки на 7 км убік, GPS — на маршруті: GPS прийнято, «поза маршрутом» немає', r1.mode === 'gps' && r1.why === '' && !r1.off, JSON.stringify(r1));
+  // 2) далі GPS підмінили (Бєлгород) — позначка лишається на маршруті й їде за швидкістю
+  for (let i = 0; i < 3; i++) { await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() }); await sleep(200); }
+  await sleep(1200);
+  const r2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, on: window.__app.nav.pos.onRoute, rd: window.__app.nav.pos.rd, man: document.getElementById('manDist').textContent }));
+  ok('підміна посеред рейсу: розрахунок по маршруту, без «поза маршрутом»', r2.mode === 'dr' && r2.on && r2.rd > 15900 && !/поза маршрутом/i.test(r2.man), JSON.stringify(r2));
+  // 3) швидкість від водія: 80 км/год
+  await page.click('#speed'); await shot(page, '15-speed-pick'); await page.click('#spdPop [data-v="80"]');
+  const rdA = await app(page, () => window.__app.nav.pos.rd); await sleep(3100);
+  const rdB = await app(page, () => window.__app.nav.pos.rd);
+  ok('швидкість, вибрана на спідометрі, рухає позначку (80 км/год ≈ 22 м/с)', rdB - rdA > 55 && rdB - rdA < 95 && /ваша/.test(await page.textContent('#spdUnit')), Math.round(rdB - rdA) + ' м за 3 с');
+  // 4) гіроскоп: перед різким поворотом позначка чекає, після повороту — стає точно за ним
+  const tr0 = await app(page, () => window.__app.nav.routeTurns().find(x => x.d > 300));
+  ok('на маршруті знайдено різкий поворот попереду', !!tr0, JSON.stringify(tr0));
+  if (tr0) {
+    await app(page, d => window.__app.nav.snapToRoute(null) || true, 0);
+    await app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(d); window.__app.nav.setManual({ lat: p.lat, lon: p.lon }); }, tr0.d - 120);
+    await emitN('sens', { var: 0.05, yaw: 0 });
+    await sleep(9500);
+    const held = await app(page, () => window.__app.nav.pos.rd);
+    ok('перед поворотом позначка чекає на гіроскоп', held < tr0.d && held > tr0.d - 40, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
+    await emitN('sens', { var: 0.05, yaw: 0 });
+    await app(page, () => { window.__realNow = Date.now; const b = Date.now(); Date.now = () => b + 8000; });
+    await emitN('sens', { var: 0.05, yaw: tr0.ang });
+    await app(page, () => { Date.now = window.__realNow; });
+    await sleep(300);
+    const after = await app(page, () => window.__app.nav.pos.rd);
+    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 150 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}`);
+  }
+  // 5) вишки «стрибають» на 3 км за 30 с — швидкість 360 км/год не показуємо
+  await app(page, () => { window.__realNow = Date.now; });
+  for (let i = 0; i <= 4; i++) {
+    await app(page, k => { const b = window.__realNow(); Date.now = () => b + k * 30000; }, i);
+    await emitN('loc', { prov: 'network', lat: 49.9 + (i % 2) * 0.027, lon: 35.5, acc: 1200, t: Date.now() + i * 30000 });
+  }
+  await app(page, () => { Date.now = window.__realNow; });
+  ok('стрибки вишок не дають «≈143 за вишками»', await app(page, () => { const d = window.__app.nav.debugState(); return d.apSpd == null || d.apSpd < 30; }));
+  ok('прохід «без GPS по маршруту» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «без GPS по маршруту» дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 2ґ: старт рейсу вже в зоні підміни — «На маршрут» ============ */
+try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length;
+  const trip = { id: 't-snap', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  // вишки показують за 9 км від маршруту — сама прив'язка не спрацює, а кнопка «На маршрут» є
+  await emitN('loc', { prov: 'network', lat: coords[300][0] + 0.08, lon: coords[300][1], acc: 1500, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() });
+  await sleep(1500);
+  const s1 = await app(page, () => ({ mode: window.__app.nav.pos.mode, btn: !document.getElementById('manSnap').hidden, man: document.getElementById('manDist').textContent }));
+  ok('вишки далеко від маршруту: «Немає GPS» і кнопка «На маршрут»', s1.mode === 'approx' && s1.btn && /Немає GPS/.test(s1.man), JSON.stringify(s1));
+  await shot(page, '14-no-gps-snap');
+  await page.click('#manSnap'); await sleep(300);
+  const s2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, on: window.__app.nav.pos.onRoute, rd: Math.round(window.__app.nav.pos.rd || -1) }));
+  ok('«На маршрут» — позначка на маршруті, ведення без GPS', s2.mode === 'dr' && s2.on && s2.rd >= 0, JSON.stringify(s2));
+  ok('прохід «На маршрут» без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід «На маршрут» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 3: офлайн-карта України з файлу в телефоні ============ */
 try {

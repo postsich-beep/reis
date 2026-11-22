@@ -1,7 +1,7 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual, speedView } from './nav.js';
+import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed } from './nav.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels } from './feed.js';
@@ -98,9 +98,9 @@ const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace(
 function hud() {
   // швидкість
   const sv = speedView(), sp = $('speed'), kmh = sv.kmh || 0;
-  const guess = sv.kind === 'approx' || sv.kind === 'est';
+  const guess = sv.kind === 'approx' || sv.kind === 'est' || sv.kind === 'manual';
   $('spdVal').textContent = sv.kind === 'none' ? '—' : (guess ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
-  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'approx' ? t('spdNet') : t('kmh');
+  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'approx' ? t('spdNet') : sv.kind === 'manual' ? t('spdManual') : sv.kind === 'still' && manualSpeed() === 0 ? t('standShort') : t('kmh');
   sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
   sp.classList.toggle('wide', guess);
   const cam = S.cams ? poi.nextCam : null;
@@ -131,8 +131,10 @@ function hud() {
     requestAnimationFrame(layoutVars);
   }
   if (lost) {
+    const ms = manualSpeed();
     $('lostLine').textContent = 'GPS ✕ ' + fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ±' + accText(pos.acc)
-      + (pos.reason === 'spoof' ? ' · ' + t('spoofShort') : pos.reason === 'manual' ? ' · ' + t('manualShort') : '');
+      + (pos.reason === 'spoof' ? ' · ' + t('spoofShort') : pos.reason === 'manual' ? ' · ' + t('manualShort') : '')
+      + (pos.onRoute ? ' · ' + t('onRouteShort') : '') + (ms != null ? ' · ' + (ms === 0 ? t('standShort') : ms + ' ' + t('kmh')) : '');
     const b = $('bAcceptGps'), show = !!pos.pending;
     if (b.hidden === show) { b.hidden = !show; requestAnimationFrame(layoutVars); }
     if (show) b.textContent = pos.reason === 'manual' ? t('backToGps') : t('acceptGps', fmtDist(pos.pending.d));
@@ -146,7 +148,11 @@ function hud() {
   else if (g.active && g.route) {
     show = true;
     if (g.rerouting) { man.classList.add('info'); $('manIco').innerHTML = manIcon(8); $('manDist').textContent = t('rerouting'); $('manText').textContent = ''; $('manThen').hidden = true; }
-    else if (g.offRoute || pos.rd == null) {
+    else if (pos.mode === 'approx' && !pos.onRoute) {          // GPS немає чи підмінено, а вишки — не на маршруті: пропонуємо стати на маршрут
+      man.classList.add('info');
+      $('manIco').innerHTML = manIcon(8); $('manDist').textContent = t('noGpsRoute');
+      $('manText').textContent = t('noGpsRouteSub'); $('manThen').hidden = true;
+    } else if (g.offRoute || pos.rd == null) {
       man.classList.add('info'); if (g.offRoute) man.classList.add('off');
       $('manIco').innerHTML = manIcon(8); $('manDist').textContent = g.offRoute ? t('offRoute') : t('toRoute');
       $('manText').textContent = pos.off ? fmtDist(pos.off) : ''; $('manThen').hidden = true;
@@ -158,6 +164,10 @@ function hud() {
       $('manThen').hidden = !then; if (then) $('manThenIco').innerHTML = manIcon(g.after.type);
     } else { $('manIco').innerHTML = manIcon(4); $('manDist').textContent = fmtDist(g.remain); $('manText').textContent = g.trip.b.label || ''; $('manThen').hidden = true; }
   }
+  // «На маршрут»: рейс іде, а GPS ненадійний — одним дотиком ставимо позначку на маршрут і ведемо без GPS
+  const snapOn = g.active && !!g.route && pos.mode !== 'gps' && (pos.mode === 'approx' || !pos.onRoute);
+  const sb = $('manSnap');
+  if (sb.hidden === snapOn) { sb.hidden = !snapOn; if (snapOn) sb.innerHTML = ICON.pin + '<span>' + t('snapRoute') + '</span>'; }
   if (man.hidden === show) { man.hidden = !show; stripEl.classList.toggle('alone', !show); requestAnimationFrame(layoutVars); }
 
   // нижній рядок
@@ -731,7 +741,38 @@ export function initUI() {
   };
   $('bZin').onclick = () => zoomBy(1); $('bZout').onclick = () => zoomBy(-1);
   $('bCenter').onclick = () => setFollow(true);
-  $('bFwd100').onclick = () => nudge(100); $('bBack100').onclick = () => nudge(-100);
+  // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
+  for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
+    const b = $(id); let timer = null, t0 = 0, held = false;
+    const stop = () => { clearTimeout(timer); timer = null; };
+    const rep = () => { held = true; const el = Date.now() - t0; nudge(sign * (el > 3500 ? 1000 : el > 1200 ? 500 : 100)); timer = setTimeout(rep, 450); };
+    b.onpointerdown = () => { held = false; t0 = Date.now(); stop(); timer = setTimeout(rep, 600); };
+    b.onpointerup = b.onpointerleave = b.onpointercancel = stop;
+    b.onclick = () => { if (!held) nudge(sign * 100); held = false; };
+  }
+  $('manSnap').onclick = e => {
+    e.stopPropagation();
+    if (snapToRoute()) toast(t('snapDone'), 'green', 6000);
+    else toast(t('snapFail'), 'yellow', 9000);
+  };
+  // спідометр: без GPS водій каже свою швидкість (з приладів фури) — розрахунок іде за нею
+  $('speed').onclick = e => {
+    e.stopPropagation();
+    const box = $('spdPop');
+    if (!box.hidden) { box.hidden = true; return; }
+    if (pos.mode === 'gps') { toast(t('spdGpsOk'), '', 3000); return; }
+    const cur = manualSpeed();
+    box.innerHTML = `<div class="ly-head">${t('spdPick')}</div><div class="spd-grid">` +
+      [0, 30, 50, 60, 70, 80, 85, 90].map(v => `<button data-v="${v}" class="${cur === v ? 'on' : ''}">${v === 0 ? t('standShort') : v}</button>`).join('') +
+      `<button data-v="auto" class="wide${cur == null ? ' on' : ''}">${t('spdAuto')}</button></div>`;
+    box.hidden = false;
+  };
+  $('spdPop').onclick = e => {
+    const b = e.target.closest('button'); if (!b) return;
+    setManualSpeed(b.dataset.v === 'auto' ? null : +b.dataset.v);
+    $('spdPop').hidden = true; hud();
+  };
+  document.addEventListener('pointerdown', e => { if (!$('spdPop').hidden && !e.target.closest('#spdPop,#speed')) $('spdPop').hidden = true; });
   $('bAcceptGps').onclick = acceptPending;
   $('gpsChip').onclick = () => openPanel('gps');
   $('lostLine').onclick = () => openPanel('gps');

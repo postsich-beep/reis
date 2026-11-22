@@ -13,6 +13,7 @@ window.__reis = (type, d) => {
     if (type === 'loc') bus.emit('gps', d);
     else if (type === 'sens') bus.emit('sens', d);
     else if (type === 'gnss') bus.emit('gnss', d);
+    else if (type === 'gnssq') bus.emit('gnssq', d);
     else if (type === 'http') {
       const p = pendingHttp.get(d.id); if (!p) return;
       pendingHttp.delete(d.id); clearTimeout(p.timer);

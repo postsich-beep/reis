@@ -314,6 +314,19 @@ body[data-theme="night"]{
 .ly-box svg{width:20px;height:20px}
 #layers .btn{margin-top:8px}
 #pick .btn.sm svg{width:20px;height:20px}
+/* ---- «На маршрут» і швидкість від водія ---- */
+.man{position:relative}
+.man-snap{flex:none;display:flex;align-items:center;gap:6px;min-height:52px;padding:0 14px;border:0;border-radius:14px;background:var(--amber);color:#1b1300;font:600 17px var(--f-ui)}
+.man-snap svg{width:22px;height:22px}
+#speed{cursor:pointer}
+#spdPop{position:absolute;left:14px;bottom:calc(var(--bh,150px) + 130px);z-index:6;width:min(280px,calc(100vw - 28px));padding:10px;border-radius:18px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+.spd-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.spd-grid button{min-height:52px;border:0;border-radius:12px;background:rgba(var(--glass2-rgb),.7);color:var(--ink);font:800 20px var(--f-num)}
+.spd-grid button.on{background:var(--ink);color:var(--panel)}
+.spd-grid button.wide{grid-column:1/-1;font:600 16px var(--f-ui)}
+.spd-grid button[data-v="0"]{font:600 17px var(--f-ui)}
+#lostLine{font-family:var(--f-ui)}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}
