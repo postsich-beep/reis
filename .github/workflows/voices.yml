@@ -17,7 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Український голос (ukrainian_tts, 3 диктори: Лада, Микита, Тетяна)
+      - name: 'Український голос (ukrainian_tts, 3 диктори — Лада, Микита, Тетяна)'
         run: |
           set -e
           N=vits-piper-uk_UA-ukrainian_tts-medium
