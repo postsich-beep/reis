@@ -116,7 +116,7 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #panel{position:absolute;left:0;right:0;bottom:calc(var(--bh,150px) - 14px);top:calc(var(--st) + var(--th,140px) + 16px);background:var(--panel);border-radius:20px 20px 0 0;box-shadow:0 -8px 30px rgba(0,0,0,.3);z-index:5;display:flex;flex-direction:column}
 #panel.half{top:auto;max-height:56%}
 #panel>header{display:flex;align-items:center;gap:8px;padding:12px 10px 8px 16px;border-bottom:1px solid var(--line)}
-#panel h2{flex:1;margin:0;font:800 26px/1 var(--f-num);letter-spacing:.01em}
+#panel h2{flex:1;margin:0;font:700 22px/1.1 var(--f-ui);letter-spacing:0;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}   /* Sofia Sans малює кириличне «т» як «m» («Бістро (mecm)») */
 #panelClose,#panelBack{width:48px;height:48px;border-radius:50%;background:var(--panel-2);display:grid;place-items:center}
 #panelClose svg,#panelBack svg{width:22px;height:22px}
 #panelBody{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:12px 14px 30px;user-select:text;-webkit-user-select:text}
@@ -409,3 +409,58 @@ body[data-theme="night"]{
 @media (orientation:landscape){
   #pick{left:auto;right:10px;width:calc(46% - 20px);bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--bh,150px) - 84px);overflow:auto}   /* нижче кнопки швидких налаштувань */
 }
+/* «Де ви зараз?» (1.1): під карткою маневру */
+#wherePop{position:absolute;left:10px;right:10px;top:calc(var(--st) + var(--th,140px) + 10px);z-index:8;max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 20px);overflow:auto;padding:10px;border-radius:18px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
+@media (orientation:landscape){#wherePop{right:auto;width:calc(46% - 10px)}}
+/* ---- маршрут (1.1): фура / легковик, варіанти карточками ---- */
+.seg.veh{margin:2px 0 10px}
+.seg.veh button{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;font-size:15px}
+.seg.veh svg{width:24px;height:24px}
+.alts{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(132px,1fr);gap:8px;overflow-x:auto;padding:2px 1px 8px;margin-bottom:4px;scroll-snap-type:x mandatory}
+.alt{scroll-snap-align:start;text-align:left;display:flex;flex-direction:column;gap:2px;padding:10px 12px;border-radius:14px;background:var(--panel-2);border:2px solid transparent;color:var(--ink);min-width:0}
+.alt b{font:800 22px/1.1 var(--f-num)}
+.alt span{font:600 15px var(--f-num);color:var(--ink-2)}
+.alt small{font-size:13px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.alt.on{border-color:var(--amber);background:color-mix(in srgb,var(--amber) 14%,var(--panel-2))}
+.alt .fl{display:flex;flex-wrap:wrap;gap:4px;margin-top:4px}
+.alt .fl i{font-style:normal;font-size:11.5px;font-weight:600;padding:2px 6px;border-radius:8px;background:var(--panel);color:var(--ink-2)}
+.alt .fl i.bad{background:var(--red);color:#fff} .alt .fl i.good{background:var(--green);color:#fff}
+/* ---- нижня панель (1.1): «Маршрут» — головна кнопка посередині ---- */
+#tabs button.main{gap:1px}
+#tabs button.main .mc{width:56px;height:56px;margin-top:-26px;border-radius:50%;display:grid;place-items:center;background:var(--amber);color:var(--amber-ink);box-shadow:var(--shadow)}
+#tabs button.main .mc svg{width:30px;height:30px;filter:none!important}
+#tabs button.main.act{background:transparent}
+#tabs button.main.act .mc{outline:3px solid var(--ink);outline-offset:2px}
+#tabs button.main span:last-child{font-weight:700;color:var(--ink)}
+/* ---- перевірені місця ---- */
+.vpm{width:36px;height:36px;padding:0;border-radius:50%;background:#fff;border:2px solid #f5b301;box-shadow:0 2px 7px rgba(0,0,0,.35);display:grid;place-items:center;position:relative;cursor:pointer}
+.vpm svg{width:26px;height:26px}
+.vpm .vpm-star{position:absolute;right:-6px;top:-6px;width:18px;height:18px;border-radius:50%;background:#f5b301;border:2px solid #fff;display:grid;place-items:center}
+.vpm .vpm-star svg{width:11px;height:11px}
+.vp-row{display:flex;align-items:center;gap:12px;width:100%;padding:8px;border-radius:14px;background:var(--panel-2);text-align:left;color:var(--ink)}
+.vp-row img{width:72px;height:72px;border-radius:10px;object-fit:cover;flex:none;background:var(--line)}
+.vp-row .grow{display:flex;flex-direction:column;gap:2px;min-width:0}
+.vp-row b{font-size:17px}
+.vp-row small{color:var(--ink-2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.vp-row .vp-w{color:var(--ink);font-weight:600}
+.vp-stars{color:#e2a400;letter-spacing:1px;font-size:14px}
+.vp-stars.big{font-size:20px}
+.vp-photos{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -4px 6px;padding:0 4px}
+.vp-photos img{flex:0 0 86%;height:220px;object-fit:cover;border-radius:14px;scroll-snap-align:start;background:var(--line);cursor:zoom-in}
+.vp-hint{font-size:12px;margin-bottom:8px}
+.vp-head{display:flex;align-items:baseline;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.vp-head b{font:700 22px var(--f-ui)}
+.vp-badge{display:inline-flex;align-items:center;gap:6px;margin:6px 0;padding:4px 10px 4px 6px;border-radius:999px;background:color-mix(in srgb,#f5b301 22%,var(--panel-2));font-size:13px;font-weight:600}
+.vp-badge svg{width:18px;height:18px;color:#a06c00}
+.vp-where{margin-top:6px;font-weight:700}
+.vp-say{margin:10px 0;line-height:1.45}
+.vp-tags{display:flex;flex-wrap:wrap;gap:6px}
+.vp-menu{display:grid;gap:2px}
+.vp-menu div{display:flex;justify-content:space-between;gap:10px;padding:6px 2px;border-bottom:1px solid var(--line);font-size:15px}
+.vp-menu b{font-weight:600;white-space:nowrap;text-align:right}
+#photoView{position:fixed;inset:0;z-index:30;background:rgba(0,0,0,.92);display:flex;align-items:center}
+#photoView .pv-strip{display:flex;overflow-x:auto;scroll-snap-type:x mandatory;width:100%;height:100%}
+#photoView .pv-strip img{flex:0 0 100%;width:100%;height:100%;object-fit:contain;scroll-snap-align:center}
+#photoView .pv-x{position:absolute;right:max(12px,env(safe-area-inset-right));top:calc(var(--st) + 12px);width:48px;height:48px;border-radius:50%;background:rgba(255,255,255,.16);color:#fff;display:grid;place-items:center;z-index:2}
+#photoView .pv-x svg{width:26px;height:26px}

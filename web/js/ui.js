@@ -1,14 +1,15 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed } from './nav.js';
+import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow } from './nav.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName } from './route.js';
-import { view, setFollow, zoomBy, previewRoute, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
+import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
+import { view, setFollow, zoomBy, previewRoute, previewAlts, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
+import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
 import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
@@ -17,6 +18,7 @@ import { offlineActive } from './offline.js';
 import { sdb, TYPES, F, nearbyRows } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
+import { vp, byId as byIdVp, sorted as vpSorted, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
 import { t } from './i18n.js';
 
@@ -34,9 +36,9 @@ function staticLabels() {
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
-  const names = { trip: 'tabTrip', feed: 'tabFeed', chat: 'tabChat', lab: 'tabLab' };
-  tabs.forEach(b => { b.innerHTML = ICON[b.dataset.panel] + '<span>' + t(names[b.dataset.panel]) + '</span>'; });
-  $('bMic').innerHTML = ICON.mic; $('bMic').setAttribute('aria-label', t('micHint'));
+  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', lab: 'tabLab', settings: 'qSettings' };
+  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, lab: ICON.lab, settings: ICON.gear };
+  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
@@ -45,7 +47,7 @@ function staticLabels() {
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
 const LAYERS = [
   ['fuel', 'f', 'lyFuel'], ['food', 'e', 'lyFood'], ['park', 'p', 'lyPark'], ['motel', 'm', 'lyMotel'], ['shower', 'h', 'lyShower'], ['cam', 'c', 'lyCam'],
-  ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
+  ['@mapVerified', '', 'lyVerified'], ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
 ];
 const layerOn = k => k[0] === '@' ? S[k.slice(1)] !== false : S.mapStops !== false && (S.mapStopTypes || {})[k] !== false;
 function setLayer(k, v) {
@@ -59,7 +61,7 @@ function setLayer(k, v) {
   if (k === 'cam' && v && !S.cams) S.cams = true;
 }
 function layersHtml() {
-  const dot = (ty, k) => k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
+  const dot = (ty, k) => k === '@mapVerified' ? '<span class="sdot" style="background:#f5a524;border-color:#f5b301"></span>' : k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
     : k === '@mapHazards' ? '<span class="sdot hz">20</span>' : k === '@roughMap' ? '<span class="sdot" style="background:linear-gradient(90deg,#2f9e62 33%,#f6bd16 33% 66%,#e5484d 66%)"></span>'
     : `<span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
   const anyOn = LAYERS.some(([k]) => layerOn(k));
@@ -71,7 +73,7 @@ function layersHtml() {
 function layersClick(e) {
   const b = e.target.closest('[data-ly]'); if (!b) return false;
   const k = b.dataset.ly;
-  if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; }
+  if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; S.mapVerified = v; }
   else setLayer(k, !layerOn(k));
   return true;
 }
@@ -153,9 +155,9 @@ const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace(
 function hud() {
   // швидкість
   const sv = speedView(), sp = $('speed'), kmh = sv.kmh || 0;
-  const guess = sv.kind === 'approx' || sv.kind === 'est' || sv.kind === 'manual';
+  const guess = sv.kind === 'approx' || sv.kind === 'est' || sv.kind === 'manual' || sv.kind === 'plan';
   $('spdVal').textContent = sv.kind === 'none' ? '—' : (guess ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
-  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'approx' ? t('spdNet') : sv.kind === 'manual' ? t('spdManual') : sv.kind === 'still' && manualSpeed() === 0 ? t('standShort') : t('kmh');
+  $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'plan' ? t('spdPlan') : sv.kind === 'approx' ? t('spdNet') : sv.kind === 'manual' ? t('spdManual') : sv.kind === 'still' && manualSpeed() === 0 ? t('standShort') : t('kmh');
   sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
   sp.classList.toggle('wide', guess);
   const cam = S.cams ? poi.nextCam : null;
@@ -247,6 +249,19 @@ function autoStart() {
   toast(t('autoStarted'), 'green', 6000);
   goTrip(trip, { onRoute: true });
 }
+// «Де ви зараз?» — список місць на маршруті, найближчі до оцінки зверху
+function whereHtml() {
+  const e = estimateNow(), list = [];
+  if (e) list.push({ d: 'est', name: t('whereEst'), sub: fmtDist(e.d) + ' ' + t('fromStart') });
+  list.push({ d: 0, name: t('whereStart'), sub: (g.trip && g.trip.a && g.trip.a.label) || '' });
+  const towns = ((g.trip && g.trip.towns) || []).filter(x => x.d > 500);
+  const ref = e ? e.d : 0;
+  towns.sort((a, b) => Math.abs(a.d - ref) - Math.abs(b.d - ref));
+  for (const x of towns.slice(0, 7).sort((a, b) => a.d - b.d)) list.push({ d: x.d, name: x.name, sub: fmtDist(x.d) + ' ' + t('fromStart') });
+  if (g.route && g.route.viaD) list.push({ d: g.route.viaD, name: (g.trip.v && g.trip.v.label) || t('via'), sub: fmtDist(g.route.viaD) + ' ' + t('fromStart') });
+  return `<div class="ly-head">${t('whereTitle')}</div>` + list.map(x => `<button class="ly-row" data-d="${x.d}"><span class="grow">${esc(x.name)}<small class="muted" style="display:block;font-size:13px">${esc(x.sub)}</small></span></button>`).join('') +
+    `<div class="muted" style="margin:6px 4px 2px;font-size:13px">${t('whereHint')}</div>`;
+}
 // Рейс, що йшов до перезапуску чи оновлення, — продовжуємо, ніби нічого не сталося.
 export async function resumeTrip() {
   if (!(await resumeActive())) return false;
@@ -274,7 +289,7 @@ function stripUpdate() {
 }
 
 /* =====================  ПАНЕЛЬ «РЕЙС»  ===================== */
-const plan = { a: null, v: null, b: null, trip: null, busy: false, err: '', sugg: [], field: null, regBusy: false, off: null };
+const plan = { a: null, v: null, b: null, trip: null, busy: false, err: '', sugg: [], field: null, regBusy: false, off: null, routes: [], sel: 0 };
 let geoTimer = null;
 
 function summaryHtml(trip) {
@@ -380,7 +395,8 @@ function tripActiveHtml() {
   return `<div class="card"><div class="t" style="font-weight:600;margin-bottom:10px">${esc(tripTitle(tr))}</div>
     <div class="kv"><div><b>${fmtDist(g.remain)}</b><span>${t('remainL')}</span></div><div><b>${fmtDur(g.remTime)}</b><span>${t('driveTime')}</span></div><div><b>${g.arrived ? '—' : fmtClock(new Date(g.eta))}</b><span>${t('arrival')}</span></div></div>
     ${regs ? `<div style="margin-top:10px">${regs}</div>` : ''}${offlineHtml()}</div>
-  <div class="btns"><button class="btn" data-act="reroute">${t('reroute')}</button><button class="btn" data-act="offline">${t('offlineMap')}</button></div>
+  <div class="btns"><button class="btn" data-act="reroute">${t('reroute')}</button><button class="btn" data-act="rerouteFresh">${t('rerouteFresh')}</button></div>
+  <div class="btns"><button class="btn" data-act="offline">${t('offlineMap')}</button></div>
   <div class="btns"><button class="btn danger wide" data-act="stop">${t('endTrip')}</button></div>
   ${poi.drive > 300 ? `<div class="sec">${t('driveSec')}</div><div class="card">${t('driveNow', fmtDur(poi.drive))}</div>` : ''}
   <div class="sec">${t('stopsSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>
@@ -401,10 +417,34 @@ function fieldHtml(k, cls, tag, ph) {
 function planHtml() {
   return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div>${plan.trip ? '' : showersNearHtml()}<div class="sec">${t('newTrip')}</div>
     ${fieldHtml('a', 'a', 'A', t('phA'))}${fieldHtml('v', 'v', '•', t('phV'))}${fieldHtml('b', 'b', 'Б', t('phB'))}
+    ${vehHtml()}
     <div class="muted">${t('pickHint')}</div>
     <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
     <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
     <div class="sec">${t('savedSec')}</div><div id="savedBox">${savedHtml()}</div>`;
+}
+// Фура чи легковик: для фури — габарити, маса, мости, обмежувач; для легковика — без обмежень
+function vehHtml() {
+  const v = S.vehicle === 'auto' ? 'auto' : 'truck';
+  return `<div class="seg veh"><button data-veh="truck" class="${v === 'truck' ? 'on' : ''}">${ICON.truck}${t('vehTruck')}</button><button data-veh="auto" class="${v === 'auto' ? 'on' : ''}">${ICON.car}${t('vehCar')}</button></div>`;
+}
+// Варіанти маршруту карточками (до трьох): час, кілометри, головні дороги, обмеження для фури
+function altCardsHtml() {
+  const rs = plan.routes || []; if (rs.length < 2) return '';
+  const truck = plan.trip && plan.trip.costing !== 'auto';
+  const best = Math.min(...rs.map(r => r.time));
+  return `<div class="alts">` + rs.map((r, i) => {
+    const red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
+    const ky = kyivOnRoute(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000);
+    const flags = [red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', r.time === best && rs.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    return `<button class="alt${i === plan.sel ? ' on' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
+  }).join('') + `</div>`;
+}
+function selectAlt(i) {
+  const tr = plan.trip, r = plan.routes[i]; if (!tr || !r) return;
+  plan.sel = i; tr.route = r; tr.regions = []; tr.towns = []; tr.chosen = null;
+  previewRoute(r.coords, r); previewAlts(plan.routes.map((x, k) => [k, x.coords]).filter(([k]) => k !== i));
+  hud(); refresh('trip'); loadRegions(tr);
 }
 function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
 function planSumHtml() {
@@ -413,7 +453,7 @@ function planSumHtml() {
       <div class="muted" style="margin-top:4px">${t('detourText')}</div>
       <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
     : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
-  return `<div class="sec">${t('routeReady')}</div><div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
+  return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
     ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}
     ${showersRouteHtml(r, indexOfRoute(r), 0)}`;
@@ -453,8 +493,12 @@ async function doBuild() {
   plan.busy = true; plan.trip = null; plan.off = null; refresh('trip');
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
-    trip.route = await buildRoute(trip);
-    plan.trip = trip; previewRoute(trip.route.coords, trip.route); hud();
+    trip.costing = S.vehicle === 'auto' ? 'auto' : 'truck';
+    const r = await buildRoute(trip, { alternates: 2 });
+    plan.routes = [r, ...(r.alts || [])].slice(0, 3); plan.sel = 0;
+    for (const x of plan.routes) delete x.alts;
+    trip.route = r;
+    plan.trip = trip; previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
     loadRegions(trip);
   } catch (e) {
     plan.err = (e.code ? t('routeFail') : t('netErr')) + ' ' + (e.message || '');
@@ -463,6 +507,8 @@ async function doBuild() {
   plan.busy = false; refresh('trip');
 }
 async function goTrip(trip, opts = {}) {
+  if (trip.route) delete trip.route.alts;
+  previewAlts(null); plan.routes = []; plan.sel = 0;
   saveTrip(trip); places.remember(trip.b);
   restorePoi(trip.cams, trip.stops);
   if (!opts.onRoute) closePanel();
@@ -482,17 +528,20 @@ function tripClicks(e) {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
   if (d.act === 'build') doBuild();
+  else if (d.veh) { S.vehicle = d.veh; e.currentTarget.querySelectorAll('[data-veh]').forEach(x => x.classList.toggle('on', x.dataset.veh === d.veh)); if (plan.trip) doBuild(); }
+  else if (d.alt != null) selectAlt(+d.alt);
+  else if (d.act === 'rerouteFresh') { rerouteNow(true); closePanel(); }
   else if (d.act === 'go' && plan.trip) goTrip(plan.trip);
   else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
     const tr = plan.trip, alt = tr.route.alt;
     alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
-  else if (d.act === 'save' && plan.trip) { saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); hud(); openPanel('trip'); }
+  else if (d.act === 'save' && plan.trip) { if (plan.trip.route) delete plan.trip.route.alts; plan.routes = []; saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); hud(); openPanel('trip'); }
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') { const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); } stopTrip(); previewRoute(null); setRouteContext([], []); openPanel('trip'); }
-  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
+  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
     if (pos.lat == null) { toast(t('gpsWait')); return; }
@@ -542,7 +591,73 @@ definePanel('trip', {
 });
 
 /* вибір точки довгим натисканням на карті */
+/* =====================  ПЕРЕВІРЕНІ МІСЦЯ  ===================== */
+let vpCur = null, vpPickFor = null;
+const stars = n => '★'.repeat(Math.max(0, Math.min(5, n || 0))) + '☆'.repeat(5 - Math.max(0, Math.min(5, n || 0)));
+function vpWhereText(p) {
+  const w = vpWhere(p); if (!w) return vpOnMap(p) ? '' : t('vpNoLoc');
+  if (w.route) return w.ahead >= 0 ? t('vpOnRoute', fmtDist(w.ahead)) : t('vpBehind');
+  return t('vpAway', fmtDist(w.dist));
+}
+function vpMonth(s) { const [y, m] = String(s || '').split('-').map(Number); if (!y || !m) return ''; try { return new Date(y, m - 1, 1).toLocaleDateString(S.lang === 'ru' ? 'ru-RU' : 'uk-UA', { month: 'long', year: 'numeric' }); } catch (_) { return s; } }
+function placesHtml() {
+  if (!vp.ready) return `<div class="muted">${t('loading')}</div>`;
+  const list = vpSorted();
+  return `<div class="muted" style="margin-bottom:10px">${t('vpIntro')}</div><div class="list">` + list.map(p => `<button class="vp-row" data-vpid="${esc(p.id)}">
+      <img src="data/${esc((p.thumbs || p.photos || [])[0] || '')}" alt="" loading="lazy"><span class="grow"><b>${esc(p.name)}</b><span class="vp-stars">${stars(p.rating)}</span>
+      <small>${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}</small><small class="vp-w">${esc(vpWhereText(p))}</small></span></button>`).join('') +
+    `</div><div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
+}
+function placeHtml(p) {
+  const ph = p.photos || [];
+  return `<div class="vp-photos">${ph.map((src, i) => `<img src="data/${esc(src)}" alt="" ${i > 1 ? 'loading="lazy"' : ''} data-ph="${i}">`).join('')}</div>
+    ${ph.length > 1 ? `<div class="muted vp-hint">${t('vpSwipe', ph.length)}</div>` : ''}
+    <div class="vp-head"><b>${esc(p.name)}</b><span class="vp-stars big">${stars(p.rating)}</span></div>
+    <div class="vp-badge">${ICON.check}<span>${t('vpChecked', vpMonth(p.checked))}</span></div>
+    <div class="muted">${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}${p.side ? '<br>' + esc(vpTxt(p.side)) : ''}</div>
+    ${vpWhereText(p) ? `<div class="vp-where">${esc(vpWhereText(p))}</div>` : ''}
+    <p class="vp-say">${esc(vpTxt(p.say))}</p>
+    <div class="vp-tags">${(vpTxt(p.tags) || []).map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div>
+    ${p.menu && p.menu.length ? `<div class="sec">${t('vpMenu')}</div><div class="vp-menu">${p.menu.map(([n, pr]) => `<div><span>${esc(n)}</span><b>${esc(pr)}</b></div>`).join('')}</div><div class="muted" style="margin-top:6px">${esc(vpTxt(p.note))}</div>` : ''}
+    <div class="btns">${vpOnMap(p) ? `<button class="btn pri" data-vp="go">${g.active ? t('vpVia') : t('vpRoute')}</button><button class="btn" data-vp="map">${t('vpOnMap')}</button>` : ''}</div>
+    ${!vpOnMap(p) || p.own ? `<div class="btns"><button class="btn" data-vp="setloc">${t('vpSetLoc')}</button></div>` : ''}`;
+}
+definePanel('places', {
+  title: () => t('tabPlaces'),
+  render(body) {
+    body.innerHTML = placesHtml();
+    body.onclick = e => { const b = e.target.closest('[data-vpid]'); if (!b) return; vpCur = byIdVp(b.dataset.vpid); if (vpCur) openPanel('place'); };
+  }
+});
+definePanel('place', {
+  title: () => vpCur ? vpCur.name : '', back: 'places', tab: 'places',
+  render(body) {
+    if (!vpCur) return;
+    body.innerHTML = placeHtml(vpCur);
+    body.onclick = e => {
+      const im = e.target.closest('[data-ph]');
+      if (im) { const pv = $('photoView'); pv.innerHTML = `<button class="pv-x" data-pv="x" aria-label="${t('close')}">${ICON.x}</button><div class="pv-strip">${(vpCur.photos || []).map(src => `<img src="data/${esc(src)}" alt="">`).join('')}</div>`; pv.hidden = false; const st = pv.querySelector('.pv-strip'); st.scrollLeft = st.clientWidth * +im.dataset.ph; return; }
+      const b = e.target.closest('[data-vp]'); if (!b) return;
+      const p = vpCur, k = b.dataset.vp;
+      if (k === 'map') { closePanel(); flyTo(p, 16); }
+      else if (k === 'go') {
+        const pt = { lat: p.lat, lon: p.lon, label: p.name, sub: [p.road, vpTxt(p.town)].filter(Boolean).join(' · ') };
+        if (g.active) { setVia(pt); closePanel(); toast(t('vpViaDone', p.name), 'green', 6000); }
+        else { plan.b = pt; plan.trip = null; plan.routes = []; openPanel('trip'); }
+      } else if (k === 'setloc') { vpPickFor = p.id; closePanel(); toast(t('vpSetLocHint'), '', 9000); }
+    };
+  },
+  update(body) { if (vpCur) body.innerHTML = placeHtml(vpCur); }
+});
+
 function onMapPick(p) {
+  if (vpPickFor) { const id = vpPickFor; vpPickFor = null; vpSetLocation(id, p); vpCur = byIdVp(id); toast(t('vpLocSet'), 'green', 5000); openPanel('place'); return; }
+  // Без GPS довге натискання біля маршруту = «я тут, на маршруті»: попадати пальцем точно в лінію на ходу незручно.
+  if (g.active && g.idx && pos.mode !== 'gps') {
+    const l = g.idx.locate(p, null), z = mapM.map ? mapM.map.getZoom() : 12;
+    const mpp = 156543 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z);          // метрів на піксель
+    if (l && l.off <= Math.max(150, mpp * 70)) { placeAtD(l.d); setFollow(true); toast(t('snapPress'), 'green', 5000); return; }
+  }
   showPick(p);
   const box = $('pick'); box.hidden = false;
   const pts = g.active ? '' : `<button class="btn" data-k="a">A</button><button class="btn" data-k="v">${t('via')}</button><button class="btn" data-k="b">Б</button>`;
@@ -745,13 +860,16 @@ export function initUI() {
   setInterval(() => { hud(); if (currentPanel() === 'trip' && g.active) refresh('trip'); }, 1000);
   bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
-  bus.on('chat', () => { refresh('chat'); micState(); });
+  bus.on('chat', () => refresh('chat'));
+  bus.on('vplaces', () => { refresh('places'); refresh('place'); });
+  bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
   bus.on('trips', () => refresh('trip'));
   bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', onMapPick);
+  bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
   bus.on('stopTap', onStopTap);
   bus.on('markTap', onMarkTap);
   bus.on('marks', () => refresh('trip'));
@@ -806,11 +924,20 @@ export function initUI() {
     b.onpointerup = b.onpointerleave = b.onpointercancel = stop;
     b.onclick = () => { if (!held) nudge(sign * 100); held = false; };
   }
+  // «На маршрут» → «Де ви зараз?»: оцінка (якщо є), початок маршруту, міста й проміжна точка вздовж маршруту
   $('manSnap').onclick = e => {
     e.stopPropagation();
-    if (snapToRoute()) toast(t('snapDone'), 'green', 6000);
-    else toast(t('snapFail'), 'yellow', 9000);
+    const box = $('wherePop'); if (!box.hidden) { box.hidden = true; return; }
+    box.innerHTML = whereHtml(); box.hidden = false; $('spdPop').hidden = true;
   };
+  $('wherePop').onclick = e => {
+    e.stopPropagation();
+    const b = e.target.closest('[data-d]'); if (!b) return;
+    const box = $('wherePop'); box.hidden = true;
+    const ok = b.dataset.d === 'est' ? snapToRoute() : placeAtD(+b.dataset.d);
+    if (ok) toast(t('snapDone'), 'green', 6000); else toast(t('snapFail'), 'yellow', 9000);
+  };
+  document.addEventListener('pointerdown', e => { if (!$('wherePop').hidden && !e.target.closest('#wherePop,#manSnap')) $('wherePop').hidden = true; });
   // спідометр: без GPS водій каже свою швидкість (з приладів фури) — розрахунок іде за нею
   $('speed').onclick = e => {
     e.stopPropagation();
@@ -833,12 +960,5 @@ export function initUI() {
   $('gpsChip').onclick = () => openPanel('gps');
   $('lostLine').onclick = () => openPanel('gps');
 
-  // мікрофон: коротке натискання — голосове повідомлення, довге — жива розмова
-  let lp = null, long = false;
-  const mic = $('bMic');
-  const down = () => { long = false; lp = setTimeout(() => { long = true; P.vibrate(60); toggleLive(); }, 650); };
-  const up = () => { clearTimeout(lp); if (long) return; if (chat.live) toggleLive(); else if (!hasKey()) openPanel('chat'); else voiceOnce(); };
-  mic.addEventListener('pointerdown', down); mic.addEventListener('pointerup', up); mic.addEventListener('pointerleave', () => clearTimeout(lp));
-  mic.addEventListener('contextmenu', e => e.preventDefault());
+  $('photoView').onclick = e => { if (e.target.closest('[data-pv="x"]') || e.target === $('photoView')) $('photoView').hidden = true; };
 }
-function micState() { const m = $('bMic'); m.classList.toggle('listening', chat.listening); m.classList.toggle('live', chat.live); }

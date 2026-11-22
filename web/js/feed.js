@@ -181,7 +181,7 @@ function alertUser(item, silent) {
   item.said = Date.now(); item.saidAt = r.ahead == null ? null : Math.round(r.ahead);
   if (silent || item.hush) return;
   const text = item.voice || item.sum || item.text;
-  const pre = r.ahead != null && r.ahead >= 2000 && item.src !== 'stop' && item.src !== 'drive' ? t('voiceIn', distWords(r.ahead)) + ' ' : '';
+  const pre = r.ahead != null && r.ahead >= 2000 && item.src !== 'stop' && item.src !== 'drive' ? t('voiceInEv', distWords(r.ahead)) + ' ' : '';
   if (r.tier === 'unknown' && item.level !== 'red') { bus.emit('toast', { level: item.level, text: body, id: item.id }); return; }   // невідомо де — без голосу
   bus.emit('toast', { level: item.level, text: (lbl ? lbl + ' · ' : '') + body, id: item.id });
   if (item.level === 'red') { say(t('voiceAttention') + ' ' + pre + short(text, 220)); vibrate(400); if (document.hidden && S.notify !== false) notify(t('appName'), (lbl ? lbl + ' · ' : '') + short(text, 160)); }
@@ -308,7 +308,7 @@ export function watch() {
     if (!it.said && r.tier !== 'far') alertUser(it);
     else if (it.said && it.level === 'red' && !it.rem && it.saidAt > 2 * REMIND && r.ahead != null && r.ahead <= REMIND && !r.area) {
       it.rem = true;
-      say(t('voiceAttention') + ' ' + t('voiceIn', distWords(r.ahead)) + ' ' + short(it.voice || it.sum || it.text, 200));
+      say(t('voiceAttention') + ' ' + t('voiceInEv', distWords(r.ahead)) + ' ' + short(it.voice || it.sum || it.text, 200));
       bus.emit('toast', { level: 'red', text: relLabel(it, r) + ' · ' + (it.sum || it.text), id: it.id });
     }
   }

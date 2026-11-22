@@ -84,21 +84,36 @@ export function truckOptions() {
   return o;
 }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
-export async function requestRoute(pts, heading, costing = 'truck') {
+export async function requestRoute(pts, heading, costing = 'truck', alternates = 0) {
   const locations = pts.map((p, i) => {
     const l = { lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6), type: (i === 0 || i === pts.length - 1) ? 'break' : 'through' };
     if (i === 0 && heading != null) { l.heading = Math.round(heading); l.heading_tolerance = 60; }
+    // точка на вибраному маршруті: з напрямком руху, щоб на трасі з розділювачем не «прилипла» до зустрічної смуги
+    else if (p.brg != null) { l.heading = Math.round(p.brg); l.heading_tolerance = 45; }
     return l;
   });
   const body = {
     locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions() } : {},
     units: 'kilometers', language: S.lang === 'ru' ? 'ru-RU' : 'uk-UA', directions_type: 'instructions'
   };
+  if (alternates > 0 && pts.length === 2) body.alternates = alternates;      // запасні варіанти — лише для А → Б без проміжних
   // GET із параметром json — «простий» запит, сервер відповідає сторінкам без попередньої перевірки CORS.
   const r = await http(S.routeUrl.replace(/\/+$/, '') + '/route?json=' + encodeURIComponent(JSON.stringify(body)), { timeout: 45000 });
   let j; try { j = JSON.parse(r.text); } catch (_) { throw new Error('HTTP ' + r.status); }
   if (r.status !== 200 || !j.trip) { const e = new Error(j.error || ('HTTP ' + r.status)); e.code = j.error_code; throw e; }
-  return parseTrip(j.trip);
+  const main = parseTrip(j.trip);
+  main.alts = [];
+  for (const a of j.alternates || []) { try { if (a && a.trip) main.alts.push(parseTrip(a.trip)); } catch (_) {} }
+  return main;
+}
+// Головні дороги маршруту для картки варіанта: «М-06, Н-01» — за довжиною
+export function mainRoads(r, n = 3) {
+  const m = new Map();
+  for (const x of r.mans || []) for (const s of x.streets || []) {
+    const ref = String(s).match(/^\s*([МНРТEМHPTE])\s*-?\s*(\d{1,3}(?:-\d{2})?)\s*$/i);
+    if (ref) { const k = ref[1].toUpperCase().replace('M', 'М').replace('H', 'Н').replace('P', 'Р').replace('T', 'Т') + '-' + ref[2].padStart(2, '0'); m.set(k, (m.get(k) || 0) + (x.len || 0)); }
+  }
+  return [...m].sort((a, b) => b[1] - a[1]).slice(0, n).map(x => x[0]);
 }
 export function parseTrip(trip) {
   const coords = [], mans = [];
@@ -157,20 +172,24 @@ export function saveTrip(trip) {
   persist(); bus.emit('trips');
 }
 export function deleteTrip(id) { trips = trips.filter(t => t.id !== id); persist(); bus.emit('trips'); }
-export function newTrip(a, v, b) {
+export function newTrip(a, v, b) {   // costing: 'truck' — фура, 'auto' — легковик (вибір на екрані маршруту)
   return { id: uid(), created: Date.now(), a, v: v || null, b, route: null, regions: [], towns: [], cams: [], stops: [], tiles: 0 };
 }
 export const tripTitle = t => (t.a.label || '?') + ' → ' + (t.v ? t.v.label + ' → ' : '') + (t.b.label || '?');
 
 // Будує маршрут рейсу. from — поточна позиція; skipA/skipVia — точки, які вже пройдено.
-export async function buildRoute(trip, { from = null, heading = null, skipA = false, skipVia = false } = {}) {
+export async function buildRoute(trip, { from = null, heading = null, skipA = false, skipVia = false, through = null, alternates = 0 } = {}) {
   const pts = [from || trip.a];
-  if (from && !skipA) pts.push(trip.a);
-  if (trip.v && !skipVia) pts.push(trip.v);
+  if (through && through.length) pts.push(...through);              // повернення на вибраний маршрут: точки вздовж нього (проміжна — серед них)
+  else {
+    if (from && !skipA) pts.push(trip.a);
+    if (trip.v && !skipVia) pts.push(trip.v);
+  }
   pts.push(trip.b);
   const costing = trip.costing || 'truck';
-  const r = await requestRoute(pts, heading, costing);
+  const r = await requestRoute(pts, heading, costing, from ? 0 : alternates);
   r.costing = costing;
+  for (const a of r.alts) { a.costing = costing; a.aD = null; a.viaD = null; a.detour = 1; }
   // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
   // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.
   const straight = hav(pts[0], pts[pts.length - 1]);

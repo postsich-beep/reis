@@ -74,15 +74,35 @@ function applyRoute(route, resumed = false) {
   for (const m of route.mans) m.d0 = g.idx.cum[Math.min(m.i0, g.idx.cum.length - 1)];
   g.manI = 0; lastManI = -1; said = {}; offSince = 0; g.offRoute = false;
   g.passedA = route.aD == null; g.passedV = route.viaD == null;
-  setRoute(g.idx);
+  setRoute(g.idx, route.mans);
   bus.emit('route', g);
   update();
   if (!resumed) saveActive();
 }
 
+// Вибраний водієм маршрут (спрощено, точка на ~500 м): при з'їзді ведемо назад на нього, а не будуємо зовсім інший.
+function chosenOf(route) {
+  if (!route || !route.coords || route.coords.length < 2) return null;
+  const idx = new RouteIndex(route.coords), out = [];
+  for (let d = 0; d < idx.total; d += 500) { const p = idx.at(d); out.push([+p.lat.toFixed(5), +p.lon.toFixed(5)]); }
+  const e = route.coords[route.coords.length - 1]; out.push([e[0], e[1]]);
+  return out;
+}
+// Точки вздовж вибраного маршруту попереду: перша — за 3 км від найближчої до нас, далі кожні ~40 км (не більше 12)
+function throughChosen() {
+  const ch = g.trip && g.trip.chosen; if (!ch || ch.length < 2 || pos.lat == null) return null;
+  const idx = new RouteIndex(ch), l = idx.locate(pos, null);
+  if (!l || l.off > 25000) return null;                    // далеко від вибраного — будуємо заново
+  const start = l.d + 3000, end = idx.total - 4000; if (start >= end) return null;
+  const n = Math.min(12, Math.max(1, Math.ceil((end - start) / 40000))), pts = [];
+  for (let i = 0; i < n; i++) { const d = start + (end - start) * i / n, p = idx.at(d); pts.push({ lat: p.lat, lon: p.lon, brg: p.brg, d }); }
+  if (g.trip.v && !g.passedV) { const lv = idx.locate(g.trip.v, null); if (lv && lv.d > l.d) pts.push({ lat: g.trip.v.lat, lon: g.trip.v.lon, d: lv.d }); }
+  return pts.sort((a, b) => a.d - b.d).map(({ lat, lon, brg }) => ({ lat, lon, brg }));
+}
 export async function startTrip(trip, opts = {}) {
   g.trip = trip; g.active = true; g.arrived = false;
   let route = trip.route;
+  if (!trip.chosen) trip.chosen = chosenOf(route);
   // Стартуємо не з точки А — ведемо до неї від поточного місця (крім випадку, коли водій уже їде цим маршрутом).
   if (!opts.onRoute && pos.lat != null && pos.mode === 'gps' && hav(pos, trip.a) > 400 && online()) {
     try { route = await buildRoute(trip, { from: pos, heading: pos.spd > 2 ? pos.hdg : null }); }
@@ -100,18 +120,24 @@ export function stopTrip() {
   bus.emit('route', g); bus.emit('trip', g); bus.emit('guide', g);
 }
 
-async function reroute(lead = false) {
+async function reroute(lead = false, fresh = false) {
   if (g.rerouting || !g.trip) return;
   g.rerouting = true; lastReroute = Date.now(); bus.emit('guide', g);
   try {
-    const r = await buildRoute(g.trip, { from: pos, heading: pos.spd > 2 ? pos.hdg : null, skipA: lead ? false : g.passedA, skipVia: g.passedV });
-    if (g.active) { applyRoute(r); say(t('voiceReroute')); }
+    const heading = pos.spd > 2 ? pos.hdg : null;
+    // з'їхали — повертаємо на вибраний маршрут (точки вздовж нього); «новий шлях» — лише на прохання водія
+    const through = lead || fresh || S.keepChosen === false ? null : throughChosen();
+    let r = null;
+    if (through) { try { r = await buildRoute(g.trip, { from: pos, heading, through }); } catch (e) { log('warn', 'повернення на вибраний маршрут: ' + e.message); } }
+    if (!r) r = await buildRoute(g.trip, { from: pos, heading, skipA: lead ? false : g.passedA, skipVia: g.passedV });
+    if (fresh) g.trip.chosen = chosenOf(r);
+    if (g.active) { applyRoute(r); say(t(through ? 'voiceRejoin' : 'voiceReroute')); }
   } catch (e) { log('warn', 'перерахунок: ' + e.message); }
   g.rerouting = false; bus.emit('guide', g);
 }
 // Заїхати по дорозі: точка стає проміжною, маршрут перебудовується від поточного місця.
-export function setVia(p) { if (!g.trip) return; g.trip.v = p; g.passedV = false; rerouteNow(); }
-export function rerouteNow() { lastReroute = 0; if (pos.lat != null && online()) reroute(); }
+export function setVia(p) { if (!g.trip) return; g.trip.v = p; g.passedV = false; rerouteNow(true); }
+export function rerouteNow(fresh = false) { lastReroute = 0; if (pos.lat != null && online()) reroute(false, fresh); }
 
 function announce() {
   const n = g.next; if (!n || !pos.onRoute) return;

@@ -4,7 +4,14 @@ import { log } from './core.js';
 import { normName, oblastName } from './route.js';
 import { t } from './i18n.js';
 
-export const pl = { ready: false, loading: null, rows: [], n1: [], n2: [], date: '' };
+export const pl = { ready: false, loading: null, rows: [], n1: [], n2: [], n3: [], n4: [], date: '' };
+// Латиницею теж шукаємо: «Lviv», «Lvov», «Kyiv», «Kiev», «Kharkov» → Львів, Київ, Харків.
+const UK_LAT = { а: 'a', б: 'b', в: 'v', г: 'h', ґ: 'g', д: 'd', е: 'e', є: 'ie', ж: 'zh', з: 'z', и: 'y', і: 'i', ї: 'i', й: 'i', к: 'k', л: 'l', м: 'm', н: 'n', о: 'o', п: 'p', р: 'r', с: 's', т: 't', у: 'u', ф: 'f', х: 'kh', ц: 'ts', ч: 'ch', ш: 'sh', щ: 'shch', ь: '', ю: 'iu', я: 'ia' };
+const RU_LAT = { ...UK_LAT, г: 'g', е: 'e', ё: 'e', и: 'i', й: 'y', ы: 'y', э: 'e', ъ: '', ю: 'yu', я: 'ya' };
+const lat = (s, M) => String(s || '').toLowerCase().split('').map(c => M[c] ?? c).join('');
+// «вільне» латинське написання: kh=h, y=i=j, ye=e, ya=a… — щоб Kharkov, Harkiv і Kharkiv зійшлися
+export const loose = s => s.toLowerCase().replace(/[^a-z]/g, '').replace(/kh/g, 'h').replace(/[yj]/g, 'i').replace(/w/g, 'v')
+  .replace(/i([eaou])/g, '$1').replace(/ii+/g, 'i').replace(/(.)\1+/g, '$1');
 const KR = { c: 3, t: 2, v: 1 };
 
 export function load() {
@@ -16,6 +23,7 @@ export function load() {
       const j = await r.json();
       pl.rows = j.rows || []; pl.date = j.date || '';
       pl.n1 = pl.rows.map(x => normName(x[3])); pl.n2 = pl.rows.map(x => x[4] ? normName(x[4]) : '');
+      pl.n3 = pl.rows.map(x => loose(lat(x[3], UK_LAT))); pl.n4 = pl.rows.map(x => x[4] ? loose(lat(x[4], RU_LAT)) : '');
       pl.ready = pl.rows.length > 0;
       log('info', `довідник населених пунктів: ${pl.rows.length}`);
     } catch (e) { log('warn', 'довідник населених пунктів: ' + e.message); }
@@ -30,10 +38,11 @@ export function toPlace(x) {
 
 export function search(q, limit = 8) {
   if (!pl.ready) return [];
-  const nq = normName(q); if (!nq) return [];
+  const latin = /[a-z]/i.test(q) && !/[а-яіїєґё]/i.test(q);
+  const nq = latin ? loose(q) : normName(q); if (!nq) return [];
   const hits = [];
   for (let i = 0; i < pl.rows.length; i++) {
-    const a = pl.n1[i], b = pl.n2[i];
+    const a = latin ? pl.n3[i] : pl.n1[i], b = latin ? pl.n4[i] : pl.n2[i];
     let s = 0;
     if (a === nq || b === nq) s = 3;
     else if (a.startsWith(nq) || (b && b.startsWith(nq))) s = 2;

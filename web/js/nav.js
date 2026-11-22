@@ -28,12 +28,19 @@ const MAX_SPD = 50;                          // 180 км/год — фура т�
 //  • оцінка швидкості без GPS (розрахунок, вишки, збережена) ніколи не більша за обмежувач;
 //  • GPS, що показує на 15 км/год більше за обмежувач, — не наша швидкість: так підміна «затягує» приймач
 //    (точки плавні, а швидкість росте 94 → 130). Саме так на М-03 з'явилось «≈106 оцінка».
-const vmaxKmh = () => { const v = +((S.truck || {}).vmax); return v > 0 ? v : 0; };
+const vmaxKmh = () => { if (S.vehicle === 'auto') return 0; const v = +((S.truck || {}).vmax); return v > 0 ? v : 0; };   // легковик — без обмежувача
 const VMAX = () => vmaxKmh() ? vmaxKmh() / 3.6 : MAX_SPD;          // м/с — стеля для будь-якої оцінки
 const SUS_SPD = () => vmaxKmh() ? (vmaxKmh() + 15) / 3.6 : MAX_SPD; // м/с — вище цього GPS для фури неправдоподібний
 const startT = Date.now();
 let lockT = 0, netInnov = [], manualSpd = null, manualSpdT = 0;
-let turns = [], yawHist = [], lastTurnEv = 0, holdSince = 0;
+let turns = [], yawHist = [], lastTurnEv = 0, holdSince = 0, gyroSeen = 0, heldTurn = null, plan = [];
+/* ---------- фільтр «місце і швидкість уздовж маршруту» (без GPS) ----------
+   Один стан на все: d — де ми на маршруті, v — швидкість, P — наскільки впевнені. Кожну секунду: d += v·dt.
+   Вишки й Wi-Fi проєктуються на маршрут (помилка вбік на 1,5 км тоді не заважає) і м'яко тягнуть d і v.
+   Швидкість, коли її ніхто не каже: плановa швидкість ділянки (з маршруту, не більша за обмежувач) — тож позначка
+   не стоїть, якщо машина їде. Акселерометр каже «стоїмо» — v = 0. Водій назвав швидкість — вона головна.
+   Так поводиться BlindDriver: метка не зупиняється, похибку виправляють ±100 і вишки. */
+const kf = { on: false, d: 0, v: 0, Pdd: 0, Pdv: 0, Pvv: 0, src: '', out: [] };
 // Якість супутникового сигналу (AGC, C/N0) і еталон цього телефона, знятий, поки GPS справжній
 export const gq = { agc: null, cn0: null, n: 0, t: 0, agcBase: null, cnBase: null, verdict: '' };
 
@@ -73,15 +80,30 @@ function saveGood() {
   try { localStorage.setItem('reis.lastGood', JSON.stringify({ lat: pos.lat, lon: pos.lon, t: now })); } catch (_) {}
 }
 
-export function setRoute(idx) {
+// Планова швидкість ділянок маршруту (час Valhalla для фури) — запасна швидкість, коли інших немає
+function makePlan(idx, mans) {
+  const out = [];
+  if (idx && mans) for (const m of mans) {
+    const i0 = Math.min(m.i0, idx.cum.length - 1), i1 = Math.min(m.i1, idx.cum.length - 1), d0 = idx.cum[i0], d1 = idx.cum[i1];
+    if (d1 - d0 > 30 && m.time > 0) out.push([d0, d1, (d1 - d0) / m.time]);
+  }
+  return out;
+}
+export function planSpeed(d) {
+  const seg = plan.find(x => d >= x[0] && d < x[1]);
+  return clamp(seg ? seg[2] : 16.7, 5, VMAX());        // невідомо — 60 км/год
+}
+export function setRoute(idx, mans = null) {
   const keepDr = pos.mode === 'dr' && route && idx && pos.onRoute;     // перебудова під час розрахунку — лишаємось на маршруті
+  plan = makePlan(idx, mans); heldTurn = null;
+  if (!idx || !keepDr) kf.on = false;
   route = idx; pos.rd = null; pos.onRoute = false; pos.off = 0;
   routeInUA = true;
   turns = idx ? findTurns(idx) : [];
   if (idx) for (let i = 0; i < idx.c.length; i += 200) if (!inUkraine({ lat: idx.c[i][0], lon: idx.c[i][1] })) { routeInUA = false; break; }
   if (idx && pos.lat != null) {
     const loc = idx.locate(pos, null);
-    if (keepDr && loc && loc.off < 400) { pos.rd = loc.d; pos.onRoute = true; pos.off = 0; }
+    if (keepDr && loc && loc.off < 400) { pos.rd = loc.d; pos.onRoute = true; pos.off = 0; if (kf.on) kf.d = loc.d; }
     else matchRoute(pos, pos.spd);
   }
   if (idx && pos.mode === 'approx' && !simOn) tryLock();
@@ -106,7 +128,14 @@ function estimateRd() {
     if (l && l.off < Math.max(6000, 3 * net.acc)) b = { d: l.d, sig: Math.max(1500, net.acc), src: 'net' };
   }
   if (a && b) return Math.abs(a.d - b.d) < 2 * b.sig + a.sig ? a : b;
-  return a || b;
+  if (a || b) return a || b;
+  // Ні свіжої справжньої точки, ні вишок (на Samsung без «Точності Google» мережевого місця немає зовсім):
+  // беремо будь-яке відоме місце біля маршруту — далі поведе планова швидкість, а водій поправить («Де ви?», ±100).
+  const cands = [];
+  try { const lg = JSON.parse(localStorage.getItem('reis.lastGood') || 'null'); if (lg && lg.lat != null) cands.push(lg); } catch (_) {}
+  if (pos.lat != null) cands.push({ lat: pos.lat, lon: pos.lon });
+  for (const p of cands) { const l = route.locate(p, null); if (l && l.off < 5000) return { d: l.d, sig: 1500, src: 'stale' }; }
+  return null;
 }
 function placeOnRoute(d, accBase, reason) {
   pos.rd = clamp(d, 0, route.total); pos.onRoute = true; pos.off = 0;
@@ -114,7 +143,35 @@ function placeOnRoute(d, accBase, reason) {
   if (pos.mode !== 'dr') { pos.mode = 'approx'; enterDR(reason); carry = 0; }    // оцінка вже врахувала час
   else pos.reason = reason;
   pos.accRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
+  kfInit(pos.rd, accBase);
   bus.emit('pos', pos);
+}
+// Старт фільтра: швидкість — від водія, з останнього чесного GPS, з Wi-Fi або планова.
+function kfInit(d, sig) {
+  const now = Date.now();
+  let v, sv, src;
+  if (manualSpd != null) { v = manualSpd; sv = 1; src = 'manual'; }
+  else if (vCruise > 0.5 && now - vCruiseT < 10 * 60000) { v = Math.min(vCruise, VMAX()); sv = 2.5; src = 'gps'; }
+  else if (apSpd != null && now - apSpdT < 60000) { v = Math.min(apSpd, VMAX()); sv = Math.max(3, apSpdErr || 3); src = 'net'; }
+  else { v = planSpeed(d); sv = 7; src = 'plan'; }
+  Object.assign(kf, { on: true, d, v, Pdd: sig * sig, Pdv: 0, Pvv: sv * sv, src, out: [], measT: 0 });
+}
+// Вишки/Wi-Fi: точка, спроєктована на маршрут. Викиди (стрибок вишки на 10 км) ігноруємо, доки 3 поспіль не скажуть те саме.
+function kfMeasure(z, acc) {
+  const R = Math.pow(Math.max(acc * 0.7, 250), 2), inn = z - kf.d, S = kf.Pdd + R;
+  if (inn * inn > 9 * S) {
+    kf.out.push(inn); if (kf.out.length > 3) kf.out.shift();
+    if (kf.out.length < 3 || !kf.out.every(x => Math.sign(x) === Math.sign(inn) && Math.abs(x - inn) < 3 * Math.sqrt(R))) return false;
+    kf.Pdd += inn * inn; kf.Pdv = 0; kf.Pvv = Math.max(kf.Pvv, 25);   // три поспіль — ми справді не там: довіряємо вишкам і заново вчимо швидкість
+  }
+  kf.out = [];
+  const S2 = kf.Pdd + R, Kd = kf.Pdd / S2, Kv = kf.Pdv / S2;
+  kf.d += Kd * inn; if (manualSpd == null) kf.v = clamp(kf.v + Kv * inn, 0, VMAX());
+  const Pdd = kf.Pdd, Pdv = kf.Pdv;
+  kf.Pdd = (1 - Kd) * Pdd; kf.Pdv = (1 - Kd) * Pdv; kf.Pvv = kf.Pvv - Kv * Pdv;
+  if (kf.src === 'plan' && kf.Pvv < 12) kf.src = 'net';
+  kf.d = clamp(kf.d, 0, route.total); kf.measT = Date.now();
+  return true;
 }
 // Автоматично: рейс іде, GPS підмінено або давно немає, а вишки кажуть, що ми десь біля маршруту.
 function tryLock() {
@@ -136,26 +193,27 @@ export function snapToRoute(p = null) {
   placeOnRoute(e.d, clamp(e.sig, 100, 3000), 'manual');
   return true;
 }
+// «Де ви?»: водій вибрав місто чи орієнтир на маршруті — ставимо туди позначку й ведемо далі.
+export function placeAtD(d) { if (!route) return false; placeOnRoute(d, 400, 'manual'); return true; }
+export const estimateNow = () => estimateRd();
 // Швидкість від водія (спідометр фури): поки GPS немає, рахуємо за нею. 0 — «стою». null — авто.
 export function setManualSpeed(kmh) {
   manualSpd = kmh == null ? null : Math.max(0, kmh) / 3.6; manualSpdT = Date.now();
+  if (kf.on) { if (manualSpd != null) { kf.v = manualSpd; kf.Pvv = 1; kf.src = 'manual'; } else { kf.src = 'plan'; kf.Pvv = 36; } }
   if (manualSpd != null && pos.mode !== 'dr' && pos.mode !== 'gps' && route) snapToRoute();
   bus.emit('pos', pos);
 }
 export const manualSpeed = () => manualSpd == null ? null : Math.round(manualSpd * 3.6);
-// М'яка поправка за вишками: якщо 3 точки поспіль кажуть, що ми далеко попереду чи позаду, — підтягуємо наполовину.
+// Вишки й Wi-Fi під час розрахунку по маршруту: у фільтр (місце і швидкість уздовж маршруту)
 function netCorrect() {
-  if (pos.mode !== 'dr' || !route || !pos.onRoute || pos.rd == null || pos.reason === 'manual' && pos.drDist - pos.accRef < 3000) return;
-  const l = route.locate(net, pos.rd); if (!l || l.off > Math.max(6000, 3 * net.acc)) { netInnov = []; return; }
-  const inn = l.d - pos.rd, lim = Math.max(2500, 1.5 * net.acc);
-  if (Math.abs(inn) < lim) { netInnov = []; return; }
-  netInnov.push(inn); if (netInnov.length > 3) netInnov.shift();
-  if (netInnov.length === 3 && netInnov.every(x => Math.sign(x) === Math.sign(inn))) {
-    const k = netInnov.reduce((s, x) => s + x, 0) / 3 * 0.5;
-    log('info', `розрахунок виправлено за вишками на ${Math.round(k)} м`);
-    pos.rd = clamp(pos.rd + k, 0, route.total); netInnov = [];
-    const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
-    pos.accBase = Math.max(pos.accBase, lim * 0.6); pos.accRef = pos.drDist;
+  if (pos.mode !== 'dr' || !route || !pos.onRoute || pos.rd == null || !kf.on) return;
+  if (pos.reason === 'manual' && pos.drDist - pos.accRef < 1500) return;      // водій щойно сам поставив точку — перші 1,5 км вишкам не перебивати
+  const l = route.locate(net, kf.d); if (!l || l.off > Math.max(6000, 3 * net.acc)) return;
+  const was = kf.d;
+  if (kfMeasure(l.d, net.acc)) {
+    if (Math.abs(kf.d - was) > 300) log('info', `розрахунок виправлено за вишками на ${Math.round(kf.d - was)} м`);
+    pos.rd = kf.d; const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
+    pos.acc = Math.round(Math.sqrt(kf.Pdd)); pos.accBase = pos.acc; pos.accRef = pos.drDist;
     bus.emit('pos', pos);
   }
 }
@@ -183,7 +241,8 @@ function onTurn(ang, ago) {
   }
   if (!best) return;
   log('info', `поворот ${Math.round(ang)}° підтверджено гіроскопом: позначку зсунуто на ${Math.round(best.d + v * ago - pos.rd)} м`);
-  pos.rd = clamp(best.d + v * ago, 0, route.total); holdSince = 0;
+  pos.rd = clamp(best.d + v * ago, 0, route.total); holdSince = 0; heldTurn = best.d;
+  if (kf.on) { kf.d = pos.rd; kf.Pdd = 40 * 40; kf.Pdv = 0; }
   const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
   pos.accRef = pos.drDist; pos.accBase = 40; pos.acc = 40;
   bus.emit('pos', pos); bus.emit('turnMatch', { ang: Math.round(ang), d: Math.round(best.d) });
@@ -194,12 +253,13 @@ function onYaw(yaw) {
   if (!moving || now - lastTurnEv < 8000) return;
   const old = yawHist.find(x => now - x.t <= 14000); if (!old || now - old.t < 6000) return;
   const dy = yaw - old.yaw;
-  if (Math.abs(dy) >= 50) { lastTurnEv = now; yawHist = [{ t: now, yaw }]; onTurn(dy, (now - old.t) / 2000); }
+  if (Math.abs(dy) >= 50) { lastTurnEv = now; gyroSeen = now; yawHist = [{ t: now, yaw }]; onTurn(dy, (now - old.t) / 2000); }
 }
 // Поточна швидкість розрахунку: водій сказав → чесна швидкість GPS → Wi-Fi; стоїмо — 0.
 function curSpeed() {
   if (manualSpd != null) return manualSpd;
   if (!moving) return 0;
+  if (kf.on && pos.mode === 'dr') return kf.v;
   if (vCruise > 0.5) return Math.min(vCruise, VMAX());
   return apSpd != null && Date.now() - apSpdT < 60000 ? Math.min(apSpd, VMAX()) : 0;
 }
@@ -279,6 +339,7 @@ export function speedView() {
   if (pos.mode === 'gps') return { kmh: pos.spd * 3.6, kind: 'gps' };
   if (manualSpd != null) return { kmh: manualSpd * 3.6, kind: manualSpd === 0 ? 'still' : 'manual' };
   if (!moving) return { kmh: 0, kind: 'still' };
+  if (pos.mode === 'dr' && kf.on) return { kmh: cap(kf.v), kind: kf.src === 'plan' ? 'plan' : 'est' };
   if (pos.mode === 'dr' && vCruise > 0.5) return { kmh: cap(pos.spd), kind: 'est' };
   if (fresh && apSpd > 0.5 && apSpd <= VMAX() * 1.15) return { kmh: cap(apSpd), kind: 'approx' };
   // GPS підмінено, а машина їде: тримаємо останню чесну швидкість (навіть із до перезапуску), поки не мине 15 хв
@@ -312,7 +373,7 @@ function approx(f) {
 
 function enterDR(reason) {
   if (pos.lat == null || pos.mode === 'dr') return;
-  pos.mode = 'dr'; pos.reason = reason; pos.lostSince = Date.now();
+  pos.mode = 'dr'; pos.reason = reason; pos.lostSince = Date.now(); kf.on = false;
   pos.drDist = 0; pos.accRef = 0; pos.accBase = clamp(pos.acc || 15, 15, 60);
   pos.pending = null; cand = []; badRun = 0;
   // Машина їхала й ті секунди, поки ми помічали втрату: надолужимо їх на першому ж кроці.
@@ -324,7 +385,7 @@ function enterDR(reason) {
 
 function exitDR(f) {
   const info = { err: Math.round(hav(pos, f)), dur: Math.round((Date.now() - pos.lostSince) / 1000), drDist: Math.round(pos.drDist), reason: pos.reason };
-  pos.mode = 'gps'; pos.pending = null; cand = []; badRun = 0; pos.raw = null; pos.reason = ''; manualSpd = null; holdSince = 0;
+  pos.mode = 'gps'; pos.pending = null; cand = []; badRun = 0; pos.raw = null; pos.reason = ''; manualSpd = null; holdSince = 0; kf.on = false;
   log('info', 'GPS відновлено: похибка розрахунку ' + info.err + ' м за ' + info.dur + ' с');
   accept(f);
   bus.emit('gpsBack', info);
@@ -343,7 +404,8 @@ function judge(f) {
   if (simOn && !f.sim) return 'sim-skip';
   const now = Date.now();
   if (f.prov === 'network' || f.prov === 'fused' || f.prov === 'last' || f.prov === 'saved') {
-    if (f.prov === 'network' && inUkraine(f)) {
+    // мережеве місце: і «network», і «fused» без супутників (точність гірша за 150 м) — це вишки й Wi-Fi
+    if ((f.prov === 'network' || (f.prov === 'fused' && (f.acc || 0) >= 150)) && inUkraine(f)) {
       const fresh = !net || net.t !== f.t || net.lat !== f.lat;
       net = { lat: f.lat, lon: f.lon, acc: f.acc || 2000, rt: now, t: f.t }; netSpeed(net);
       if (fresh) netCorrect();
@@ -415,6 +477,7 @@ export function nudge(d) {
   if (route && pos.onRoute && pos.rd != null) {
     pos.rd = clamp(pos.rd + d, 0, route.total);
     const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
+    if (!kf.on) kfInit(pos.rd, 30); else { kf.d = pos.rd; kf.Pdd = 30 * 30; kf.Pdv = 0; kf.out = []; }
   } else {
     const p = destPoint(pos, d >= 0 ? pos.hdg : (pos.hdg + 180) % 360, Math.abs(d));
     pos.lat = p.lat; pos.lon = p.lon;
@@ -427,21 +490,43 @@ function tick() {
   const now = Date.now(), dt = clamp((now - lastTick) / 1000, 0, 300); lastTick = now;
   if (pos.mode === 'gps' && now - lastFixT > 5000) enterDR('timeout');
   if (pos.mode === 'approx' && route && !simOn) tryLock();
-  if (pos.mode !== 'dr') return;
-  if (manualSpd === 0 && now - manualSpdT > 5 * 60000) manualSpd = null;          // «стою» саме минає за 5 хв, як у BlindDriver
-  const v = curSpeed(), step = v * (dt + carry); carry = 0;
-  if (route && pos.onRoute && pos.rd != null) {
-    let nd = Math.min(route.total, pos.rd + step);
-    // Перед різким поворотом чекаємо, поки гіроскоп його відчує, щоб позначка не проскакувала перехрестя.
-    const tn = yawNow != null && turns.find(t => t.d > pos.rd - 1 && t.d <= nd + 1);
+  if (pos.mode !== 'dr') { kf.on = false; return; }          // фільтр живе лише під час розрахунку; наступний старт — з поточного місця
+  if (manualSpd === 0 && now - manualSpdT > 5 * 60000) { manualSpd = null; if (kf.on) { kf.src = 'plan'; kf.Pvv = 36; } }   // «стою» саме минає за 5 хв, як у BlindDriver
+  if (route && pos.onRoute && pos.rd != null && !kf.on) kfInit(pos.rd, Math.max(pos.acc || 50, 50));
+  if (kf.on && route && pos.onRoute && pos.rd != null) {
+    // швидкість: водій > «стоїмо» (акселерометр) > фільтр; без жодних даних швидкість повільно тягнеться до планової
+    const T = dt + carry; carry = 0;
+    if (manualSpd != null) { kf.v = manualSpd; kf.Pvv = 1; }
+    else if (!moving) { kf.v = 0; kf.Pvv = Math.min(kf.Pvv, 4); }
+    else {
+      // до планової — повільно: за 2 хв, якщо вишок давно не було, і за 15 хв, якщо вони щойно казали своє
+      const vp = planSpeed(kf.d), k = Math.min(1, T / (now - (kf.measT || 0) > 300000 ? 120 : 900));
+      if (kf.v < 1 && kf.src !== 'plan') kf.v = vp * 0.5;          // рушили після зупинки
+      kf.v = clamp(kf.v + (vp - kf.v) * k, 0, VMAX());
+      kf.Pvv = Math.min(kf.Pvv + 0.02 * T, 64);
+    }
+    const prev = kf.d;
+    kf.d = Math.min(route.total, kf.d + kf.v * T);
+    kf.Pdd += 2 * kf.Pdv * T + kf.Pvv * T * T + 4 * T; kf.Pdv += kf.Pvv * T;
+    kf.Pdd = Math.min(kf.Pdd, 8000 * 8000);
+    // Різкий поворот попереду: якщо гіроскоп працює — чекаємо, поки він відчує поворот, але не довше 8 с
+    // і кожен поворот лише раз (раніше позначка стояла до 45 с і знову, якщо швидкість мала — «зависла на повороті»).
+    const tn = yawNow != null && turns.find(t => t.d > prev - 1 && t.d <= kf.d + 1 && t.d !== heldTurn);
     if (tn && now - lastTurnEv > 20000) {
       if (!holdSince) holdSince = now;
-      if (now - holdSince < 45000) nd = Math.max(pos.rd, tn.d - 15);
-      else holdSince = 0;
+      if (now - holdSince < 8000) kf.d = Math.max(prev, tn.d - 15);
+      else { holdSince = 0; heldTurn = tn.d; }
     } else if (!tn) holdSince = 0;
-    pos.rd = nd;
+    const step = kf.d - prev;
+    pos.rd = kf.d;
     const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
-  } else if (step > 0) {
+    pos.drDist += Math.max(0, step); pos.spd = kf.v;
+    pos.acc = Math.round(Math.sqrt(kf.Pdd));
+    bus.emit('pos', pos);
+    return;
+  }
+  const v = curSpeed(), step = v * (dt + carry); carry = 0;
+  if (step > 0) {
     const h = (yawNow != null && yawRef != null && hdgRef != null) ? ((hdgRef + yawNow - yawRef) % 360 + 360) % 360 : (compass != null ? compass : pos.hdg);
     const p = destPoint(pos, h, step); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = h;
   }
@@ -502,7 +587,7 @@ export function start() {
   } catch (_) {}
 }
 export const routeTurns = () => turns.slice();
-export const debugState = () => ({ vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq } });
+export const debugState = () => ({ vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
   return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };

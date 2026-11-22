@@ -10,6 +10,7 @@ import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
 import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
 import * as rough from './rough.js';
+import { vp, onMap as vpOnMap } from './vplaces.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -79,7 +80,24 @@ function routeData(coords, route) {
 }
 export const ROUTE_COLORS = { a: '#2f6bff', b: '#0f9f9a', c: '#8b5cf6' };
 let puck = null, puckEl = null, wps = [], hzMarks = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
-const evMarks = new Map();
+const evMarks = new Map(), vpMarks = new Map();
+// Перевірене місце: маленький бургер із золотою зіркою — відрізняється від кольорових кружечків піт-стопів
+const VP_ICON = { food: '<svg viewBox="0 0 32 32"><path d="M6 14a10 7 0 0 1 20 0z" fill="#f5a524"/><circle cx="12" cy="10" r=".9" fill="#fff6d6"/><circle cx="17" cy="8.6" r=".9" fill="#fff6d6"/><circle cx="20.5" cy="11" r=".9" fill="#fff6d6"/><path d="M5.5 15.6q2.6 1.8 5.2 0t5.3 0 5.3 0 5.2 0" stroke="#3fae49" stroke-width="2.2" fill="none" stroke-linecap="round"/><rect x="6" y="17.4" width="20" height="3.6" rx="1.8" fill="#7a2e12"/><path d="M6.5 22.4h19a1.5 1.5 0 0 1-1.6 3.1H8.1a1.5 1.5 0 0 1-1.6-3.1z" fill="#f5a524"/></svg>' };
+const VP_STAR = '<i class="vpm-star"><svg viewBox="0 0 24 24"><path d="M12 3.2l2.6 5.5 6 .7-4.5 4.1 1.2 5.9L12 16.5l-5.3 2.9 1.2-5.9L3.4 9.4l6-.7z" fill="#fff"/></svg></i>';
+export function drawVerified() {
+  if (!map) return;
+  const on = S.mapVerified !== false, keep = new Set();
+  if (on) for (const p of vp.list) {
+    if (!vpOnMap(p)) continue;
+    keep.add(p.id);
+    if (vpMarks.has(p.id)) { vpMarks.get(p.id).setLngLat([p.lon, p.lat]); continue; }
+    const el = document.createElement('button');
+    el.className = 'vpm'; el.innerHTML = (VP_ICON[p.kind] || VP_ICON.food) + VP_STAR; el.setAttribute('aria-label', p.name);
+    el.addEventListener('click', e => { e.stopPropagation(); bus.emit('vpTap', p.id); });
+    vpMarks.set(p.id, new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lon, p.lat]).addTo(map));
+  }
+  for (const [id, m] of vpMarks) if (!keep.has(id)) { m.remove(); vpMarks.delete(id); }
+}
 const EMPTY = { type: 'FeatureCollection', features: [] };
 
 export function initMap() {
@@ -96,6 +114,7 @@ export function initMap() {
     if (!seenErr.has(m) && seenErr.size < 20) { seenErr.add(m); log('warn', 'карта: ' + m); }
   });
   map.on('style.load', addLayers);
+  map.on('styleimagemissing', e => { if (!e.id.startsWith('fuel:') || map.hasImage(e.id)) return; try { const f = fuelImage(e.id.slice(5)); map.addImage(e.id, f.img, { pixelRatio: f.dpr }); } catch (_) {} });
   // запасна страховка: якщо стиль змінився, а наших шарів немає — повертаємо їх
   map.on('styledata', () => { if (map.isStyleLoaded() && !map.getSource('route')) addLayers(); });
   // Стиль не завантажився (немає мережі й кешу) — показуємо хоча б маршрут на порожньому тлі.
@@ -128,6 +147,7 @@ export function initMap() {
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
+  bus.on('vplaces', drawVerified); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); });
   bus.on('stopsdb', drawStops);
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   setInterval(drawEvents, 60000);
@@ -140,11 +160,34 @@ export function initMap() {
   return map;
 }
 
+// Плашка АЗС: значок колонки + назва мережі; колір — наш, за назвою (не фірмовий)
+const FUEL_COL = ['#0f766e', '#1d4ed8', '#7c3aed', '#b45309', '#be123c', '#047857', '#4338ca', '#0e7490', '#a16207', '#334155'];
+function fuelImage(nm) {
+  const dpr = 2, fs = 15 * dpr, pad = 7 * dpr, ico = 14 * dpr, h = 26 * dpr;
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  x.font = `800 ${fs}px Roboto, "Segoe UI", system-ui, sans-serif`;
+  const w = Math.ceil(pad + ico + 4 * dpr + x.measureText(nm).width + pad), tail = 5 * dpr;
+  c.width = w; c.height = h + tail;
+  let hsh = 0; for (const ch of nm) hsh = (hsh * 31 + ch.charCodeAt(0)) >>> 0;
+  const col = nm === 'Газ' ? '#6b7280' : nm === 'АЗС' ? '#374151' : FUEL_COL[hsh % FUEL_COL.length];
+  const r = 7 * dpr;
+  x.fillStyle = col; x.strokeStyle = '#ffffff'; x.lineWidth = 2 * dpr;
+  x.beginPath(); x.moveTo(r, 1); x.lineTo(w - r, 1); x.quadraticCurveTo(w - 1, 1, w - 1, r); x.lineTo(w - 1, h - r); x.quadraticCurveTo(w - 1, h - 1, w - r, h - 1);
+  x.lineTo(w / 2 + tail, h - 1); x.lineTo(w / 2, h + tail - 1); x.lineTo(w / 2 - tail, h - 1);
+  x.lineTo(r, h - 1); x.quadraticCurveTo(1, h - 1, 1, h - r); x.lineTo(1, r); x.quadraticCurveTo(1, 1, r, 1); x.closePath(); x.fill(); x.stroke();
+  // колонка
+  const ix = pad, iy = (h - ico) / 2; x.fillStyle = '#ffffff';
+  x.fillRect(ix, iy, ico * 0.62, ico); x.fillStyle = col; x.fillRect(ix + ico * 0.12, iy + ico * 0.14, ico * 0.38, ico * 0.3); x.fillStyle = '#ffffff';
+  x.fillRect(ix + ico * 0.7, iy + ico * 0.25, ico * 0.14, ico * 0.6);
+  x.fillStyle = '#ffffff'; x.textBaseline = 'middle'; x.fillText(nm, pad + ico + 4 * dpr, h / 2 + dpr);
+  return { img: x.getImageData(0, 0, c.width, c.height), dpr };
+}
 function addLayers() {
   clearTimeout(styleTimer);
   if (map.getSource('route')) return;
   const w = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 6, a, 12, b, 17, c];
   map.addSource('route', { type: 'geojson', data: EMPTY });
+  map.addSource('route-alts', { type: 'geojson', data: EMPTY });
   map.addSource('route-done', { type: 'geojson', data: EMPTY });
   map.addSource('poi', { type: 'geojson', data: EMPTY });
   map.addSource('stops', { type: 'geojson', data: EMPTY });
@@ -156,6 +199,9 @@ function addLayers() {
   map.addLayer({ id: 'rough-dot', type: 'circle', source: 'rough', minzoom: 10.5, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
     'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } });
+  // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
+  map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#8b95a7', 'line-width': w(4, 7, 12), 'line-opacity': 0.85 } });
+  map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f) bus.emit('altTap', f.properties.k); });
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) } });
   map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) } });
   // ґрунт і погане покриття на маршруті — червоний пунктир поверх
@@ -175,6 +221,11 @@ function addLayers() {
   });
   map.addLayer({ id: 'stops-major', type: 'circle', source: 'stops', minzoom: 5, maxzoom: 9.5, filter: ['>=', ['get', 'r'], 2], paint: stopPaint(2.2) });
   map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, paint: stopPaint(2.6) });
+  // АЗС — плашка з назвою мережі (OKKO, WOG, UPG…), щоб одразу видно, яка заправка далі. Малюємо самі, без шрифтів карти — працює й офлайн.
+  map.addLayer({ id: 'fuel-label', type: 'symbol', source: 'stops', minzoom: 10, filter: ['==', ['get', 't'], 'f'],
+    layout: { 'icon-image': ['concat', 'fuel:', ['get', 'nm']], 'icon-anchor': 'bottom', 'icon-offset': [0, -5], 'icon-allow-overlap': false, 'icon-padding': 2,
+      'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.85, 14, 1.05], 'symbol-sort-key': ['-', 0, ['get', 'r']] } });
+  map.on('click', 'fuel-label', e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
   map.addLayer({
     id: 'poi-dot', type: 'circle', source: 'poi', minzoom: 8,
     paint: {
@@ -332,8 +383,13 @@ export function showRoute(coords) {
   map.fitBounds(b, { padding: { top: Math.round(h * 0.22), bottom: Math.round(h * 0.42), left: 40, right: 40 }, bearing: 0, pitch: 0, duration: 700, maxZoom: 15 });
 }
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
+export function previewAlts(list) {
+  const src = map && map.getSource && map.getSource('route-alts'); if (!src) return;
+  src.setData({ type: 'FeatureCollection', features: (list || []).map(([k, coords]) => ({ type: 'Feature', properties: { k }, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } })) });
+}
 export function previewRoute(coords, route = null) {
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
+  if (!coords) previewAlts(null);
   previewCoords = coords || null; previewR = coords ? route : null;
   src.setData(coords ? routeData(coords, route) : EMPTY);
   drawHazards();

@@ -45,6 +45,21 @@ export function score(r) {
     (t === 's' ? 3 : t === 'p' ? 2 : t === 'm' ? 1 : 0);
 }
 
+// Назва мережі АЗС для підпису на карті: одна мережа — одна назва (ОККО/OKKO, Сокар/Socar…).
+// Лише назви на наших кольорових плашках: фірмові логотипи — чужі знаки, їх не малюємо.
+const BRANDS = [
+  [/^(окко|okko)/i, 'OKKO'], [/^wog/i, 'WOG'], [/^(upg|юпіджі)/i, 'UPG'], [/^(укрнафта|ukrnafta)/i, 'Укрнафта'], [/^(брсм|brsm)/i, 'БРСМ'],
+  [/^amic/i, 'AMIC'], [/^(socar|сокар)/i, 'SOCAR'], [/^shell/i, 'Shell'], [/^(кло|klo)$/i, 'KLO'], [/^motto/i, 'Motto'], [/^chipo/i, 'Chipo'],
+  [/^(marshal|маршал)/i, 'Marshal'], [/^(атан|atan)/i, 'ATAN'], [/^avantage\s?7/i, 'Avantage 7'], [/^(паралл?ель|parallel)/i, 'Параллель'],
+  [/^(tes|тэс|тес)$/i, 'TES'], [/^(glusco|глуско)/i, 'Glusco'], [/^укр-?петроль/i, 'Укр-Петроль'], [/^sun oil/i, 'Sun Oil'], [/^brent/i, 'Brent Oil'],
+  [/^(агзс|агнкс|газ|пропан|метан)/i, 'Газ']
+];
+export function brandOf(name) {
+  const n = String(name || '').trim();
+  if (!n || /^(азс|маркет|заправка|автозаправка)$/i.test(n)) return 'АЗС';
+  for (const [re, b] of BRANDS) if (re.test(n)) return b;
+  return n.length > 14 ? n.slice(0, 13) + '…' : n;
+}
 export async function load() {
   try {
     const r = await fetch('data/stops.json', { cache: 'no-cache' });
@@ -53,7 +68,7 @@ export async function load() {
     sdb.rows = j.rows || []; sdb.date = j.date || ''; sdb.count = sdb.rows.length;
     sdb.geo = {
       type: 'FeatureCollection',
-      features: sdb.rows.map((x, i) => ({ type: 'Feature', id: i, geometry: { type: 'Point', coordinates: [x[1], x[0]] }, properties: { t: x[2], r: rank(x) + (x[3] & F.SHOWER ? 1 : 0), sh: x[3] & F.SHOWER ? 1 : 0, i } }))
+      features: sdb.rows.map((x, i) => ({ type: 'Feature', id: i, geometry: { type: 'Point', coordinates: [x[1], x[0]] }, properties: x[2] === 'f' ? { t: x[2], r: rank(x) + (x[3] & F.SHOWER ? 1 : 0), sh: x[3] & F.SHOWER ? 1 : 0, i, nm: brandOf(x[4]) } : { t: x[2], r: rank(x) + (x[3] & F.SHOWER ? 1 : 0), sh: x[3] & F.SHOWER ? 1 : 0, i } }))
     };
     sdb.ready = sdb.count > 0;
     log('info', `база піт-стопів: ${sdb.count} точок, дані від ${sdb.date}`);
