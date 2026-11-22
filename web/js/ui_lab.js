@@ -362,21 +362,23 @@ definePanel('diag', {
 // Пакет «uk» (Piper ukrainian_tts) має трьох дикторів: 0 — Лада, 1 — Микита, 2 — Тетяна.
 const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta'], ['uk:0', 'uk', 0, 'vLada']];
 const vst = { dl: null };
+const PACK_VER = 2;                                          // v1 читала текст через espeak і звучала невірно — такий пакет оновлюємо
+const packOk = st => { const p = st && st.packs && st.packs.uk; return !!p && (p.ver || 0) >= PACK_VER; };
 const fmtMB = b => Math.max(1, Math.round((b || 0) / 1e6)) + ' МБ';
 export function applyVoice() {
   const v = VOICES.find(x => x[0] === (S.ttsVoice || 'system'));
-  if (!v || !v[1]) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
+  if (!v || !v[1] || !packOk(P.voiceStatus())) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
 }
 function voiceHtml() {
   if (!P.isNative) return `<div class="muted">${t('vWeb')}</div>`;
   if (!P.hasVoices()) return `<div class="muted">${t('vOldShell')}</div>`;
-  const st = P.voiceStatus() || {}, have = st.packs && st.packs.uk, cur = S.ttsVoice || 'system';
+  const st = P.voiceStatus() || {}, cur = S.ttsVoice || 'system', old = st.packs && st.packs.uk && !packOk(st), have = packOk(st) && st.packs.uk;
   const dl = vst.dl || (st.dl && st.dl.pack === 'uk' ? { pct: st.dl.pct } : null);
   const rows = VOICES.map(([id, pack, , nk, dk]) => `<button class="vrow${cur === id ? ' on' : ''}" data-voice="${id}" aria-pressed="${cur === id}"><i class="vdot"></i><span class="grow"><b>${t(nk)}</b><small>${pack ? t('vNeuralD') + (have ? '' : ' · ' + t('vNeedPack')) : t(dk)}</small></span></button>`).join('');
   let pk;
   if (dl) pk = `<div class="vbar"><i style="width:${Math.max(3, dl.pct)}%"></i></div><div class="vdl"><span class="muted">${dl.unzip ? t('vUnzip') : t('vDlNow', dl.pct >= 0 ? dl.pct + '%' : '')}</span><button class="btn sm" data-act="vCancel">${t('vCancel')}</button></div>`;
   else if (have) pk = `<div class="vdl"><span class="muted">${t('vPackHave', fmtMB(have.size))}</span><button class="btn sm" data-act="vDel">${t('vDel')}</button></div>`;
-  else pk = `<div class="muted">${t('vPackSize')}</div><div class="btns"><button class="btn pri wide" data-act="vDl">${t('vDl')}</button></div>`;
+  else pk = `<div class="muted">${old ? t('vPackOld') : t('vPackSize')}</div><div class="btns"><button class="btn pri wide" data-act="vDl">${old ? t('vPackUpd') : t('vDl')}</button></div>`;
   return `<div class="list vlist">${rows}</div><div class="card vpack"><b>${t('vPack')}</b>${pk}</div>` +
     (S.lang === 'ru' ? `<div class="muted" style="margin-top:6px">${t('vUkOnly')}</div>` : '') + (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '');
 }
@@ -386,7 +388,7 @@ function selectVoice(id) {
   const v = VOICES.find(x => x[0] === id); if (!v) return;
   S.ttsVoice = id; applyVoice();
   const st = P.voiceStatus() || {};
-  if (v[1] && !(st.packs && st.packs[v[1]])) { if (!vst.dl && !(st.dl && st.dl.pack)) voiceDl(v[1]); }
+  if (v[1] && !packOk(st)) { if (!vst.dl && !(st.dl && st.dl.pack)) voiceDl(v[1]); }
   else setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), v[1] ? 600 : 0);
   voiceRefresh();
 }

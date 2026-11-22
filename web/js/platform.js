@@ -1,5 +1,6 @@
 // Платформа: один інтерфейс поверх Android-оболонки (window.ReisNative) і звичайного браузера.
 import { bus, log, S, uid } from './core.js';
+import { ukSpeech } from './ukspeech.js';
 
 const N = window.ReisNative || null;
 export const isNative = !!N;
@@ -78,7 +79,9 @@ export function speak(text) {
     return new Promise(res => {
       if (ttsResolve) { const r = ttsResolve; ttsResolve = null; r(); }
       ttsId = uid(); ttsResolve = res;
-      try { N.speak(String(text), langTag(), S.ttsRate || 1, ttsId); } catch (e) { ttsResolve = null; res(); }
+      // якісний голос читає лише літери: числа, траси, скорочення — словами (системному голосу так теж добре)
+      const say = neuralOn() ? ukSpeech(String(text)) : String(text);
+      try { N.speak(say, langTag(), S.ttsRate || 1, ttsId); } catch (e) { ttsResolve = null; res(); }
       setTimeout(() => { if (ttsResolve === res) { ttsResolve = null; res(); } }, 4000 + text.length * 120);
     });
   }
@@ -94,6 +97,7 @@ export function speak(text) {
   });
 }
 /* ---------- якісні голоси (оболонка з 1.1.2): пакет моделі в телефоні, системний голос — запасний ---------- */
+const neuralOn = () => hasVoices() && (S.ttsVoice || 'system') !== 'system' && S.lang !== 'ru';
 export const hasVoices = () => !!(N && typeof N.voiceStatus === 'function');
 export function setVoice(pack, sid, lang) { if (hasVoices()) { try { N.setVoice(pack || '', sid | 0, lang || ''); } catch (_) {} } }
 export function voiceStatus() { if (hasVoices()) { try { return JSON.parse(N.voiceStatus()); } catch (_) {} } return null; }

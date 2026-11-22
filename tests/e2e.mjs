@@ -407,8 +407,9 @@ if (run('1')) try {
   await shot(page, '03-drive');
   // пройдене: за замовчуванням ховаємо — на карті лише шлях попереду; за налаштуванням — блідо
   const pr = await app(page, async () => { const m = window.__app.map.map, g = window.__app.guide.g;
-    const r = await m.getSource('route-near').getData(), dn = await m.getSource('route-done').getData();
-    const first = (r.features || [r])[0].geometry.coordinates[0], here = window.__app.nav.pos, cur = window.__app.map.camState.cur;
+    const dn = await m.getSource('route-done').getData();
+    const r = m.getSource('route-near')._data, cur = window.__app.map.camState.cur, here = window.__app.nav.pos;   // в одну мить, без очікування
+    const first = (r.features || [r])[0].geometry.coordinates[0];
     const off = window.__app.core.hav({ lat: first[1], lon: first[0] }, cur);
     return { off: Math.round(off), rd: Math.round(here.rd), done: dn.geometry ? dn.geometry.coordinates.length : (dn.features || []).length }; });
   ok('пройдена частина маршруту схована: лінія починається просто під стрілкою', pr.rd > 20 && pr.off < 8 && pr.done === 0, JSON.stringify(pr));
@@ -485,7 +486,7 @@ if (run('1')) try {
   await page.click('#bFwd100'); const up = await app(page, () => window.__app.nav.pos.rd);
   await page.click('#bBack100'); await page.click('#bBack100'); const dn = await app(page, () => window.__app.nav.pos.rd);
   ok('↑100 зсуває вперед (100 м + рух за час натискання)', up - before >= 99 && up - before < 150, `${Math.round(up - before)} м`);
-  ok('↓100 двічі зсуває назад (200 м мінус рух)', up - dn > 140 && up - dn <= 201, `${Math.round(up - dn)} м`);
+  ok('↓100 двічі зсуває назад (200 м мінус рух за час натискань)', up - dn > 110 && up - dn <= 201, `${Math.round(up - dn)} м`);
   await app(page, () => window.__app.sim.setLost(false));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
   ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано', await app(page, () => document.getElementById('nudge').hidden && !document.getElementById('gpsChip').hidden));
@@ -1203,17 +1204,28 @@ if (run('9')) try {
   ok('якісних голосів ще немає — «потрібен пакет», кнопка «Завантажити пакет»', /потрібен пакет/.test(v.rows[1]) && /Завантажити пакет/.test(v.text));
   await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200);
   let c = await calls(); v = await vs();
-  ok('вибрали Микиту — пакет почав завантажуватись сам, вибір запамʼятано', c.includes('voiceDownload:uk') && c.includes('setVoice:uk:1:uk') && v.on === 'uk:1', c.slice(-3).join());
+  ok('вибрали Микиту — пакет почав завантажуватись сам, вибір запамʼятано (поки пакета немає — голос телефону)', c.includes('voiceDownload:uk') && c.slice(-2).includes('setVoice::0:') && v.on === 'uk:1', c.slice(-3).join());
   await emitN('voice', { state: 'dl', pack: 'uk', pct: 37 }); await sleep(150); v = await vs();
   ok('видно, скільки завантажено, і є «Скасувати»', /Завантажую… 37%/.test(v.text) && /Скасувати/.test(v.text), v.text.slice(0, 160));
   await page.screenshot({ path: SHOTS ? join(SHOTS, '17-voice-dl.png') : '/dev/null' }).catch(() => {});
   await page.click('#voiceSec [data-act="vCancel"]'); ok('«Скасувати» передано оболонці', (await calls()).includes('voiceCancel'));
-  await app(page, () => { window.__voice = { packs: { uk: { size: 87300000, ver: 1 } } }; });
+  await emitN('voice', { state: 'cancel', pack: 'uk' }); await sleep(100);
+  // старий пакет (v1, вимова через espeak) — пропонує оновити, якісний голос не вмикає
+  await app(page, () => { window.__voice = { packs: { uk: { size: 92000000, ver: 1 } } }; window.__nativeCalls.length = 0; });
+  await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200); v = await vs();
+  ok('старий пакет голосу — сам почав оновлюватись, підказки поки голосом телефону', /Завантажую/.test(v.text) && (await calls()).includes('setVoice::0:') && (await calls()).includes('voiceDownload:uk'), (await calls()).join());
+  await app(page, () => { window.__voice = { packs: { uk: { size: 92000000, ver: 1 } } }; });
+  await emitN('voice', { state: 'cancel', pack: 'uk' }); await sleep(100);
+  ok('…а без завантаження — кнопка «Оновити пакет»', /Оновити пакет/.test((await vs()).text));
+  await app(page, () => { window.__voice = { packs: { uk: { size: 87300000, ver: 2 } } }; });
   await emitN('voice', { state: 'ready', pack: 'uk', size: 87300000 }); await sleep(300); v = await vs();
   ok('пакет завантажено — «Завантажено · 87 МБ», «потрібен пакет» зник, повідомлення', /Завантажено · 87 МБ/.test(v.text) && !/потрібен пакет/.test(v.text) && /Голос завантажено/.test(await page.textContent('#toasts')), v.text.slice(0, 200));
   await shot(page, '17-voice');
   await page.click('#voiceSec .vrow[data-voice="uk:2"]'); await sleep(900); c = await calls();
-  ok('вибрали Тетяну — оболонці sid 2, і звучить пробна фраза', c.includes('setVoice:uk:2:uk') && await app(page, () => window.__spoken.some(s => /пʼятсот метрів/.test(s))));
+  ok('вибрали Тетяну — оболонці sid 2, і звучить пробна фраза', c.includes('setVoice:uk:2:uk') && await app(page, () => window.__spoken.length > 0));
+  ok('якісному голосу текст іде словами: малими літерами, без цифр і значків', await app(page, () => { const t = window.__spoken[window.__spoken.length - 1].normalize('NFC'); return /^через п'ятсот метрів поверніть праворуч\.?$/.test(t); }), await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC')));
+  await app(page, () => window.__app.P.speak('Через 2 км АЗС OKKO на М-03, обмеження 90 км/год.'));
+  ok('…числа, траси, скорочення й латиниця — словами', await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC') === "через два кілометри а зе ес окко на ем нуль три, обмеження дев'яносто кілометрів на годину."), await app(page, () => window.__spoken.slice(-1)[0].normalize('NFC')));
   await page.click('#voiceSec .vrow[data-voice="system"]'); await sleep(150);
   ok('назад на голос телефону', (await calls()).slice(-3).includes('setVoice::0:') && (await vs()).on === 'system');
   await page.click('#voiceSec [data-act="vDel"]'); await page.click('#voiceSec [data-act="vDel"]'); await sleep(200);

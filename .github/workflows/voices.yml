@@ -26,9 +26,26 @@ jobs:
           D=/tmp/$N
           ls -la $D
           MODEL=$(cd $D && ls *.onnx | head -1)
-          test -f "$D/tokens.txt" && test -d "$D/espeak-ng-data"
+          test -f "$D/tokens.txt"
+          # Ця модель навчена на літерах (phoneme_type: text), а не на фонемах espeak: кажемо sherpa-onnx брати
+          # символьний фронтенд з обрамленням Piper (^ _ л _ і _ т _ е _ р _ а _ $); словник espeak не потрібен.
+          pip install -q onnx
+          python3 - "$D/$MODEL" <<'PY'
+          import sys, json, onnx
+          p = sys.argv[1]; m = onnx.load(p)
+          meta = {x.key: x.value for x in m.metadata_props}
+          pid = json.load(open(p + '.json'))['phoneme_id_map']
+          meta.update({'frontend': 'characters', 'add_blank': '1', 'blank_id': str(pid['_'][0]), 'use_eos_bos': '1',
+                       'bos_id': str(pid['^'][0]), 'eos_id': str(pid['$'][0]), 'pad_id': str(pid['_'][0])})
+          del m.metadata_props[:]
+          for k, v in meta.items():
+              e = m.metadata_props.add(); e.key = k; e.value = v
+          onnx.save(m, p)
+          print(meta)
+          PY
+          rm -rf "$D/espeak-ng-data"
           cat > $D/voice.json <<EOF
-          {"ver": 1, "name": "Piper uk_UA ukrainian_tts medium", "model": "$MODEL", "tokens": "tokens.txt", "data": "espeak-ng-data",
+          {"ver": 2, "name": "Piper uk_UA ukrainian_tts medium", "model": "$MODEL", "tokens": "tokens.txt", "data": "", "frontend": "characters",
            "sr": 22050, "speakers": {"lada": 0, "mykyta": 1, "tetiana": 2},
            "source": "https://huggingface.co/rhasspy/piper-voices/tree/main/uk/uk_UA/ukrainian_tts/medium"}
           EOF
@@ -37,7 +54,7 @@ jobs:
           (cd $D && zip -qr -9 "$GITHUB_WORKSPACE/out/voice-uk.zip" .)
           ls -la out
           SIZE=$(stat -c %s out/voice-uk.zip); UNZ=$(du -sb $D | cut -f1)
-          echo "{\"uk\": {\"ver\": 1, \"zip\": $SIZE, \"size\": $UNZ}}" > out/voices.json
+          echo "{\"uk\": {\"ver\": 2, \"zip\": $SIZE, \"size\": $UNZ}}" > out/voices.json
           cat out/voices.json
 
       - name: Реліз voices
