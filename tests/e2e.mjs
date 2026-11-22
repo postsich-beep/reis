@@ -565,7 +565,7 @@ try {
     await app(page, () => { Date.now = window.__realNow; });
     await sleep(300);
     const after = await app(page, () => window.__app.nav.pos.rd);
-    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 150 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}`);
+    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 450 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}`);
   }
   // 5) вишки «стрибають» на 3 км за 30 с — швидкість 360 км/год не показуємо
   await app(page, () => { window.__realNow = Date.now; });

@@ -20,9 +20,11 @@ export function addSample(lat, lon, spd, v) {
   const norm = Math.sqrt(v) * 20 / Math.max(spd, 6);       // приводимо до ~72 км/год
   const k = key(lat, lon), now = Math.floor(Date.now() / 1000);
   let c = rg.cells.get(k);
-  if (!c) { c = [0, 0, now]; rg.cells.set(k, c); }
+  if (!c) { c = [0, 0, now, lat, lon]; rg.cells.set(k, c); }
   if (c[1] >= 30) c[0] *= 29 / 30; else c[1]++;           // ковзне середнє з 30 останніх проїздів-секунд
   c[0] += norm; c[2] = now;
+  // де саме на дорозі були заміри (а не центр клітинки сітки) — щоб крапка лежала на дорозі, а не поруч
+  if (c[3] == null) { c[3] = lat; c[4] = lon; } else { const w = 1 / Math.min(c[1], 30); c[3] += (lat - c[3]) * w; c[4] += (lon - c[4]) * w; }
   rg.res.push(norm); if (rg.res.length > RES_MAX) rg.res.splice(0, rg.res.length - RES_MAX);
   if (++rg.samples % 60 === 0 || rg.median == null) rg.median = median(rg.res);
   dirty = true;
@@ -44,7 +46,7 @@ export function geojson() {
   const f = [];
   if (calibrated()) for (const [k, c] of rg.cells) {
     const l = levelOf(c); if (!l) continue;
-    const p = cellCenter(k);
+    const p = c[3] != null ? { lat: c[3], lon: c[4] } : cellCenter(k);
     f.push({ type: 'Feature', properties: { l }, geometry: { type: 'Point', coordinates: [+p.lon.toFixed(5), +p.lat.toFixed(5)] } });
   }
   return { type: 'FeatureCollection', features: f };
@@ -68,13 +70,13 @@ async function save(force) {
     const old = [...rg.cells].sort((a, b) => a[1][2] - b[1][2]).slice(0, rg.cells.size - MAX_CELLS);
     for (const [k] of old) rg.cells.delete(k);
   }
-  try { await db.set('kv', 'rough', { v: 1, cells: [...rg.cells].map(([k, c]) => [k, +c[0].toFixed(3), c[1], c[2]]), res: rg.res.map(x => +x.toFixed(3)) }); }
+  try { await db.set('kv', 'rough', { v: 2, cells: [...rg.cells].map(([k, c]) => [k, +c[0].toFixed(3), c[1], c[2], c[3] == null ? null : +c[3].toFixed(6), c[4] == null ? null : +c[4].toFixed(6)]), res: rg.res.map(x => +x.toFixed(3)) }); }
   catch (e) { log('warn', 'заміри покриття: ' + e.message); }
 }
 async function load() {
   try {
     const j = await db.get('kv', 'rough');
-    if (j && Array.isArray(j.cells)) { for (const [k, s, n, t] of j.cells) rg.cells.set(k, [s, n, t]); rg.res = j.res || []; rg.median = median(rg.res); }
+    if (j && Array.isArray(j.cells)) { for (const [k, s, n, t, la, lo] of j.cells) rg.cells.set(k, la == null ? [s, n, t] : [s, n, t, la, lo]); rg.res = j.res || []; rg.median = median(rg.res); }
   } catch (e) { log('warn', 'заміри покриття: ' + e.message); }
   rg.loaded = true; bus.emit('rough');
 }
@@ -88,6 +90,8 @@ function onSens(s) {
   save(false);
 }
 export function init() {
+  // Заміри показувались на карті одразу й виглядали як зелені артефакти вздовж дороги — тепер лише за бажанням (Шари → «Мої заміри покриття»)
+  if (S.roughMapV !== 2) { S.roughMap = false; S.roughMapV = 2; }
   load();
   bus.on('sens', onSens);
   document.addEventListener('visibilitychange', () => { if (document.hidden) save(true); });
