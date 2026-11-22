@@ -100,6 +100,77 @@ def samples(pts, step=SAMPLE_M):
     return out, total
 
 
+# Що є поруч із зоною сервісу, стоянкою, АЗС чи мотелем (окремі об'єкти OSM у радіусі) — коротким кодом.
+def fac_of(t):
+    a, s, tr = t.get('amenity'), t.get('shop'), t.get('tourism')
+    if a == 'toilets':
+        return 'wc'
+    if a in ('drinking_water', 'water_point'):
+        return 'water'
+    if t.get('leisure') == 'picnic_table' or tr == 'picnic_site' or a == 'bbq':
+        return 'picnic'
+    if s in ('convenience', 'supermarket', 'kiosk', 'general'):
+        return 'shop'
+    if a == 'car_wash':
+        return 'wash'
+    if a in ('atm', 'bank'):
+        return 'atm'
+    if s == 'tyres':
+        return 'tyres'
+    if s in ('car_repair', 'truck_repair'):
+        return 'repair'
+    if a == 'compressed_air':
+        return 'air'
+    if tr in ('hotel', 'guest_house', 'hostel'):
+        return 'hotel'
+    return None
+
+
+# Те саме, але з тегів самої точки («toilets=yes» на АЗС тощо)
+def own_facs(t):
+    out = set()
+    if t.get('toilets') in ('yes', 'customers'):
+        out.add('wc')
+    if t.get('drinking_water') == 'yes':
+        out.add('water')
+    if t.get('compressed_air') == 'yes':
+        out.add('air')
+    if t.get('car_wash') == 'yes':
+        out.add('wash')
+    if t.get('shop') in ('yes', 'convenience', 'kiosk'):
+        out.add('shop')
+    if t.get('atm') == 'yes':
+        out.add('atm')
+    return out
+
+
+FAC_R = {'sv': 350, 'ra': 200, 'p': 200, 'f': 120, 'm': 150, 'h': 120}
+
+
+def info_of(typ, oid, tags):
+    """Довідка для картки точки: сайт, телефон, години, оператор, посилання на OSM, вид зони."""
+    t, i = tags, {}
+    w = (t.get('website') or t.get('contact:website') or t.get('url') or '').strip()
+    if w.startswith(('http://', 'https://')) or (w and '.' in w and ' ' not in w):
+        i['w'] = (w if w.startswith('http') else 'https://' + w)[:200]
+    p = (t.get('phone') or t.get('contact:phone') or t.get('contact:mobile') or '').split(';')[0].strip()
+    if p:
+        i['p'] = p[:30]
+    h = (t.get('opening_hours') or '').strip()
+    if h and h != '24/7':
+        i['h'] = h[:60]
+    o = (t.get('operator') or t.get('brand') or '').strip()
+    name = (t.get('name:uk') or t.get('name') or '').strip()
+    if o and o.lower() not in name.lower():
+        i['o'] = o[:40]
+    if t.get('highway') == 'services':
+        i['k'] = 'sv'
+    elif t.get('highway') == 'rest_area':
+        i['k'] = 'ra'
+    i['id'] = ('n' if typ == 'n' else 'w') + str(oid)
+    return i
+
+
 def stop_kind(t, is_node):
     a = t.get('amenity')
     if a == 'fuel' or a in FOOD:
@@ -120,12 +191,16 @@ class Reader(osmium.SimpleHandler):
         super().__init__()
         self.items, self.roads, self.places, self.oblasts = [], [], [], []
         self.hz_groups, self.hz_pts = [], []
+        self.facs = []
         self.wkb = osmium.geom.WKBFactory()
 
     def node(self, n):
         t = n.tags
         if stop_kind(t, True):
             self.items.append(('n', n.id, {x.k: x.v for x in t}, n.location.lat, n.location.lon))
+        fc = fac_of(t)
+        if fc:
+            self.facs.append((n.location.lat, n.location.lon, fc))
         if t.get('place') in KIND:
             self.places.append((n.id, {x.k: x.v for x in t}, n.location.lat, n.location.lon))
 
@@ -134,11 +209,14 @@ class Reader(osmium.SimpleHandler):
         road = t.get('highway') in ROADS
         kind = stop_kind(t, False)
         hz = hazards_of(t)
-        if not road and not kind and not hz:
+        fc = fac_of(t)
+        if not road and not kind and not hz and not fc:
             return
         pts = [(nd.location.lat, nd.location.lon) for nd in w.nodes if nd.location.valid()]
         if not pts:
             return
+        if fc:
+            self.facs.append((sum(p[0] for p in pts) / len(pts), sum(p[1] for p in pts) / len(pts), fc))
         if hz and len(pts) >= 2:
             name = (t.get('ref') or t.get('name:uk') or t.get('name') or '').strip()[:40]
             cache = {}
@@ -196,7 +274,31 @@ def main(pbf, stops_out, places_out, hazards_out=None):
         x = stop_row({'type': 'node' if typ == 'n' else 'way', 'id': oid, 'tags': tags, 'lat': lat, 'lon': lon})
         if x:
             rows.append(x)
+            if x[2] != 'c':
+                x.append((typ, oid, tags))          # тимчасово: для довідки нижче
+    # довідка: що поруч, сайт, телефон, години — для зон сервісу, стоянок, мотелів, душів і АЗС
+    ftree = STRtree([Point(lo * KX, la * KY) for la, lo, _ in r.facs]) if r.facs else None
+    with_info = 0
+    for x in rows:
+        if len(x) < 7:
+            continue
+        typ, oid, tags = x.pop()
+        inf = info_of(typ, oid, tags)
+        facs = own_facs(tags)
+        rad = FAC_R.get(inf.get('k') or x[2])
+        if ftree is not None and rad:
+            for j in ftree.query(Point(x[1] * KX, x[0] * KY), predicate='dwithin', distance=rad):
+                facs.add(r.facs[int(j)][2])
+        if facs:
+            inf['fa'] = sorted(facs)
+        useful = x[2] in ('s', 'p', 'm', 'h') or any(k in inf for k in ('w', 'p', 'h', 'fa'))
+        if not useful:
+            continue
+        if x[2] in ('e', 'f'):
+            inf.pop('id', None)                     # для кафе й АЗС посилання на OSM не тягнемо — їх тисячі
+        x.append(inf); with_info += 1
     rows.sort(key=lambda x: (x[2], x[0], x[1]))
+    print('з довідкою:', with_info, 'зон сервісу з переліком зручностей:', sum(1 for x in rows if x[2] == 's' and len(x) > 6 and x[6].get('fa')), file=sys.stderr)
     print('піт-стопи:', len(rows), dict(Counter(x[2] for x in rows)), f'(їжа далеко від трас відкинута: {food_far})', file=sys.stderr)
     print('з душем:', sum(1 for x in rows if x[3] & 2), dict(Counter(x[2] for x in rows if x[3] & 2)), file=sys.stderr)
 
