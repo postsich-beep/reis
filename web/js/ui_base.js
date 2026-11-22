@@ -19,6 +19,7 @@ export const ICON = {
   feed: I('<path d="M6 9a6 6 0 1 1 12 0c0 6 2.5 7 2.5 7h-17S6 15 6 9Z"/><path d="M10 20a2.2 2.2 0 0 0 4 0"/>'),
   mic: I('<rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3"/>'),
   chat: I('<path d="M4 5h16v11H9l-5 4Z"/>'),
+  gpsSig: I('<circle cx="12" cy="12" r="3.4" fill="currentColor"/><path d="M7.1 7.1a7 7 0 0 0 0 9.8M16.9 7.1a7 7 0 0 1 0 9.8M4.2 4.2a11 11 0 0 0 0 15.6M19.8 4.2a11 11 0 0 1 0 15.6"/>'),
   lab: I('<path d="M9 3h6M10 3v6l-5 9a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3l-5-9V3"/><path d="M7.5 15h9"/>'),
   north: I('<path d="M12 3 17 20 12 16.5 7 20Z"/>'),
   head: I('<circle cx="12" cy="12" r="9"/><path d="M12 6.5 15 15l-3-1.8L9 15Z" fill="currentColor"/>'),
@@ -51,6 +52,8 @@ export const ICON = {
   trash: I('<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>'),
   shower: I('<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.5 8h7"/><path d="M12 12v.01M15 12v.01M18 12v.01M12.5 15v.01M15.5 15v.01M18.5 15v.01M13 18v.01M16 18v.01M19 18v.01"/>'),
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
+  plus: I('<path d="M12 5v14M5 12h14"/>', 'stroke-width="2.6"'),
+  warnTri: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#fff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#e8890c" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#e8890c"/></svg>',
   cam: I('<rect x="3" y="8" width="13" height="9" rx="2"/><path d="m16 11 5-3v9l-5-3"/>')
 };
 
@@ -90,7 +93,7 @@ export const currentPanel = () => current;
 export function openPanel(name, arg) {
   const def = panels[name]; if (!def) return;
   current = name;
-  const p = $('panel'); p.hidden = false; p.classList.toggle('half', !!def.half);
+  const p = $('panel'); p.hidden = false; p.classList.toggle('half', !!def.half); p.classList.toggle('full', !!def.full);
   $('panelTitle').textContent = def.title();
   $('panelBack').hidden = !def.back;
   $('panelBack').onclick = () => openPanel(def.back);

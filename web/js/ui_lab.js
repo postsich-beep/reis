@@ -54,7 +54,7 @@ function labHtml() {
   return h;
 }
 definePanel('lab', {
-  title: () => t('labTitle'),
+  title: () => t('labTitle'), back: 'settings',
   render(body) {
     body.innerHTML = labHtml();
     body.onclick = e => {
@@ -127,7 +127,8 @@ function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}" value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
   const styleOn = STYLES.find(x => x[1] === S.styleUrl);
-  return `<div class="sec">${t('secScreen')}</div>
+  return `<div class="btns" style="margin-top:0"><button class="btn wide" data-act="labOpen">${ICON.lab}${t('labOpen')}</button></div>
+  <div class="sec">${t('secScreen')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
   <div class="muted" style="margin:-4px 2px 10px">${t('themeHint')}</div>
@@ -155,7 +156,7 @@ function settingsHtml() {
   <div class="btns" style="margin-top:0"><button class="btn wide" data-act="testVoice">${t('testVoice')}</button></div>
 
   <div class="sec">${t('secNotify')}</div>
-  <div class="list">${tog('popups')}${tog('notify')}</div>
+  <div class="list">${tog('popups')}${tog('notify')}${tog('repShare')}</div>
 
   <div class="sec">${t('setLang')}</div>
   ${seg('lang', [['uk', 'Українська', S.lang === 'uk'], ['ru', 'Русский', S.lang === 'ru']])}
@@ -226,6 +227,7 @@ definePanel('settings', {
       else if (a === 'appset') P.openAppSettings();
       else if (a === 'locset') P.openLocationSettings();
       else if (a === 'about') openPanel('about');
+      else if (a === 'labOpen') openPanel('lab');
       else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
@@ -300,7 +302,7 @@ function gpsHtml() {
   const sv = speedView();
   rows.push([t('gpsSpeedSrc'), sv.kind === 'none' ? '—' : Math.round(sv.kmh || 0) + ' ' + t('kmh') + ' · ' + t('spdKind_' + sv.kind) + (sv.kind === 'approx' && d.apSpdErr != null ? ' ±' + Math.round(d.apSpdErr * 3.6 * 2) : '')]);
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';
-  return `<div class="list">${rows.map(r => `<div class="item"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
+  return `<div class="list">${rows.map(r => `<div class="item kvr"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
     <div class="sec">${t('gpsManual')}</div><div class="muted">${t('gpsManualHint')}</div>
     <div class="muted" style="margin-top:6px">${t('hereHint')}</div>
     <div class="btns">${pos.mode === 'dr' ? `<button class="btn pri wide" data-act="back" ${pos.pending ? '' : 'disabled'}>${t('backToGps')}</button>` : `<button class="btn dark wide" data-act="manual" ${pos.lat == null ? 'disabled' : ''}>${t('gpsManualOn')}</button>`}</div>

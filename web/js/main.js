@@ -17,6 +17,8 @@ import * as stopsdb from './stopsdb.js';
 import * as mapM from './map.js';
 import * as route from './route.js';
 import * as vplaces from './vplaces.js';
+import * as reports from './reports.js';
+import * as limits from './limits.js';
 import { initUI } from './ui.js';
 import { initLab } from './ui_lab.js';
 import { resumeTrip } from './ui.js';
@@ -31,12 +33,12 @@ async function boot() {
   initUI(); initLab();
   await route.loadTrips();
   await feed.init();
-  stopsdb.load(); vplaces.init();
+  stopsdb.load(); vplaces.init(); reports.init(); limits.init();
   P.nativeReady(); P.startLocation(); P.keepAwake(S.keepAwake !== false);
   resumeTrip();
   const b = document.getElementById('boot');
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb, vplaces };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb, vplaces, reports, limits };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

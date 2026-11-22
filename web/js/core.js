@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 30, name: '1.1.3' };
+export const VERSION = { web: 31, name: '1.1.4' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -36,7 +36,7 @@ const DEFAULTS = {
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true, shower: true },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 40, axle: 11.5, hazmat: false, vmax: 90 },
-  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: true, mapHazards: true, passed: 'hide', rough: true, roughMap: false,
+  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: true, mapHazards: true, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',

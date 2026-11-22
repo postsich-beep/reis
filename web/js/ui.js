@@ -18,9 +18,11 @@ import { offlineActive } from './offline.js';
 import { sdb, TYPES, F, nearbyRows } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
-import { vp, byId as byIdVp, sorted as vpSorted, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
+import { vp, byId as byIdVp, listed as vpListed, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
 import { t } from './i18n.js';
+import { reps, report, REP_TYPES, REP_SVG, repName, repAgo } from './reports.js';
+import { limitNow, overLimit } from './limits.js';
 
 /* =====================  ГОЛОВНИЙ ЕКРАН  ===================== */
 function layoutVars() {
@@ -36,9 +38,9 @@ function staticLabels() {
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
-  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', lab: 'tabLab', settings: 'qSettings' };
-  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, lab: ICON.lab, settings: ICON.gear };
-  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
+  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', gps: 'tabGps', settings: 'qSettings' };
+  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, gps: ICON.gpsSig, settings: ICON.gear };
+  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : p === 'gps' ? `<span class="gc">${icons[p]}</span>` : icons[p]) + `<span${p === 'gps' ? ' id="tabGpsL"' : ''}>` + t(names[p]) + '</span>'; });
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
@@ -161,7 +163,10 @@ function hud() {
   sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
   sp.classList.toggle('wide', guess);
   const cam = S.cams ? poi.nextCam : null;
-  sp.classList.toggle('over', !!(cam && cam.max && kmh > cam.max + 3 && cam.ahead < 600));
+  // червоний — коли перевищено більш ніж на 20 км/год (з цього починається штраф); без GPS — червоно-помаранчевий
+  const lim = limitNow(), over = sv.kind !== 'none' && overLimit(kmh, lim);
+  sp.classList.toggle('over', over);
+  const ls = $('spdLim'); ls.hidden = !lim || lim.src === 'cam'; if (lim) ls.textContent = lim.max;
   $('cam').hidden = !cam;
   if (cam) { $('camMax').innerHTML = cam.max ? cam.max : ICON.cam; $('camDist').textContent = fmtDist(Math.max(0, cam.ahead)); }
 
@@ -175,6 +180,9 @@ function hud() {
   else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
   else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
   else { chip.className = 'chip none'; $('gpsText').textContent = t('gpsWait'); }
+  // кружечок GPS у нижній панелі: є справжній GPS — зелений, немає — червоний
+  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('tabGps');
+  if (tg) { tg.classList.toggle('g-ok', gOk); tg.classList.toggle('g-bad', !gOk); const l = $('tabGpsL'); if (l) l.textContent = gOk ? (pos.acc != null ? '±' + accText(pos.acc) : 'GPS') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps'); }
   // GPS шукає вже хвилину, а геолокація ввімкнена — швидше за все, телефон у приміщенні
   if (pos.mode === 'gps' || pos.mode === 'dr' || pos.sim) searchSince = Date.now();
   else if (!indoorHinted && !off && Date.now() - searchSince > 60000) { indoorHinted = true; toast(t('gpsIndoor'), 'yellow', 12000, () => openPanel('gps')); }
@@ -468,7 +476,86 @@ function pickFit() {
 }
 function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
 function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
+/* ---------- позначки водіїв: ДТП, поліція, транспортна служба ---------- */
+function repOpen(open) {
+  const box = $('repSheet');
+  if (open) {
+    box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>
+      <div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}</div>
+      <div class="muted rep-hint">${t('repHint')}</div>`;
+    box.hidden = false;
+  } else box.hidden = true;
+}
+async function repClick(e) {
+  const b = e.target.closest('[data-rep]'); if (!b) return;
+  const k = b.dataset.rep;
+  if (k === 'x') { repOpen(false); return; }
+  if (pos.lat == null) { toast(t('repNoPos'), 'yellow', 5000); return; }
+  repOpen(false);
+  const r = await report(k);
+  if (r) { toast(t('repDone', t('rep_' + k)), REP_TYPES[k].level === 'red' ? 'red' : 'green', 6000); P.vibrate(60); }
+}
+
+/* ---------- «Маршрут» у дорозі: увесь залишок маршруту на карті; контрольна точка, залишитись, завершити ---------- */
+const ts = { via: false, q: '', sugg: [], timer: 0 };
+const tsOpen = () => $('routePick').dataset.mode === 'trip' && !$('routePick').hidden;
+const tsKvHtml = () => `<div class="ts-kv"><div><b>${fmtDist(g.remain)}</b><small>${t('remainL')}</small></div><div><b>${fmtDur(g.remTime)}</b><small>${t('driveTime')}</small></div><div><b>${g.arrived ? '—' : fmtClock(new Date(g.eta))}</b><small>${t('arrival')}</small></div></div>`;
+function tsHtml() {
+  const tr = g.trip;
+  const pin = (cls, l, p) => p ? `<i class="rp-t ${cls}">${l}</i><b>${esc(p.label || '')}</b>` : '';
+  const via = ts.via ? `<div class="ts-via"><input id="tsViaIn" placeholder="${esc(t('tsViaPh'))}" value="${esc(ts.q)}" autocomplete="off" enterkeyhint="search">
+      <div class="ts-sugg">${ts.sugg.map((x, i) => `<button data-tsg="${i}"><b>${esc(x.label)}</b><small>${esc(x.sub || '')}</small></button>`).join('')}</div></div>` : '';
+  return `${ts.via ? '' : `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>`}
+    <div class="rp-head">${pin('a', 'А', tr.a)}${pin('v', 'Б', tr.v)}${pin('b', 'С', tr.b)}<button class="ts-more" data-ts="details">${t('details')}</button></div>
+    ${tsKvHtml()}
+    ${via}
+    <div class="rp-btns ts-btns"><button class="btn" data-ts="via">${ICON.plus}${t('tsVia')}</button><button class="btn danger" data-ts="stop">${t('tsStop')}</button>
+      <button class="btn pri" data-ts="stay">${t('tsStay')}</button></div>`;
+}
+export function tsShow() {
+  if (!g.active || !g.route) return;
+  if (currentPanel()) closePanel();
+  const box = $('routePick'); box.dataset.mode = 'trip'; box.innerHTML = tsHtml(); box.hidden = false;
+  requestAnimationFrame(tsFit);
+}
+function tsRender() { if (!tsOpen()) return; const box = $('routePick'), f = document.activeElement && document.activeElement.id === 'tsViaIn'; box.innerHTML = tsHtml(); if (f) { const i = $('tsViaIn'); if (i) { i.focus(); i.setSelectionRange(i.value.length, i.value.length); } } }
+// залишок маршруту — від машини до кінця — цілком у вільній частині карти
+function tsFit() {
+  if (!tsOpen() || !g.idx) return;
+  const box = $('routePick'), tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
+  const cs = g.idx.slice(Math.max(0, pos.rd || 0), g.idx.total).map(c => [c[1], c[0]]);
+  if (cs.length >= 2) fitRoutes([cs], top, bottom);
+}
+function tsHide(follow = true) {
+  const box = $('routePick'); if (box.dataset.mode !== 'trip') return;
+  box.hidden = true; delete box.dataset.mode; ts.via = false; ts.q = ''; ts.sugg = [];
+  if (follow) setFollow(true); else freeView();
+}
+function endTrip(openForm) {
+  const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); }
+  stopTrip(); previewRoute(null); setRouteContext([], []);
+  if (openForm) openPanel('trip'); else setFollow(true);
+}
+function tsClick(e) {
+  const sg = e.target.closest('[data-tsg]');
+  if (sg) { const p = ts.sugg[+sg.dataset.tsg]; if (p) { setVia({ lat: p.lat, lon: p.lon, label: p.label }); toast(t('tsViaDone', p.label), 'green', 6000); ts.via = false; ts.q = ''; ts.sugg = []; tsRender(); } return; }
+  const b = e.target.closest('[data-ts],[data-rp]'); if (!b) return;
+  const k = b.dataset.ts || b.dataset.rp;
+  if (k === 'zin' || k === 'zout') { zoomBy(k === 'zin' ? 1 : -1); return; }
+  if (k === 'fit') { tsFit(); return; }
+  if (k === 'via') { ts.via = !ts.via; tsRender(); requestAnimationFrame(tsFit); if (ts.via) { const i = $('tsViaIn'); if (i) i.focus(); } return; }
+  if (k === 'stay') { tsHide(true); return; }
+  if (k === 'details') { tsHide(false); openPanel('trip'); return; }
+  if (k === 'stop') { if (!b.dataset.sure) { b.dataset.sure = '1'; b.textContent = t('tsStopSure'); return; } tsHide(false); endTrip(false); toast(t('tsStopped'), 'green', 4000); }
+}
+function tsInput(e) {
+  if (e.target.id !== 'tsViaIn') return;
+  ts.q = e.target.value; clearTimeout(ts.timer);
+  const q = ts.q.trim(); if (q.length < 2) { ts.sugg = []; tsRender(); return; }
+  ts.timer = setTimeout(async () => { const r = await findPlaces(q); if (ts.q.trim() !== q) return; ts.sugg = r.slice(0, 6); tsRender(); }, 250);
+}
 function pickClick(e) {
+  if ($('routePick').dataset.mode === 'trip') { tsClick(e); return; }
   const c = e.target.closest('[data-alt]'); if (c) { selectAlt(+c.dataset.alt); return; }
   const b = e.target.closest('[data-rp]'); if (!b || !plan.trip) return;
   const k = b.dataset.rp;
@@ -575,7 +662,7 @@ function tripClicks(e) {
   else if (d.act === 'save' && plan.trip) { if (plan.trip.route) delete plan.trip.route.alts; plan.routes = []; saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); hud(); openPanel('trip'); }
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
-  else if (d.act === 'stop') { const tr = g.trip; if (tr) { const snap = poiSnapshot(); tr.cams = snap.cams; tr.stops = snap.stops; if (getTrips().some(x => x.id === tr.id)) saveTrip(tr); } stopTrip(); previewRoute(null); setRouteContext([], []); openPanel('trip'); }
+  else if (d.act === 'stop') endTrip(true);
   else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
@@ -637,10 +724,15 @@ function vpWhereText(p) {
 function vpMonth(s) { const [y, m] = String(s || '').split('-').map(Number); if (!y || !m) return ''; try { return new Date(y, m - 1, 1).toLocaleDateString(S.lang === 'ru' ? 'ru-RU' : 'uk-UA', { month: 'long', year: 'numeric' }); } catch (_) { return s; } }
 function placesHtml() {
   if (!vp.ready) return `<div class="muted">${t('loading')}</div>`;
-  const list = vpSorted();
-  return `<div class="muted" style="margin-bottom:10px">${t('vpIntro')}</div><div class="list">` + list.map(p => `<button class="vp-row" data-vpid="${esc(p.id)}">
+  const trip = g.active && g.idx && pos.rd != null, items = vpListed(), list = items.map(x => x.p), W = new Map(items.map(x => [x.p.id, x.w]));
+  const where = p => { const w = W.get(p.id); if (!w) return vpWhereText(p);
+    if (w.route) return w.ahead < 1000 ? t(w.off > 1500 ? 'vpHereOff' : 'vpHere', fmtDist(w.off)) : t(w.off > 1500 ? 'vpAheadOff' : 'vpOnRoute', fmtDist(w.ahead), fmtDist(w.off));
+    return t('vpAway', fmtDist(w.dist)); };
+  const head = `<div class="vp-scope">${t(trip ? 'vpScopeRoute' : pos.lat != null ? 'vpScopeNear' : 'vpScopeAll')}</div>`;
+  if (!list.length) return head + `<div class="card vp-empty">${t(trip ? 'vpNoneRoute' : 'vpNoneNear')}</div><div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
+  return head + `<div class="list">` + list.map(p => `<button class="vp-row" data-vpid="${esc(p.id)}">
       <img src="data/${esc((p.thumbs || p.photos || [])[0] || '')}" alt="" loading="lazy"><span class="grow"><b>${esc(p.name)}</b><span class="vp-stars">${stars(p.rating)}</span>
-      <small>${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}</small><small class="vp-w">${esc(vpWhereText(p))}</small></span></button>`).join('') +
+      <small>${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}</small><small class="vp-w">${esc(where(p))}</small></span></button>`).join('') +
     `</div><div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
 }
 function placeHtml(p) {
@@ -831,23 +923,39 @@ function feedStatus() {
   }
   return parts.join(' · ');
 }
+// «Події» на весь екран, без нижньої панелі: 1) тривога там, де машина; 2) прильоти, вибухи, НП — лише на шляху попереду;
+// 3) інше (відсіяне, позаду) — згорнуто. Унизу «Назад», щоб не тягнутися до хрестика вгорі.
+function airCardHtml() {
+  const here = (zoneRegions(1)[0] || {}).id || feed.here, a = here && feed.air[here];
+  const ahead = zoneRegions().filter(z => z.id !== here && feed.air[z.id]).map(z => oblastName(z.id));
+  if (!here) return `<div class="ev-air none"><b>${t('evAirUnknown')}</b><span>${t(feed.airAt ? 'airWhere' : 'airNoData')}</span></div>`;
+  return `<div class="ev-air ${a ? 'on' : 'off'}"><b>${a ? t('evAirOn') : t('evAirCalm')}</b><span>${esc(oblastName(here))} ${t('oblShort')}${a && a.since ? ' · ' + t('evAirSince', a.since) : ''}${a && a.part ? ' · ' + t('evAirPart') : ''}</span>
+    ${ahead.length ? `<small>${t('evAirAhead', ahead.join(', '))}</small>` : ''}</div>`;
+}
 function feedHtml() {
-  const L = feedLists(), main = L.main.slice(0, 60), rest = L.rest.slice(0, 60);
-  const list = feedTab === 'main' ? main : rest;
-  return `<div class="muted" style="margin-bottom:10px">${esc(feedStatus())}</div>
-    <div class="seg"><button data-tab="main" class="${feedTab === 'main' ? 'on' : ''}">${t('feedMain')} ${main.length || ''}</button><button data-tab="rest" class="${feedTab === 'rest' ? 'on' : ''}">${t('feedRest')} ${rest.length || ''}</button></div>
-    <div class="list">${list.map(evHtml).join('') || `<div class="muted">${feedTab === 'main' ? t('feedEmpty') : t('feedRestEmpty')}</div>`}</div>
+  // лише події: тривоги (окремою карткою), Telegram (прильоти, ДТП, перекриття), позначки водіїв, погода на дорозі;
+  // підказки про стоянки, перевірені місця й час за кермом сюди не потрапляють — вони звучать у дорозі
+  const EV = i => i.src !== 'air' && i.src !== 'stop' && i.src !== 'drive';
+  const L = feedLists(), main = L.main.filter(([i]) => EV(i)).slice(0, 60), rest = L.rest.filter(([i]) => EV(i)).slice(0, 60);
+  const onTrip = g.active && g.route;
+  return `${airCardHtml()}
+    <div class="sec">${t(onTrip ? 'feedAhead' : 'feedAround')}</div>
+    <div class="list">${main.map(evHtml).join('') || `<div class="card ev-calm">${t(onTrip ? 'feedCalmAhead' : 'feedCalmAround')}</div>`}</div>
+    ${rest.length ? `<button class="btn sm wide ev-more" data-tab="${feedTab === 'rest' ? 'main' : 'rest'}">${t(feedTab === 'rest' ? 'feedRestHide' : 'feedRestShow', rest.length)}</button>
+      ${feedTab === 'rest' ? `<div class="list">${rest.map(evHtml).join('')}</div>` : ''}` : ''}
     <div class="btns"><button class="btn sm" data-act="refresh">${t('refreshNow')}</button><button class="btn sm" data-act="channels">${t('channels')}</button></div>
-    <div class="muted" style="margin-top:10px">${t('feedHint', Math.round(nearM() / 1000))}</div>`;
+    <div class="muted" style="margin-top:8px">${esc(feedStatus())}</div>
+    <div class="pb-back"><button class="btn wide" data-act="back">${ICON.back}${t('back')}</button></div>`;
 }
 definePanel('feed', {
-  title: () => t('tabFeed'),
+  title: () => t('tabFeed'), full: true,
   render(body) {
     body.innerHTML = feedHtml(); markSeen();
     body.onclick = e => {
       const b = e.target.closest('button'), x = e.target.closest('[data-exp]');
       if (!b) { if (x) x.classList.toggle('cl'); return; }
       if (b.dataset.tab) { feedTab = b.dataset.tab; body.innerHTML = feedHtml(); }
+      else if (b.dataset.act === 'back') closePanel();
       else if (b.dataset.v) { const [id, v] = b.dataset.v.split(':'); vote(id, +v); }
       else if (b.dataset.act === 'refresh') { pollAir(); pollTelegram(true); toast(t('refreshing'), '', 2500); }
       else if (b.dataset.act === 'channels') openPanel('channels');
@@ -907,8 +1015,11 @@ export function initUI() {
   bus.on('mapPick', onMapPick);
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
-  bus.on('panel', name => { if (name) { if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
-  bus.on('trip', () => { if (g.active) pickHide(); });
+  bus.on('panel', name => { if (name) { if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
+  bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && $('routePick').dataset.mode !== 'trip') pickHide(); });
+  bus.on('route', () => { if (tsOpen()) { tsRender(); requestAnimationFrame(tsFit); } });
+  bus.on('guide', () => { if (tsOpen()) { const kv = document.querySelector('#routePick .ts-kv'); if (kv) kv.outerHTML = tsKvHtml(); } });
+  $('routePick').addEventListener('input', tsInput);
   bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
   bus.on('stopTap', onStopTap);
   bus.on('markTap', onMarkTap);
@@ -943,6 +1054,8 @@ export function initUI() {
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
     if (!$('quick').hidden) { quickOpen(false); return true; }
+    if (!$('repSheet').hidden) { repOpen(false); return true; }
+    if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
     if (currentPanel()) { closePanel(); return true; }
@@ -951,11 +1064,21 @@ export function initUI() {
 
   $('strip').onclick = () => openPanel('feed');
   $('panelClose').onclick = closePanel;
-  document.querySelectorAll('#tabs button[data-panel]').forEach(b => { b.onclick = () => currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel); });
+  document.querySelectorAll('#tabs button[data-panel]').forEach(b => { b.onclick = () => {
+    // у дорозі «Маршрут» — не панель, а карта з усім залишком маршруту й трьома кнопками
+    if (b.dataset.panel === 'trip' && g.active && !g.arrived) { if (tsOpen()) tsHide(true); else tsShow(); return; }
+    if (tsOpen()) tsHide(false);
+    currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel);
+  }; });
   $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden); };
   $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
   document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
+  // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
+  $('bReport').innerHTML = ICON.warnTri; $('bReport').setAttribute('aria-label', t('repBtn'));
+  $('bReport').onclick = e => { e.stopPropagation(); repOpen($('repSheet').hidden); };
+  $('repSheet').onclick = repClick;
+  bus.on('repTap', id => { const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repAgo(r)), REP_TYPES[r.t].level, 6000); });
   // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
   for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
     const b = $(id); let timer = null, t0 = 0, held = false;

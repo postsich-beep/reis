@@ -48,6 +48,12 @@ const ROAD = /дорог|трас|шосе|шоссе|автодор|міст|м
 const HARD = /вибух|взрыв|приліт|прилет|обстріл|обстрел|теракт|ракет|шахед|бпла|дрон|балістик|баллистик/;
 // Довгі перешкоди, про які варто знати й за сотні кілометрів: перекриття, зруйнований чи закритий міст, ремонт з обмеженням руху, заборона для фур
 const IMPORTANT = /перекри|перекры|рух (заблок|закрит|зупин)|движение (заблок|закрыт|останов)|проїзд (неможлив|заборон|закрит)|проезд (невозмож|запрещ|закрыт)|(міст|мост|шляхопровід|путепровод)\S* (зруйн|разруш|закрит|закрыт|пошкодж|поврежд)|(зруйн|разруш|пошкодж|поврежд)\S* (міст|мост|шляхопровід|путепровод)|ремонт\S* (дорог|мост|міст|траси|трассы|шляхопровод|путепровод|покритт|покрыт|полотн)|капітальн\S* ремонт|капитальн\S* ремонт|реверсивн|(обмежен|заборон)\S* (рух|проїзд|в['’ʼ]їзд)\S* (для )?(вантаж|фур)|(ограничен|запрещ)\S* (движен|проезд|въезд)\S* (для )?(груз|фур)/;
+// Рух дронів і ракет («група БпЛА курсом на…», «ще 5 мопедів з півночі») — водію не потрібен: є тривога чи ні, показуємо окремо.
+// Потрібне лише те, що сталося: вибух, приліт, влучання, уламки, пожежа, руйнування.
+const DRONE = /бпла|шахед|мопед|дрон|ракет|балістик|баллистик|крилат|крылат|авіабомб|авиабомб|(^|[^а-я])каб([^а-я]|$)|ударн\S* безпілот|ударн\S* беспилот/;
+const MOVE = /курс|рухаєт|рухают|рухаєть|рух у|у напрям|в напрям|направлен|летить|летят|летять|летит|в бік|у бік|в сторону|над |у районі|в районе|фіксуєть|фиксиру|зафіксован|груп[аиу]|загроз\S* застосуван|угроз\S* применен|з півночі|з півдня|зі сходу|із заходу|з заходу|с севера|с юга|с востока|с запада|на півночі|на півдні|на сході|на заході|на севере|на юге|на востоке|на западе|ще \d|ещё \d|еще \d|\d+\s*(шахед|бпла|мопед|дрон)/;
+const STRIKE = /вибух|взрыв|приліт|прилет|влучан|попадан|уражен|поражен|обстріл|обстрел|атак\S* (на|по)|уламк|обломк|пожеж|пожар|загибл|загинул|погиб|поранен|ранен|руйнуван|разрушен|пошкоджен|поврежден|знищен|уничтожен|детонац/;
+export const isDroneMove = s => DRONE.test(s) && MOVE.test(s) && !STRIKE.test(s);
 const SPAM = /реклам|знижк|скидк|розіграш|розыгрыш|вакансі|ваканси|продам|купл[юя]|підпис(атися|уйтесь)|подпис(аться|ывайтесь)|промокод|казино|курс валют|гороскоп/;
 
 const stems = s => [...new Set((s.toLowerCase().match(/[a-zа-яіїєґё']{4,}/g) || []).map(w => w.slice(0, 5)))];
@@ -60,6 +66,7 @@ function learned(s, ch) {
 }
 export function classify(text, ch) {
   const s = text.toLowerCase();
+  if (isDroneMove(s)) return { level: null, score: -5, road: false, imp: false, drone: true };       // «курсом на…» — не показуємо
   const sum = arr => arr.reduce((a, [re, w]) => a + (re.test(s) ? w : 0), 0);
   const red = sum(RED), yel = sum(YELLOW), grn = sum(GREEN);
   const road = ROAD.test(s), hard = HARD.test(s);
@@ -68,6 +75,7 @@ export function classify(text, ch) {
   else if (red >= 3) { level = UNSURE.test(s) ? 'yellow' : 'red'; score = red + yel * 0.3; }
   else if (yel >= 2 || red >= 2) { level = 'yellow'; score = yel + red; }
   if (level && !road && !hard) level = null;                 // закрився завод — нам не цікаво; дорога — цікаво
+  if (hard && STRIKE.test(s) && !UNSURE.test(s)) { level = 'red'; score = Math.max(score, 3.5); }   // приліт, вибух — червоним
   if (SPAM.test(s)) score -= 3;
   const town = feed.towns.some(x => { const n = townName(x); return n.length > 3 && s.includes(n.toLowerCase().slice(0, Math.max(4, n.length - 2))); });
   if (town) score += 1.5;
@@ -199,6 +207,7 @@ function ttl(it) {
   if (it.src === 'air') return it.level === 'green' ? 20 * 60e3 : 12 * 3600e3;   // жовта тривога живе, поки тривога триває
   if (it.imp) return 12 * 3600e3;
   if (it.src === 'stop') return 40 * 60e3;
+  if (it.src === 'rep') return 2 * 3600e3;                   // позначка водія живе 2 години
   if (it.src === 'wx' || it.src === 'drive') return 3 * 3600e3;
   return it.level === 'red' ? 3 * 3600e3 : it.level === 'green' ? 3600e3 : 2 * 3600e3;
 }
@@ -373,9 +382,18 @@ export const DEFAULT_CHANNELS = [
   { name: 'ternopilskaODA', region: 'ternopil', on: true },
   { name: 'khmelnytskaODA', region: 'khmelnytskyi', on: true },
   { name: 'zakarpatskaODA', region: 'zakarpattia', on: true },
-  { name: 'chernivetskaODA', region: 'chernivtsi', on: true }
+  { name: 'chernivetskaODA', region: 'chernivtsi', on: true },
+  // офіційні канали обласних військових адміністрацій, яких бракувало (перелік ОП / decentralization.gov.ua), і КМВА
+  { name: 'vinnytskaODA', region: 'vinnytsia', on: true },
+  { name: 'poltavskaOVA', region: 'poltava', on: true },
+  { name: 'Sumy_news_ODA', region: 'sumy', on: true },
+  { name: 'onyshchuksvitlana', region: 'ivano-frankivsk', on: true },
+  { name: 'mykolaivskaODA', region: 'mykolaiv', on: true },
+  { name: 'kirovohradskaODA', region: 'kirovohrad', on: true },
+  { name: 'luhanskaVTSA', region: 'luhansk', on: true },
+  { name: 'VA_Kyiv', region: 'kyiv', on: true }
 ];
-const CH_DEF_VER = 3;                  // збільшується, коли список поповнюється: нові канали додаються й тим, у кого вже є список
+const CH_DEF_VER = 4;                  // збільшується, коли список поповнюється: нові канали додаються й тим, у кого вже є список
 export function addDefaultChannels() {
   const have = new Set((S.channels || []).map(c => c.name.toLowerCase()));
   const add = DEFAULT_CHANNELS.filter(c => !have.has(c.name.toLowerCase())).map(c => ({ ...c }));
@@ -500,7 +518,8 @@ async function fetchAir() {
         if (a.alert_type && a.alert_type !== 'air_raid') continue;
         const id = oblastOf(a.location_oblast || a.location_title); if (!id) continue;
         const whole = a.location_type === 'oblast' || a.location_type === 'city';
-        if (whole || !out[id]) out[id] = { part: !whole };
+        const st = a.started_at ? new Date(a.started_at) : null, since = st && !isNaN(st) ? String(st.getHours()).padStart(2, '0') + ':' + String(st.getMinutes()).padStart(2, '0') : '';
+        if (whole || !out[id]) out[id] = { part: !whole, since };
       }
       return out;
     }
@@ -514,8 +533,8 @@ async function fetchAir() {
     if (!/in effect|триває|активна/i.test(line)) continue;
     hits++;
     const id = oblastOf(line); if (!id) continue;
-    const part = /raion|hromada|район|громад/i.test(line);
-    if (!part || !out[id]) out[id] = { part };
+    const part = /raion|hromada|район|громад/i.test(line), sm = line.match(/(?:since|з|с)\s+(\d{1,2}:\d{2})/i);
+    if (!part || !out[id]) out[id] = { part, since: sm ? sm[1].padStart(5, '0') : '' };
   }
   if (!hits && !/WARNING STATUS|no active|немає/i.test(r.text)) log('warn', 'тривоги: формат зведення змінився');
   return out;

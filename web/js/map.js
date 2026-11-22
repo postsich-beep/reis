@@ -11,6 +11,7 @@ import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
 import * as rough from './rough.js';
 import { vp, onMap as vpOnMap } from './vplaces.js';
+import { reps, REP_SVG } from './reports.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -80,7 +81,19 @@ function routeData(coords, route) {
 }
 export const ROUTE_COLORS = { a: '#2f6bff', b: '#0f9f9a', c: '#8b5cf6' };
 let puck = null, puckEl = null, wps = [], hzMarks = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
-const evMarks = new Map(), vpMarks = new Map();
+const evMarks = new Map(), vpMarks = new Map(), repMarks = new Map();
+// Позначки водіїв (ДТП, поліція, транспортна служба): значок у кружечку; торкнутися — що й коли
+export function drawReports() {
+  if (!map) return;
+  const keep = new Set();
+  for (const r of reps.list) {
+    keep.add(r.id); if (repMarks.has(r.id)) continue;
+    const el = document.createElement('button'); el.className = 'rpm rpm-' + r.t; el.innerHTML = REP_SVG[r.t] || ''; el.dataset.rep = r.id;
+    el.addEventListener('click', e => { e.stopPropagation(); bus.emit('repTap', r.id); });
+    repMarks.set(r.id, new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([r.lon, r.lat]).addTo(map));
+  }
+  for (const [id, m] of repMarks) if (!keep.has(id)) { m.remove(); repMarks.delete(id); }
+}
 // Перевірене місце: маленький бургер із золотою зіркою — відрізняється від кольорових кружечків піт-стопів
 const VP_ICON = { food: '<svg viewBox="0 0 32 32"><path d="M6 14a10 7 0 0 1 20 0z" fill="#f5a524"/><circle cx="12" cy="10" r=".9" fill="#fff6d6"/><circle cx="17" cy="8.6" r=".9" fill="#fff6d6"/><circle cx="20.5" cy="11" r=".9" fill="#fff6d6"/><path d="M5.5 15.6q2.6 1.8 5.2 0t5.3 0 5.3 0 5.2 0" stroke="#3fae49" stroke-width="2.2" fill="none" stroke-linecap="round"/><rect x="6" y="17.4" width="20" height="3.6" rx="1.8" fill="#7a2e12"/><path d="M6.5 22.4h19a1.5 1.5 0 0 1-1.6 3.1H8.1a1.5 1.5 0 0 1-1.6-3.1z" fill="#f5a524"/></svg>' };
 const VP_STAR = '<i class="vpm-star"><svg viewBox="0 0 24 24"><path d="M12 3.2l2.6 5.5 6 .7-4.5 4.1 1.2 5.9L12 16.5l-5.3 2.9 1.2-5.9L3.4 9.4l6-.7z" fill="#fff"/></svg></i>';
@@ -147,7 +160,8 @@ export function initMap() {
   bus.on('guide', drawProgress);
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
-  bus.on('vplaces', drawVerified); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); });
+  bus.on('vplaces', drawVerified);
+  bus.on('reports', drawReports); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); });
   bus.on('stopsdb', drawStops);
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   setInterval(drawEvents, 60000);

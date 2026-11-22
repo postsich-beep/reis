@@ -218,16 +218,35 @@ function netCorrect() {
   }
 }
 // Різкі повороти маршруту (перехрестя, з'їзди, кільця): де гіроскоп має «відчути» поворот.
-function findTurns(idx) {
-  const out = [], step = 15;
-  for (let d = 40; d < idx.total - 40; d += step) {
-    const a = idx.at(d - 35).brg, b = idx.at(d + 35).brg, ang = ((b - a + 540) % 360) - 180;
-    if (Math.abs(ang) < 50) continue;
-    const last = out[out.length - 1];
-    if (last && d - last.d < 80) { if (Math.abs(ang) > Math.abs(last.ang)) { last.d = d; last.ang = ang; } continue; }
-    out.push({ d, ang });
+// Контрольні точки маршруту — повороти від 40°: і різкі (перехрестя, 70 м), і з'їзди (160 м), і плавні дуги (до 320 м).
+// По них розрахункова позначка звіряється з гіроскопом: доганяє поворот або чекає, поки машина поверне.
+export const TURN_MIN = 40;
+const SPANS = [70, 160, 320];
+function dirAt(idx, d, back) {                         // напрям дороги на 30 м до (back) чи після точки — без дрібних зламів лінії
+  const a = idx.at(clamp(back ? d - 30 : d, 0, idx.total)), b = idx.at(clamp(back ? d : d + 30, 0, idx.total));
+  return hav(a, b) > 3 ? bearing(a, b) : a.brg;
+}
+export function findTurns(idx) {
+  const raw = [], step = 15;
+  for (let d = 50; d < idx.total - 50; d += step) {
+    for (const sp of SPANS) {
+      const d0 = d - sp / 2, d1 = d + sp / 2; if (d0 < 0 || d1 > idx.total) continue;
+      const ang = ((dirAt(idx, d1, false) - dirAt(idx, d0, true) + 540) % 360) - 180;
+      if (Math.abs(ang) >= TURN_MIN) { raw.push({ d, ang, sp }); break; }
+    }
   }
-  return out;
+  // сусідні точки одного повороту — одна контрольна точка: найкрутіша, посередині повороту
+  const out = [];
+  for (const t of raw) {
+    const last = out[out.length - 1];
+    if (last && Math.sign(last.ang) === Math.sign(t.ang) && t.d - last.end <= Math.max(60, t.sp / 2)) {
+      last.end = t.d; if (Math.abs(t.ang) > Math.abs(last.ang) + 2 || (Math.abs(t.ang) >= Math.abs(last.ang) - 2 && t.sp < last.sp)) { last.ang = t.ang; last.sp = t.sp; }
+      last.d = Math.round((last.start + last.end) / 2);
+      continue;
+    }
+    out.push({ d: t.d, ang: t.ang, sp: t.sp, start: t.d, end: t.d });
+  }
+  return out.map(t => ({ d: t.d, ang: Math.round(t.ang), sp: t.sp }));
 }
 // Гіроскоп відчув поворот: знаходимо такий самий поворот маршруту поблизу й ставимо позначку точно на нього.
 function onTurn(ang, ago) {
@@ -236,7 +255,7 @@ function onTurn(ang, ago) {
   const w = clamp(300 + 0.25 * (pos.drDist - pos.accRef) + pos.accBase, 400, 3000);
   let best = null;
   for (const t of turns) {
-    if (Math.abs(t.d - at) > w || Math.sign(t.ang) !== Math.sign(ang) || Math.abs(Math.abs(t.ang) - Math.abs(ang)) > 70) continue;
+    if (Math.abs(t.d - at) > w || Math.sign(t.ang) !== Math.sign(ang) || Math.abs(Math.abs(t.ang) - Math.abs(ang)) > Math.max(35, 0.6 * Math.abs(t.ang))) continue;
     if (!best || Math.abs(t.d - at) < Math.abs(best.d - at)) best = t;
   }
   if (!best) return;
@@ -247,13 +266,36 @@ function onTurn(ang, ago) {
   pos.accRef = pos.drDist; pos.accBase = 40; pos.acc = 40;
   bus.emit('pos', pos); bus.emit('turnMatch', { ang: Math.round(ang), d: Math.round(best.d) });
 }
+// Гіроскоп: поворот від 28° (було 50° — удвічі чутливіше), і різкий, і плавна дуга до 35 с.
+// Поворот рахуємо від спокійного курсу до спокійного курсу: обгін (туди й назад) і кільце «прямо» дають ~0 і не плутають.
+export const YAW_MIN = 28;
+export function detectTurn(hist, now) {
+  const n = hist.length; if (n < 3) return null;
+  const y = hist[n - 1].yaw;
+  let k = n - 2; while (k > 0 && now - hist[k].t < 1500) k--;                          // замір ~2 с тому (чи попередній, якщо рідше)
+  if (Math.abs(y - hist[k].yaw) > 5) return null;                                       // ще повертаємо — чекаємо кінця
+  let s = -1, best = 0;
+  for (let i = k; i >= 0; i--) {
+    const h = hist[i]; if (now - h.t > 40000) break;
+    const stable = (i < 1 || Math.abs(hist[i - 1].yaw - h.yaw) < 4) && (i < 2 || Math.abs(hist[i - 2].yaw - h.yaw) < 6);
+    const dy = y - h.yaw;
+    if (stable && Math.abs(dy) >= YAW_MIN && Math.abs(dy) > Math.abs(best) + 2) { best = dy; s = i; }
+  }
+  if (s < 0) return null;
+  // початок — останній спокійний замір перед поворотом; кінець — перший замір, де курс уже майже остаточний
+  let a = s; while (a + 1 < n && Math.abs(hist[a + 1].yaw - hist[s].yaw) < 3) a++;
+  let e = a; while (e < n - 1 && Math.abs(y - hist[e].yaw) > 4) e++;
+  return { dy: best, ago: (now - (hist[a].t + hist[e].t) / 2) / 1000 };
+}
 function onYaw(yaw) {
   const now = Date.now();
-  yawHist.push({ t: now, yaw }); while (yawHist.length && now - yawHist[0].t > 30000) yawHist.shift();
-  if (!moving || now - lastTurnEv < 8000) return;
-  const old = yawHist.find(x => now - x.t <= 14000); if (!old || now - old.t < 6000) return;
-  const dy = yaw - old.yaw;
-  if (Math.abs(dy) >= 50) { lastTurnEv = now; gyroSeen = now; yawHist = [{ t: now, yaw }]; onTurn(dy, (now - old.t) / 2000); }
+  yawHist.push({ t: now, yaw }); while (yawHist.length && now - yawHist[0].t > 45000) yawHist.shift();
+  const n = yawHist.length;
+  if (n >= 4 && Math.abs(yaw - yawHist[n - 4].yaw) > 6) { moving = true; stillT = 0; }     // машина крутиться — отже, їде
+  if (!moving || now - lastTurnEv < 4000) return;
+  const tr = detectTurn(yawHist, now); if (!tr) return;
+  lastTurnEv = now; gyroSeen = now; yawHist = [{ t: now, yaw }];
+  onTurn(tr.dy, tr.ago);
 }
 // Поточна швидкість розрахунку: водій сказав → чесна швидкість GPS → Wi-Fi; стоїмо — 0.
 function curSpeed() {
@@ -543,8 +585,9 @@ function onSens(s) {
   if (pos.mode === 'gps' && Date.now() - lastFixT < 2500) {
     if (pos.spd < 0.5) varStop = ema(varStop, s.var); else if (pos.spd > 5) varMove = ema(varMove, s.var);
   }
-  const thr = (varStop != null && varMove != null && varMove > 2.5 * varStop) ? Math.sqrt(varStop * varMove) : 0.004;
-  if (s.var > thr) { moving = true; stillT = 0; } else if (++stillT >= 4) moving = false;
+  // поріг «їдемо» — ближче до рівня стоянки (чутливіше удвічі, ніж середнє геометричне); «стоїмо» — лише після 6 с спокою
+  const thr = (varStop != null && varMove != null && varMove > 2.5 * varStop) ? varStop * Math.pow(varMove / varStop, 0.3) : 0.002;
+  if (s.var > thr) { moving = true; stillT = 0; } else if (++stillT >= 6) moving = false;
 }
 
 // AGC і C/N0: поки GPS справжній — вчимо еталон телефона; далі порівнюємо. Глушіння: обидва падають.
@@ -587,7 +630,7 @@ export function start() {
   } catch (_) {}
 }
 export const routeTurns = () => turns.slice();
-export const debugState = () => ({ vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen });
+export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
   return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };

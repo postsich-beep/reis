@@ -35,15 +35,18 @@
 <div id="quick" role="dialog" hidden></div>
 <!-- «Моє місце» зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->
 <div id="zoom">
+  <!-- позначити подію на дорозі: ДТП, поліція, транспортна служба (бачать усі водії 2 години) -->
+  <button class="rb" id="bReport"></button>
   <button class="rb" id="bCenter" hidden></button>
 </div>
 
-<div id="speed"><b id="spdVal">0</b><span id="spdUnit"></span></div>
+<div id="speed"><b id="spdVal">0</b><span id="spdUnit"></span><i id="spdLim" hidden></i></div>
 <div id="spdPop" hidden></div>
 <div id="wherePop" hidden></div>
 <div id="photoView" hidden></div>
 <!-- вибір варіанта маршруту: карта з обома варіантами зверху, дві карточки й кнопки внизу -->
 <section id="routePick" hidden></section>
+<section id="repSheet" role="dialog" hidden></section>
 <div id="cam" hidden><div class="sign" id="camMax"></div><div><span id="camDist"></span><small id="camLbl"></small></div></div>
 <div id="pick" hidden></div>
 
@@ -64,7 +67,7 @@
     <button data-panel="feed"></button>
     <button data-panel="places"></button>
     <button data-panel="trip" class="main"></button>
-    <button data-panel="lab"></button>
+    <button data-panel="gps" id="tabGps"></button>
     <button data-panel="settings"></button>
   </div>
 </footer>
