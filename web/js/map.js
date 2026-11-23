@@ -178,6 +178,19 @@ export function initMap() {
   return map;
 }
 
+/* ---------- чиста карта для екранів маршруту ---------- */
+// Вибір варіанта маршруту і «Маршрут» у дорозі відкриваються без допоміжних позначок (піт-стопи, плашки АЗС, камери,
+// події, перевірені місця, позначки водіїв, проблемні місця): видно лише дороги, області й сам маршрут із точками А, Б, С.
+// Кнопкою на тих екранах позначки можна повернути.
+const AUX_LAYERS = ['stops-major', 'stops-all', 'fuel-label', 'poi-dot', 'marks-dot', 'rough-dot'];
+let clean = false;
+export function setClean(on) {
+  clean = !!on; document.body.classList.toggle('map-clean', clean);     // DOM-позначки (.rpm, .vpm, .evm, .hzm) ховає CSS
+  if (!map) return;
+  for (const id of AUX_LAYERS) if (map.getLayer(id)) map.setLayoutProperty(id, 'visibility', clean ? 'none' : 'visible');
+}
+export const isClean = () => clean;
+
 /* ---------- кружечок не потрібен, коли назву вже видно ---------- */
 // Наближено над АЗС стоїть плашка з назвою мережі, а біля кафе, мотелю чи стоянки карта сама пише назву.
 // Кружечок поруч із назвою лише рябить — ховаємо його (натиснути на місце можна, як і раніше).
@@ -324,6 +337,7 @@ function addLayers() {
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
   doneD = -1; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks();
+  if (clean) setClean(true);
 }
 
 /* ---------- день / ніч ---------- */

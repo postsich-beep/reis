@@ -55,6 +55,8 @@ export const ICON = {
   shower: I('<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.5 8h7"/><path d="M12 12v.01M15 12v.01M18 12v.01M12.5 15v.01M15.5 15v.01M18.5 15v.01M13 18v.01M16 18v.01M19 18v.01"/>'),
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
   plus: I('<path d="M12 5v14M5 12h14"/>', 'stroke-width="2.6"'),
+  // трикутник «позначити подію» в нижній панелі: помаранчевий із білим знаком оклику
+  warnTab: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#f59e0b" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#fff"/></svg>',
   warnTri: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#fff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#e8890c" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#e8890c"/></svg>',
   cam: I('<rect x="3" y="8" width="13" height="9" rx="2"/><path d="m16 11 5-3v9l-5-3"/>')
 };

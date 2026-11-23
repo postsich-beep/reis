@@ -97,7 +97,6 @@ body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) 
 #bAcceptGps{width:100%;min-height:44px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px;margin-bottom:6px}
 .tb-row{display:flex;align-items:baseline;gap:10px;min-width:0}
 .tb-row span{font-size:14px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.tb-lost{display:block;max-width:100%;text-align:left;margin-top:3px;font:700 15px/1.2 var(--f-num);letter-spacing:.02em;color:var(--red);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
 .nudge{flex:none;display:flex;flex-direction:column;gap:6px}
 .nudge button{width:88px;height:40px;border-radius:999px;border:2px solid var(--ink-2);background:var(--panel);color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px;font:800 20px/1 var(--f-num)}
 .nudge button svg{width:18px;height:18px}
@@ -322,7 +321,6 @@ body[data-theme="night"]{
 .spd-grid button.on{background:var(--ink);color:var(--panel)}
 .spd-grid button.wide{grid-column:1/-1;font:600 16px var(--f-ui)}
 .spd-grid button[data-v="0"]{font:600 17px var(--f-ui)}
-#lostLine{font-family:var(--f-ui)}
 @media (orientation:landscape){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}
@@ -394,7 +392,6 @@ body[data-theme="night"]{
 }
 /* адаптивність (1.0.19): «Моє місце» не налазить на ⓘ; рядок втрати GPS — достатньо високий для пальця */
 #zoom{bottom:calc(var(--bh,150px) + 30px)}
-.tb-lost{min-height:30px;line-height:30px;margin-top:0}
 @media (orientation:landscape){
   #rail{right:10px;top:calc(var(--st) + 10px)}
   #zoom{bottom:30px}
@@ -478,7 +475,7 @@ body[data-theme="night"]{
 .rp-btns .btn.pri{flex:1.6;gap:6px}
 .rp-btns .btn svg{width:20px;height:20px}
 .rp-btns .rp-x{flex:0 0 50px;padding:0}
-body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hidden}
+body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibility:hidden}
 @media (orientation:landscape){
   #routePick{left:auto;width:calc(46% - 16px)}
 }
@@ -531,11 +528,6 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
 #tabs{grid-template-columns:1fr 1fr 66px 1fr 1fr}
 #tabs button.main .mc{width:46px;height:46px;margin-top:-14px}
 #tabs button.main .mc svg{width:25px;height:25px}
-#tabs .gc{width:30px;height:30px;border-radius:50%;display:grid;place-items:center;border:2.5px solid currentColor}
-#tabs .gc svg{width:20px;height:20px}
-#tabGps.g-ok{color:#2f9e62}#tabGps.g-bad{color:var(--red)}
-#tabGps.g-ok .gc{background:rgba(47,158,98,.16)}#tabGps.g-bad .gc{background:rgba(229,72,77,.16)}
-#tabGps span:last-child{font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 #gpsChip{display:none!important}
 .tb-row span{font:700 19px/1.15 var(--f-num);color:var(--ink);letter-spacing:.01em}
 /* «Маршрут» у дорозі (1.1.4): залишок маршруту на карті, три кнопки */
@@ -554,8 +546,6 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
 .ts-sugg b{display:block;font-size:15px}.ts-sugg small{color:var(--ink-2);font-size:12px}
 @media (orientation:landscape){ .ts-kv b{font-size:18px} .ts-kv>div{padding:5px} }
 /* позначки водіїв (1.1.4): помаранчева кнопка-трикутник, шторка з трьома великими кнопками, значки на карті */
-#bReport{background:#f59e0b;border-color:#f59e0b;width:56px;height:56px;border-radius:50%;box-shadow:var(--shadow)}
-#bReport svg{width:30px;height:30px}
 #repSheet{position:absolute;left:8px;right:8px;bottom:calc(var(--sb) + 8px);z-index:12;padding:12px 14px 14px;border-radius:22px;background:#1f2329;color:#f1f3f5;box-shadow:0 -6px 30px rgba(0,0,0,.45)}
 #repSheet .q-head b{font-size:22px}
 #repSheet .q-x{color:#f1f3f5}
@@ -611,3 +601,31 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop){visibility:hid
   #rail{flex-direction:row-reverse}
   #bLayers{margin-top:0;margin-right:9px}
 }
+/* ---- 1.1.6 ---- */
+/* GPS і трикутник помінялись місцями: кружечок GPS — справа над картою (зелений — сигнал є, червоний — немає),
+   трикутник «позначити подію» — у нижній панелі */
+#bGps{width:56px;height:56px;border-radius:50%;border:3px solid currentColor;box-shadow:var(--shadow)}
+#bGps svg{width:30px;height:30px}
+#bGps.g-ok{color:#2f9e62}
+#bGps.g-bad{background:var(--red);border-color:var(--red);color:#fff;text-shadow:none}
+#bGps.g-bad svg{filter:none}
+#tabs #tabRep svg{width:30px;height:30px;filter:none}
+#tabRep span:last-child{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* екрани маршруту: карта без допоміжних позначок; кнопка над «+» їх повертає */
+body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
+.rp-zoom .rp-mk{position:relative}
+.rp-zoom .rp-mk svg{width:28px;height:28px}
+.rp-zoom .rp-mk:not(.on) svg{opacity:.5}
+.rp-zoom .rp-mk:not(.on)::after{content:"";position:absolute;left:8px;right:8px;top:50%;height:3px;margin-top:-1.5px;border-radius:2px;background:var(--ink);transform:rotate(-45deg);box-shadow:0 0 0 1.5px var(--panel)}
+.rp-zoom .rp-mk.on{background:var(--ink);color:var(--panel)}
+/* низький екран (портрет): чотири кнопки стовпчика трохи менші, щоб не діставати до верхньої плашки */
+@media (orientation:portrait) and (max-height:620px){
+  .rp-zoom{gap:6px}
+  .rp-zoom button{width:44px;height:44px}
+}
+/* альбомна: поки відкрито екран маршруту, плашки-повідомлення не заходять під стовпчик кнопок і шторку */
+@media (orientation:landscape){
+  body:has(#routePick:not([hidden])) #toasts{right:auto;width:calc(54% - 70px)}
+}
+/* «Контрольна точка» не обрізається на вузькій шторці — переноситься на два рядки */
+.ts-btns .btn{white-space:normal;line-height:1.15;text-align:center;padding:4px 8px}

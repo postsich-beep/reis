@@ -38,9 +38,12 @@ function staticLabels() {
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
-  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', gps: 'tabGps', settings: 'qSettings' };
-  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, gps: ICON.gpsSig, settings: ICON.gear };
-  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : p === 'gps' ? `<span class="gc">${icons[p]}</span>` : icons[p]) + `<span${p === 'gps' ? ' id="tabGpsL"' : ''}>` + t(names[p]) + '</span>'; });
+  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', settings: 'qSettings' };
+  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, settings: ICON.gear };
+  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
+  // трикутник «позначити подію» — у нижній панелі, кружечок GPS — справа над картою (1.1.6: помінялись місцями)
+  $('tabRep').innerHTML = ICON.warnTab + '<span>' + t('tabRep') + '</span>'; $('tabRep').setAttribute('aria-label', t('repBtn'));
+  $('bGps').innerHTML = ICON.gpsSig;
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
@@ -183,9 +186,10 @@ function hud() {
   else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
   else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
   else { chip.className = 'chip none'; $('gpsText').textContent = t('gpsWait'); }
-  // кружечок GPS у нижній панелі: є справжній GPS — зелений, немає — червоний
-  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('tabGps');
-  if (tg) { tg.classList.toggle('g-ok', gOk); tg.classList.toggle('g-bad', !gOk); const l = $('tabGpsL'); if (l) l.textContent = gOk ? (pos.acc != null ? '±' + accText(pos.acc) : 'GPS') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps'); }
+  // кружечок GPS справа над картою: є справжній GPS — зелений, немає — червоний; подробиці — за дотиком (і в підписі для читання з екрана)
+  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('bGps');
+  tg.classList.toggle('g-ok', gOk); tg.classList.toggle('g-bad', !gOk);
+  let gLbl = gOk ? 'GPS' + (pos.acc != null ? ' ±' + accText(pos.acc) : '') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps');
   // GPS шукає вже хвилину, а геолокація ввімкнена — швидше за все, телефон у приміщенні
   if (pos.mode === 'gps' || pos.mode === 'dr' || pos.sim) searchSince = Date.now();
   else if (!indoorHinted && !off && Date.now() - searchSince > 60000) { indoorHinted = true; toast(t('gpsIndoor'), 'yellow', 12000, () => openPanel('gps')); }
@@ -194,19 +198,21 @@ function hud() {
   const lost = pos.mode === 'dr';
   if (lost !== lostShown) {
     lostShown = lost;
-    $('nudge').hidden = !lost; $('lostLine').hidden = !lost; $('gpsChip').hidden = lost;
+    $('nudge').hidden = !lost; $('gpsChip').hidden = lost;
     if (!lost) $('bAcceptGps').hidden = true;
     requestAnimationFrame(layoutVars);
   }
   if (lost) {
     const ms = manualSpeed();
-    $('lostLine').textContent = 'GPS ✕ ' + fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ±' + accText(pos.acc)
+    // червоного рядка під часом прибуття більше немає (1.1.6) — подробиці лишились у підписі кружечка GPS і на екрані «GPS»
+    gLbl = 'GPS ✕ ' + fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ±' + accText(pos.acc)
       + (pos.reason === 'spoof' ? ' · ' + t('spoofShort') : pos.reason === 'manual' ? ' · ' + t('manualShort') : '')
       + (pos.onRoute ? ' · ' + t('onRouteShort') : '') + (ms != null ? ' · ' + (ms === 0 ? t('standShort') : ms + ' ' + t('kmh')) : '');
     const b = $('bAcceptGps'), show = !!pos.pending;
     if (b.hidden === show) { b.hidden = !show; requestAnimationFrame(layoutVars); }
     if (show) b.textContent = pos.reason === 'manual' ? t('backToGps') : t('acceptGps', fmtDist(pos.pending.d));
   }
+  if (tg.getAttribute('aria-label') !== gLbl) tg.setAttribute('aria-label', gLbl);
 
   // картка маневру
   const man = $('man'), stripEl = $('strip');
@@ -458,10 +464,21 @@ function selectAlt(i) {
   hud(); refresh('trip'); loadRegions(tr);
   if (!$('routePick').hidden) pickShow();
 }
+/* ---------- екрани маршруту відкриваються з чистою картою ---------- */
+// І вибір варіанта, і «Маршрут» у дорозі показують лише дороги, області й сам маршрут — без кольорових кружечків
+// піт-стопів, камер, подій та інших позначок. Хто хоче — вмикає їх кнопкою над «+»; закрили екран — наступного разу знову чисто.
+let rpMarks = false;
+const rpMarksBtn = () => `<button data-rp="marks" class="rp-mk${rpMarks ? ' on' : ''}" aria-pressed="${rpMarks}" aria-label="${t(rpMarks ? 'rpMarksHide' : 'rpMarksShow')}">${ICON.layersPin}</button>`;
+function rpSync() { const open = !$('routePick').hidden; if (!open) rpMarks = false; mapM.setClean(open && !rpMarks); }
+function rpMarksToggle(b) {
+  rpMarks = !rpMarks; rpSync();
+  b.classList.toggle('on', rpMarks); b.setAttribute('aria-pressed', String(rpMarks)); b.setAttribute('aria-label', t(rpMarks ? 'rpMarksHide' : 'rpMarksShow'));
+  toast(t(rpMarks ? 'rpMarksOn' : 'rpMarksOff'), '', 2500);
+}
 /* ---------- вибір варіанта, як у BlindDriver: карта з обома маршрутами зверху, дві карточки й кнопки знизу ---------- */
 function pickHtml() {
   const tr = plan.trip;
-  return `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
+  return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <div class="rp-head"><i class="rp-t a">А</i><b>${esc(tr.a.label || '')}</b>${tr.v ? `<i class="rp-t v">Б</i><b>${esc(tr.v.label || '')}</b>` : ''}<i class="rp-t b">С</i><b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
     ${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
@@ -508,7 +525,7 @@ function tsHtml() {
   const pin = (cls, l, p) => p ? `<i class="rp-t ${cls}">${l}</i><b>${esc(p.label || '')}</b>` : '';
   const via = ts.via ? `<div class="ts-via"><input id="tsViaIn" placeholder="${esc(t('tsViaPh'))}" value="${esc(ts.q)}" autocomplete="off" enterkeyhint="search">
       <div class="ts-sugg">${ts.sugg.map((x, i) => `<button data-tsg="${i}"><b>${esc(x.label)}</b><small>${esc(x.sub || '')}</small></button>`).join('')}</div></div>` : '';
-  return `${ts.via ? '' : `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>`}
+  return `${ts.via ? '' : `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>`}
     <div class="rp-head">${pin('a', 'А', tr.a)}${pin('v', 'Б', tr.v)}${pin('b', 'С', tr.b)}<button class="ts-more" data-ts="details">${t('details')}</button></div>
     ${tsKvHtml()}
     ${via}
@@ -544,6 +561,7 @@ function tsClick(e) {
   if (sg) { const p = ts.sugg[+sg.dataset.tsg]; if (p) { setVia({ lat: p.lat, lon: p.lon, label: p.label }); toast(t('tsViaDone', p.label), 'green', 6000); ts.via = false; ts.q = ''; ts.sugg = []; tsRender(); } return; }
   const b = e.target.closest('[data-ts],[data-rp]'); if (!b) return;
   const k = b.dataset.ts || b.dataset.rp;
+  if (k === 'marks') { rpMarksToggle(b); return; }
   if (k === 'zin' || k === 'zout') { zoomBy(k === 'zin' ? 1 : -1); return; }
   if (k === 'fit') { tsFit(); return; }
   if (k === 'via') { ts.via = !ts.via; tsRender(); requestAnimationFrame(tsFit); if (ts.via) { const i = $('tsViaIn'); if (i) i.focus(); } return; }
@@ -562,6 +580,7 @@ function pickClick(e) {
   const c = e.target.closest('[data-alt]'); if (c) { selectAlt(+c.dataset.alt); return; }
   const b = e.target.closest('[data-rp]'); if (!b || !plan.trip) return;
   const k = b.dataset.rp;
+  if (k === 'marks') { rpMarksToggle(b); return; }
   if (k === 'zin' || k === 'zout') { zoomBy(k === 'zin' ? 1 : -1); return; }
   if (k === 'fit') { pickFit(); return; }
   if (k === 'go') { pickHide(); goTrip(plan.trip); }
@@ -1079,9 +1098,11 @@ export function initUI() {
   document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick,#bLayers')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
-  $('bReport').innerHTML = ICON.warnTri; $('bReport').setAttribute('aria-label', t('repBtn'));
-  $('bReport').onclick = e => { e.stopPropagation(); repOpen($('repSheet').hidden); };
+  $('tabRep').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); repOpen($('repSheet').hidden); };
+  $('bGps').onclick = e => { e.stopPropagation(); currentPanel() === 'gps' ? closePanel() : openPanel('gps'); };
   $('repSheet').onclick = repClick;
+  // екран маршруту відкрили чи закрили (будь-яким шляхом) — карта чиста або знову з позначками
+  new MutationObserver(rpSync).observe($('routePick'), { attributes: true, attributeFilter: ['hidden'] });
   bus.on('repTap', id => { const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repAgo(r)), REP_TYPES[r.t].level, 6000); });
   // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
   for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
@@ -1126,7 +1147,6 @@ export function initUI() {
   document.addEventListener('pointerdown', e => { if (!$('spdPop').hidden && !e.target.closest('#spdPop,#speed')) $('spdPop').hidden = true; });
   $('bAcceptGps').onclick = acceptPending;
   $('gpsChip').onclick = () => openPanel('gps');
-  $('lostLine').onclick = () => openPanel('gps');
 
   $('photoView').onclick = e => { if (e.target.closest('[data-pv="x"]') || e.target === $('photoView')) $('photoView').hidden = true; };
 }
