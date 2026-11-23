@@ -437,7 +437,7 @@ if (run('1')) try {
   ok('проїзд на вулиці навхрест і міст 55 т не вважаються проблемою', !/3,8 м/.test(tk) && !/55 т/.test(tk));
   const rmap = await app(page, async () => { const m = window.__app.map.map; const d = await m.getSource('route').getData(); const bad = await m.getSource('route-bad').getData();
     return { cats: (d.features || []).map(f => f.properties.c).join(''), bad: bad.features.length, marks: [...document.querySelectorAll('.hzm')].map(x => x.textContent + ':' + x.className) }; });
-  ok('карта: маршрут розфарбовано за категоріями, ґрунт — пунктиром, на мосту значок «20т»', /a/.test(rmap.cats) && /c/.test(rmap.cats) && rmap.bad === 1 && rmap.marks.some(x => /^20т:.*red/.test(x)), JSON.stringify(rmap));
+  ok('карта: маршрут розфарбовано за категоріями, ґрунт — пунктиром, на мосту значок «15т»', /a/.test(rmap.cats) && /c/.test(rmap.cats) && rmap.bad === 1 && rmap.marks.some(x => /^15т:.*red/.test(x)), JSON.stringify(rmap));
   await shot(page, '02-plan');
   // варіанти маршруту карточками; вибір — сірий інший варіант на карті; повертаємось до першого
   const alts = await page.$$eval('#planSum .alt', e => e.map(x => x.textContent.replace(/\s+/g, ' ').trim()));
@@ -679,7 +679,7 @@ if (run('1')) try {
     const h = await W.heatAlong(route), w0 = S.truck.weight; const light = W.heatApplies(); S.truck = { ...S.truck, weight: 40 }; const heavy = W.heatApplies(); S.heatExempt = true; const ex = W.heatApplies(); S.heatExempt = false; S.truck = { ...S.truck, weight: w0 };
     return { maxT: h && h.maxT, first: !!(h && h.first), heavy, ex, light };
   });
-  ok('спека: прогноз +31 °C на маршруті; наша фура 20 т — без обмеження (воно для фур понад 24 т); 40 т — обмеження, пільговий вантаж — без', heat.maxT === 31 && heat.first && heat.light === false && heat.heavy === true && heat.ex === false, JSON.stringify(heat));
+  ok('спека: прогноз +31 °C на маршруті; обмеження діє і для нашої фури 20 т (на вісь 11,5 т — понад 7 т), і для 40 т; пільговий вантаж — без', heat.maxT === 31 && heat.first && heat.light === true && heat.heavy === true && heat.ex === false, JSON.stringify(heat));
   // тряска за датчиками: калібрування і погана ділянка
   const rg = await app(page, () => {
     const R = window.__app.rough, base = [49.70, 35.00];
