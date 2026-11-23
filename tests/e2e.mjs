@@ -1893,7 +1893,7 @@ if (run('19')) try {
   const pl = () => app(page, () => ({ chips: [...document.querySelectorAll('.pl-chip')].map(b => b.dataset.plc + (b.classList.contains('on') ? '+' : '-')), rows: [...document.querySelectorAll('.pl-row')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), txt: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
   let st = await pl();
   ok('«Місця»: угорі шість квадратиків — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені; АЗС увімкнено (як на карті)', st.chips.length === 6 && st.chips[0] === 'fuel+' && st.chips[1] === 'food-', JSON.stringify(st.chips));
-  ok('увімкнено АЗС — список найближчих АЗС попереду в рейсі з відстанню', st.rows.length >= 1 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
+  ok('увімкнено АЗС — список найближчих АЗС попереду в рейсі з відстанню', st.rows.length >= 1 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3,0 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
   await shot(page, '20-places-chips');
   await page.click('.pl-chip[data-plc="food"]'); await sleep(300); st = await pl();
   ok('торкнулись «Їжа» — у списку кафе, і на карті їжу ввімкнено', st.chips[1] === 'food+' && st.rows.some(r => /Кафе Дорога/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.food === true), JSON.stringify(st.rows));
