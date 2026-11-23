@@ -1,0 +1,329 @@
+// Ведення без GPS по рейсу: «хмара» можливих положень фури (частинковий фільтр). Без DOM — те саме працює й на стенді.
+//
+// Кожна частинка — своя гіпотеза «де фура на рейсі і як швидко їде». Щосекунди всі рухаються за фізикою фури:
+// розгін ~0,45 м/с², гальмування до ~1,3 м/с², у поворотах повільно (90° перехрестя фура проходить на 15–20 км/год,
+// далі знову розганяється до планової швидкості ділянки). А гіроскоп відсіює ті, що не збігаються з дорогою:
+//  • телефон відчув поворот, а частинка за ці секунди поворотів рейсу не проїхала — відпадає (позначка доганяє поворот);
+//  • частинка «проскочила» перехрестя, а фура не повертала — теж відпадає (позначка чекає перед поворотом);
+//  • довга дуга траси (50–60° на кілометр) звіряється так само, як і перехрестя, — за тим, як курс змінюється в часі.
+// Рейс без GPS не змінюється, тож усі повороти попереду — відомі контрольні точки.
+//
+// Контрольні точки для водія (показуємо на карті без GPS):
+//  • червоні — різкі, на коротких метрах (перехрестя, світлофори, кільця, крутий з'їзд): звірка майже напевно;
+//  • жовті — довгі дуги й плавні з'їзди від 35°.
+
+const R2D = 180 / Math.PI, D2R = Math.PI / 180;
+const brg = (a, b) => { const y = Math.sin((b.lon - a.lon) * D2R) * Math.cos(b.lat * D2R), x = Math.cos(a.lat * D2R) * Math.sin(b.lat * D2R) - Math.sin(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.cos((b.lon - a.lon) * D2R); return (Math.atan2(y, x) * R2D + 360) % 360; };
+const dist = (a, b) => { const kx = Math.cos(a.lat * D2R) * 111320; return Math.hypot((b.lon - a.lon) * kx, (b.lat - a.lat) * 110540); };
+const clamp = (v, a, b) => v < a ? a : v > b ? b : v;
+
+/* ---------- курс рейсу як функція відстані (не загорнутий: кільце — це справді 360°) ---------- */
+export function headingProfile(idx, step = 5) {
+  const n = Math.max(2, Math.ceil(idx.total / step) + 1), H = new Float32Array(n);
+  let acc = null;
+  for (let k = 0; k < n; k++) {
+    const d = k * step, a = idx.at(clamp(d - 10, 0, idx.total)), b = idx.at(clamp(d + 10, 0, idx.total));
+    const h = dist(a, b) > 1 ? brg(a, b) : (acc == null ? 0 : ((acc % 360) + 360) % 360);
+    if (acc == null) acc = h; else { let dd = h - (((acc % 360) + 360) % 360); dd = ((dd + 540) % 360) - 180; acc += dd; }
+    H[k] = acc;
+  }
+  return { step, n, H, total: idx.total, at(d) { const x = clamp(d / step, 0, n - 1), i = Math.floor(x), f = x - i; return i >= n - 1 ? H[n - 1] : H[i] + (H[i + 1] - H[i]) * f; } };
+}
+
+/* ---------- контрольні точки: де дорога повертає від 35° ---------- */
+export const CP_MIN = 35;
+export function controlPoints(prof) {
+  const { step, n, H } = prof, curv = new Float32Array(n);
+  for (let k = 2; k < n - 2; k++) curv[k] = (H[k + 2] - H[k - 2]) / (4 * step);          // °/м
+  const segs = []; let cur = null;
+  for (let k = 0; k < n; k++) {
+    const on = Math.abs(curv[k]) > 0.025;                                                     // радіус менший ~2,3 км
+    if (on) { if (cur && (k - cur.k1) * step <= 60) cur.k1 = k; else { if (cur) segs.push(cur); cur = { k0: k, k1: k }; } }
+  }
+  if (cur) segs.push(cur);
+  const out = [];
+  for (const s of segs) {
+    const k0 = Math.max(0, s.k0 - 2), k1 = Math.min(n - 1, s.k1 + 2), h0 = H[k0];
+    let amp = 0; for (let k = k0; k <= k1; k++) amp = Math.max(amp, Math.abs(H[k] - h0));
+    const net = H[k1] - h0, len = (k1 - k0) * step;
+    if (Math.max(amp, Math.abs(net)) < CP_MIN) continue;
+    out.push({ d0: k0 * step, d1: k1 * step, d: Math.round((k0 + k1) / 2 * step), ang: Math.round(net), amp: Math.round(amp), len: Math.round(len),
+      cls: amp >= 60 && len <= 160 ? 'red' : 'yellow' });
+  }
+  return out;
+}
+
+/* ---------- фізика фури вздовж рейсу: планова швидкість ділянки і стеля в поворотах ---------- */
+const STEP_V = 10;
+function speedProfile(prof, planFn, vmax, aLat) {
+  const total = prof.total, n = Math.ceil(total / STEP_V) + 1, plan = new Float32Array(n), cap = new Float32Array(n);
+  for (let k = 0; k < n; k++) {
+    const d = k * STEP_V;
+    plan[k] = clamp(planFn ? planFn(d) : 16.7, 3, vmax);
+    const kap = Math.abs(prof.at(d + 8) - prof.at(d - 8)) * D2R / 16;                      // рад/м
+    cap[k] = Math.min(vmax, kap > 1e-5 ? Math.sqrt(aLat / kap) : vmax);
+  }
+  for (let k = n - 2; k >= 0; k--) cap[k] = Math.min(cap[k], Math.sqrt(cap[k + 1] * cap[k + 1] + 2 * 1.0 * STEP_V));   // загальмувати заздалегідь
+  return { n, plan, cap, at: (arr, d) => arr[clamp(Math.round(d / STEP_V), 0, n - 1)] };
+}
+
+/* ---------- сама хмара ---------- */
+export const PF_DEFAULTS = {
+  N: 1000, hist: 64, windows: [3, 8, 20, 40, 60], slow: 0.1, regime: 0.001, cluster: 400, clusterMass: 0.6, alpha: 0.3, sig0: 10, sigK: 0.06, eps: 0.03, rateGain: 0.25, mWalk: 0.003, supportMin: 0.12, slowEnd: 0.003, seedShare: 0.4,
+  aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, mLo: 0.82, mHi: 1.18, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
+};
+export class RouteTracker {
+  constructor(idx, o = {}) {
+    this.o = { ...PF_DEFAULTS, ...o };
+    this.idx = idx; this.prof = headingProfile(idx); this.cps = controlPoints(this.prof);
+    this.vmax = o.vmax || 25; this.sp = speedProfile(this.prof, o.planFn, this.vmax, this.o.aLat);
+    const N = this.o.N, Hn = this.o.hist;
+    this.d = new Float64Array(N); this.v = new Float32Array(N); this.m = new Float32Array(N); this.w = new Float64Array(N);
+    this.hd = new Float32Array(N * Hn); this.ht = new Float64Array(Hn); this.hi = 0; this.hn = 0;
+    this.yaw = []; this.bias = 0; this.handledUntil = 0; this.on = false; this.seed = 1234567;
+    this.est = { d: 0, v: 0, sig: 0, w: 0 }; this.mode = null; this.stuck = { t: 0, d: 0 }; this.trust = 1;
+  }
+  // темп частинки відносно плану: здебільшого «як завжди» (0,82–1,18), а частина — повільно (затор, ремонт, 10–80%)
+  pickM(base = null) {
+    const o = this.o;
+    if (base == null && this.rnd() < o.slow) return 0.1 + 0.7 * this.rnd();
+    return base != null ? clamp(base + this.gauss() * 0.06, o.mLo - 0.1, o.mHi + 0.1) : o.mLo + (o.mHi - o.mLo) * this.rnd();
+  }
+  rnd() { this.seed = (this.seed * 1103515245 + 12345) % 2147483648; return this.seed / 2147483648; }
+  gauss() { let u = 0, v = 0; while (u === 0) u = this.rnd(); v = this.rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
+  // старт: де фура (± sig) і як їде (± sv). Чесна швидкість GPS перед втратою каже, як цей водій їде відносно плану:
+  // 85 там, де план 80, — і далі хмара тримає такий самий темп (на трасі, у місті — пропорційно).
+  init(d, sig, v, sv, t, known = false) {
+    const N = this.o.N, pl = this.sp.at(this.sp.plan, d);
+    const mc = known && v > 3 && pl > 3 ? clamp(v / pl, this.o.mLo, this.o.mHi) : null;
+    this.mMed = mc; this.lbar = null; this.bias = this.bias || 0;
+    for (let i = 0; i < N; i++) {
+      this.d[i] = clamp(d + this.gauss() * sig, 0, this.idx.total); this.v[i] = clamp(v + this.gauss() * sv, 0, this.vmax);
+      this.m[i] = mc != null && this.rnd() >= this.o.slow ? this.pickM(mc) : this.pickM(); this.w[i] = 1 / N;
+    }
+    this.hn = 0; this.hi = 0; this.on = true; this.mode = null; this.stuck = { t, d }; this.trust = 1;
+    this.pushHist(t); this.estimate();
+  }
+  pushHist(t) {
+    const N = this.o.N, Hn = this.o.hist, j = this.hi;
+    for (let i = 0; i < N; i++) this.hd[i * Hn + j] = this.d[i];
+    this.ht[j] = t; this.hi = (j + 1) % Hn; this.hn = Math.min(Hn, this.hn + 1);
+  }
+  histIdx(t) {                                       // заміри історії, найближчий до моменту t (±0,6 с)
+    const Hn = this.o.hist; let best = -1, bd = 0.6;
+    for (let k = 0; k < this.hn; k++) { const j = (this.hi - 1 - k + Hn) % Hn, dd = Math.abs(this.ht[j] - t); if (dd < bd) { bd = dd; best = j; } }
+    return best;
+  }
+  yawAt(t) { for (let k = this.yaw.length - 1; k >= 0; k--) { const y = this.yaw[k]; if (Math.abs(y.t - t) < 0.6) return y; if (y.t < t - 0.6) break; } return null; }
+  // замір гіроскопа (накопичений поворот за годинниковою, градуси) — раз на секунду
+  addYaw(t, y, still) {
+    const last = this.yaw[this.yaw.length - 1];
+    if (last && Math.abs(y - last.y) > 40 * Math.max(1, t - last.t)) this.handledUntil = t + this.o.windows[this.o.windows.length - 1] + 1;   // фура так швидко не повертає — телефон узяли в руки
+    this.yaw.push({ t, y }); while (this.yaw.length && t - this.yaw[0].t > 180) this.yaw.shift();
+    // дрейф гіроскопа: коли стоїмо, курс не змінюється — що набіжить, те й дрейф
+    if (still && last) { const n = this.yaw.length; const a = this.yaw[Math.max(0, n - 9)]; if (t - a.t >= 6 && Math.abs(y - a.y) / (t - a.t) < 1) this.bias = this.bias * 0.7 + 0.3 * (y - a.y) / (t - a.t); }
+  }
+  // Дрейф гіроскопа — з самої дороги: хмара впевнена, що останню хвилину фура їхала прямо (рейс там не повертає),
+  // а телефон «набіг» на кілька градусів — це і є дрейф. Так дрейф вчиться і в русі, а не лише на стоянках.
+  learnBias(t, moving) {
+    if (moving === false || this.est.sig > 150 || t <= this.handledUntil) return;
+    const y1 = this.yawAt(t), y0 = this.yawAt(t - 60); if (!y1 || !y0) return;
+    const d = this.est.d, back = Math.max(0, d - this.est.v * 60 - 50);
+    let flat = true; for (let x = back; x <= d + 20; x += 25) if (Math.abs(this.prof.at(x) - this.prof.at(back)) > 2.5) { flat = false; break; }
+    if (!flat) return;
+    const rate = (y1.y - y0.y) / (y1.t - y0.t);
+    if (Math.abs(rate) < 0.2) this.bias = this.bias * 0.9 + rate * 0.1;
+  }
+  // Свій детектор повороту (і різкого, і довгої дуги): курс був спокійний → змінився на ≥35° → знову спокійний.
+  // Рахуємо всю дугу цілком (55° на кілометрі — це 55°, а не перші 28°). Він запускає пошук по поворотах рейсу.
+  turnEvent(t, moving) {
+    const Y = this.yaw, n = Y.length; if (n < 12 || t <= this.handledUntil) return;
+    const rate = (a, b) => { const y1 = this.yawAt(a), y0 = this.yawAt(b); return y1 && y0 ? ((y1.y - y0.y) / (y1.t - y0.t || 1)) - this.bias : null; };
+    const r6 = rate(t, t - 6); if (r6 == null || Math.abs(r6) > 0.35) return;                // ще повертаємо
+    // назад від «зараз»: де курс востаннє був спокійний до цього повороту
+    const yNow = Y[n - 1].y - this.bias * Y[n - 1].t;
+    let k = n - 7, start = null, mid = null;
+    for (; k >= 6; k--) {
+      const r = (Y[k].y - Y[k - 6].y) / (Y[k].t - Y[k - 6].t || 1) - this.bias;
+      const dyk = yNow - (Y[k].y - this.bias * Y[k].t);
+      if (Math.abs(r) <= 0.35 && Math.abs(dyk) >= CP_MIN) { start = k; break; }
+    }
+    if (start == null) return;
+    const y0 = Y[start].y - this.bias * Y[start].t, dy = yNow - y0;
+    for (let q = start; q < n; q++) if (Math.abs((Y[q].y - this.bias * Y[q].t) - y0) >= Math.abs(dy) / 2) { mid = Y[q].t; break; }
+    if (mid == null || (this.lastEv && this.lastEv > Y[start].t - 1)) return;               // цей поворот уже враховано
+    this.lastEv = t;
+    this.lastTurn = { t, dy, ago: t - mid };
+    return this.onGyroTurn(t, dy, t - mid);
+  }
+  handled(t) { this.handledUntil = Math.max(this.handledUntil, t + this.o.windows[this.o.windows.length - 1] + 1); }
+  // крок у секунду: рух за фізикою → звірка з гіроскопом → відбір
+  // proven — гіроскоп уже підтверджував повороти: тоді позначка чекає перед поворотом скільки треба (затор, світлофор)
+  step(t, dt, { moving = true, manualV = null, proven = false } = {}) {
+    if (!this.on) return;
+    const o = this.o, N = o.N, sp = this.sp, total = this.idx.total;
+    // Швидкість у повороті: телефон повертає на ω °/с, дорога там вигнута на κ °/м — отже, фура їде ω/κ м/с.
+    // Дуга радіусом 1 км і 0,23 °/с — це 4 м/с (затор), 1,3 °/с — 23 м/с (траса). Підказуємо це частинкам у повороті.
+    let omega = null, steady = false;
+    if (t > this.handledUntil && manualV == null) {
+      const y1 = this.yawAt(t), y0 = this.yawAt(t - 4), y8 = this.yawAt(t - 8);
+      if (y1 && y0) omega = (y1.y - y0.y) / (y1.t - y0.t || 4) - this.bias;
+      if (omega != null && y8) { const o8 = (y1.y - y8.y) / (y1.t - y8.t || 8) - this.bias; steady = Math.abs(o8 - omega) < 0.25 * Math.abs(omega) + 0.05; }   // повертає рівно вже 8 с
+    }
+    for (let i = 0; i < N; i++) {
+      let v = this.v[i];
+      if (omega != null && moving !== false && Math.abs(omega) > 0.15) {
+        const dd = this.d[i], kap = (this.prof.at(dd + 10) - this.prof.at(dd - 10)) / 20;
+        if (Math.abs(kap) > 0.03 && Math.sign(kap) === Math.sign(omega)) {
+          const vm = omega / kap;
+          if (vm > 0.5 && vm < this.vmax * 1.1) {
+            v += o.rateGain * (vm - v);
+          }
+        }
+      }
+      if (manualV != null) v = Math.max(0, manualV + this.gauss() * 0.4);
+      else if (moving === false) v = 0;
+      else {
+        const d = this.d[i], tgt = Math.min(this.m[i] * sp.at(sp.plan, d), sp.at(sp.cap, d), this.vmax);
+        let a = clamp((tgt - v) / o.tau * 2, -o.accDn, o.accUp) + this.gauss() * o.accNoise;
+        if (v > sp.at(sp.cap, d)) a = Math.min(a, -o.accDn * 0.8);                              // перед поворотом гальмуємо
+        v = clamp(v + a * dt, 0, this.vmax * 1.02);
+        // інколи темп змінюється: почався затор (повільно) або скінчився (назад до темпу, якого хмара навчилась)
+        const back = () => this.mMed != null ? clamp(this.mMed + this.gauss() * 0.04, o.mLo - 0.1, o.mHi + 0.1) : this.pickM(1);
+        if (this.m[i] < 0.75 && this.rnd() < o.slowEnd) this.m[i] = back();                     // «затор» скінчився (у середньому за ~5 хв)
+        else if (this.rnd() < o.regime) this.m[i] = this.rnd() < 0.5 ? 0.1 + 0.6 * this.rnd() : back();
+        else this.m[i] = clamp(this.m[i] + this.gauss() * o.mWalk, 0.08, o.mHi + 0.1);
+      }
+      this.v[i] = v;
+      this.d[i] = clamp(this.d[i] + v * dt + this.gauss() * 0.3 * Math.sqrt(dt), 0, total);
+    }
+    this.pushHist(t);
+    // звірка з гіроскопом
+    const yNow = this.yawAt(t); let used = 0;
+    if (yNow && t > this.handledUntil) {
+      const Hn = o.hist, prof = this.prof;
+      const lw = new Float64Array(N);
+      for (const W of o.windows) {
+        const yW = this.yawAt(t - W), j = this.histIdx(t - W); if (!yW || j < 0) continue;
+        const dY = (yNow.y - yW.y) - this.bias * W, sig0 = o.sig0 + 0.03 * W;
+        const jn = (this.hi - 1 + Hn) % Hn;
+        for (let i = 0; i < N; i++) {
+          const dH = prof.at(this.hd[i * Hn + jn]) - prof.at(this.hd[i * Hn + j]), r = dY - dH, s = sig0 + o.sigK * Math.max(Math.abs(dH), Math.abs(dY));
+          lw[i] += Math.log((1 - o.eps) * Math.exp(-r * r / (2 * s * s)) + o.eps);
+        }
+        used++;
+      }
+      if (used) {
+        const a = o.alpha * this.trust; let lbar = 0;
+        for (let i = 0; i < N; i++) { const l = Math.exp(a * lw[i]); lbar += this.w[i] * l; this.w[i] *= l; }
+        this.normalize();
+        // уся хмара розійшлась із гіроскопом (фура «загубилась»: стартували не там, водій звернув не туди, де ми думали) —
+        // розсипаємо більше запасних гіпотез ширше; інакше — зовсім трохи, щоб не розмивати те, чого хмара навчилась
+        this.lbar = this.lbar == null ? lbar : this.lbar * 0.7 + lbar * 0.3;
+      }
+    }
+    const lost = this.lbar != null && this.lbar < Math.pow(o.lostL, o.alpha * used || 1);
+    this.resampleIfNeeded(); this.injectNear(lost ? o.lostInject : o.inject); this.estimate();
+    this.learnBias(t, moving); this.turnEvent(t, moving);
+    // запобіжник: гіроскоп «не бачить» поворотів (телефон лежить як попало, датчик збоїть) — не тримати позначку вічно
+    if (moving !== false && this.est.d - this.stuck.d < 25) { if (t - this.stuck.t > (proven ? o.holdProven : o.holdMax)) this.trust = 0.15; }
+    else { this.stuck = { t, d: this.est.d }; this.trust = Math.min(1, this.trust + 0.05); }
+  }
+  normalize() { let s = 0; for (const x of this.w) s += x; if (!(s > 0) || !isFinite(s)) { this.w.fill(1 / this.o.N); return; } for (let i = 0; i < this.o.N; i++) this.w[i] /= s; }
+  resampleIfNeeded() {
+    const N = this.o.N; let s2 = 0; for (const x of this.w) s2 += x * x;
+    if (1 / s2 > N * 0.5) return;
+    const Hn = this.o.hist, d = new Float64Array(N), v = new Float32Array(N), m = new Float32Array(N), hd = new Float32Array(N * Hn);
+    let c = this.w[0], j = 0; const u0 = this.rnd() / N;
+    for (let i = 0; i < N; i++) {
+      const u = u0 + i / N; while (u > c && j < N - 1) { j++; c += this.w[j]; }
+      d[i] = clamp(this.d[j] + this.gauss() * 2, 0, this.idx.total); v[i] = Math.max(0, this.v[j] + this.gauss() * 0.15); m[i] = this.m[j];
+      hd.set(this.hd.subarray(j * Hn, j * Hn + Hn), i * Hn);
+    }
+    this.d = d; this.v = v; this.m = m; this.hd = hd; this.w.fill(1 / N);
+  }
+  // кілька частинок — у широкому вікні навколо оцінки: якщо хмара помилилась цілком, наступний поворот її знайде
+  injectNear(p, around = null, R = null) {
+    const N = this.o.N, Hn = this.o.hist, k = Math.round(N * p); if (!k) return;
+    const c = around != null ? around : this.est.d, rad = R != null ? R : clamp(3 * this.est.sig + 400, 500, 4000);
+    for (let q = 0; q < k; q++) {
+      const i = Math.floor(this.rnd() * N), d0 = clamp(c + (this.rnd() * 2 - 1) * rad, 0, this.idx.total), shift = d0 - this.d[i];
+      this.d[i] = d0; this.v[i] = clamp(this.est.v + this.gauss() * 2, 0, this.vmax); this.m[i] = this.mMed != null && this.rnd() > this.o.slow ? this.pickM(this.mMed) : this.pickM();
+      for (let h = 0; h < Hn; h++) this.hd[i * Hn + h] = clamp(this.hd[i * Hn + h] + shift, 0, this.idx.total);
+    }
+  }
+  // вишки чи Wi-Fi: точка, спроєктована на рейс (± acc); поодинокі «стрибки» вишок не перевертають хмару
+  measure(z, acc) {
+    const N = this.o.N, R = Math.max(acc * 0.7, 250), eps = 0.08;
+    for (let i = 0; i < N; i++) { const r = z - this.d[i]; this.w[i] *= (1 - eps) * Math.exp(-r * r / (2 * R * R)) + eps; }
+    this.normalize(); this.resampleIfNeeded(); this.injectNear(0.02, z, R); this.estimate();
+  }
+  // водій: ↑100 / ↓100 — уся хмара зсувається, і довіра до точки висока
+  shift(dd, sig = 30) {
+    const c = this.est.d + dd, Hn = this.o.hist;
+    for (let i = 0; i < this.o.N; i++) { const nd = clamp(c + this.gauss() * sig, 0, this.idx.total), s = nd - this.d[i]; this.d[i] = nd; for (let h = 0; h < Hn; h++) this.hd[i * Hn + h] += s; }
+    this.w.fill(1 / this.o.N); this.estimate();
+  }
+  // оцінка: найщільніше місце хмари (не середнє: якщо гіпотез дві — не ставимо позначку посередині, де фури точно немає)
+  estimate() {
+    const N = this.o.N, B = 25; let lo = Infinity, hi = -Infinity;
+    for (let i = 0; i < N; i++) { if (this.d[i] < lo) lo = this.d[i]; if (this.d[i] > hi) hi = this.d[i]; }
+    const nb = Math.max(1, Math.ceil((hi - lo) / B) + 1), hist = new Float64Array(nb);
+    for (let i = 0; i < N; i++) hist[Math.floor((this.d[i] - lo) / B)] += this.w[i];
+    let best = 0, bv = -1;
+    for (let b = 0; b < nb; b++) { let s = 0; for (let k = -3; k <= 3; k++) { const q = b + k; if (q >= 0 && q < nb) s += hist[q] * (4 - Math.abs(k)); } if (s > bv) { bv = s; best = b; } }
+    // тримаємо попередню гіпотезу, доки нова не стане помітно сильнішою — позначка не скаче між двома місцями
+    const peak = lo + (best + 0.5) * B;
+    let c = peak;
+    if (this.mode != null && Math.abs(this.mode - peak) > 200) {
+      let wo = 0, wn = 0; for (let i = 0; i < N; i++) { if (Math.abs(this.d[i] - this.mode) < 150) wo += this.w[i]; if (Math.abs(this.d[i] - peak) < 150) wn += this.w[i]; }
+      if (wo > 0.2 && wn < 1.6 * wo) c = this.mode;
+    }
+    // у головному скупченні (±400 м від піку) — зважена медіана: не тягнеться за поодинокими «хвостами» хмари
+    const near = []; let sw = 0, sv = 0, all = 0, alld = 0;
+    for (let i = 0; i < N; i++) { all += this.w[i]; alld += this.w[i] * this.d[i]; if (Math.abs(this.d[i] - c) < (this.o.cluster || 400)) { near.push(i); sw += this.w[i]; sv += this.w[i] * this.v[i]; } }
+    const median = (ids, tot) => { ids.sort((a, b) => this.d[a] - this.d[b]); let acc = 0; for (const i of ids) { acc += this.w[i]; if (acc >= tot / 2) return i; } return ids[ids.length - 1]; };
+    // хмара зібралась (після повороту) — беремо головне скупчення; розмита рівно (довга пряма) — медіану всієї хмари
+    let d, v, ids;
+    if (sw >= this.o.clusterMass * (all || 1)) { ids = near; const im = median(near.slice(), sw); d = this.d[im]; v = sv / sw; }
+    else { ids = Array.from({ length: N }, (_, i) => i); const im = median(ids.slice(), all); d = this.d[im]; let s2 = 0, vv = 0; for (let i = 0; i < N; i++) if (Math.abs(this.d[i] - d) < this.o.cluster) { s2 += this.w[i]; vv += this.w[i] * this.v[i]; } v = s2 > 0 ? vv / s2 : 0; }
+    // темп, якого навчилась хмара (зважена медіана m у скупченні) — лише коли вона впевнена (щойно звірилась на повороті),
+    // інакше медленні гіпотези затору тягнули б «вивчений темп» униз
+    if (this.est && this.est.sig < 80 || this.mMed == null) { const ms = ids.filter(i => Math.abs(this.d[i] - d) < this.o.cluster).sort((a, b) => this.m[a] - this.m[b]); let tw = 0; for (const i of ms) tw += this.w[i]; let acc = 0; for (const i of ms) { acc += this.w[i]; if (acc >= tw / 2) { this.mMed = this.m[i]; break; } } }
+    let var_ = 0; for (let i = 0; i < N; i++) var_ += this.w[i] * (this.d[i] - d) ** 2;
+    this.mode = d; this.est = { d, v, sig: Math.sqrt(var_ / (all || 1)), w: sw };
+    return this.est;
+  }
+  // Гіроскоп упізнав поворот (від спокійного курсу до спокійного: dy градусів, середина — ago секунд тому).
+  // Якщо хмара цього повороту в себе «не бачить» — фура загубилась: шукаємо всі повороти рейсу з таким самим знаком і кутом
+  // уперед і назад (вікно — кілька кілометрів, ширше, що довше без звірки) і ставимо на кожен гіпотези «щойно його пройшла»
+  // з правдоподібною історією руху. Далі звірка сама відбере справжню.
+  onGyroTurn(t, dy, ago) {
+    if (!this.on || Math.abs(dy) < CP_MIN || t <= this.handledUntil) return null;
+    const o = this.o, N = o.N, Hn = o.hist, jn = (this.hi - 1 + Hn) % Hn, j0 = this.histIdx(Math.max(t - 2 * ago - 8, t - o.hist + 2));
+    const tol = Math.max(20, 0.35 * Math.abs(dy));
+    let sup = 0;
+    if (j0 >= 0) for (let i = 0; i < N; i++) { const dH = this.prof.at(this.hd[i * Hn + jn]) - this.prof.at(this.hd[i * Hn + j0]); if (Math.abs(dH - dy) < tol) sup += this.w[i]; }
+    if (sup >= o.supportMin) return { sup, seeded: 0 };
+    const W = clamp(4 * this.est.sig + 2500, 3000, 15000), e = this.est.d;
+    const cands = this.cps.filter(c => Math.sign(c.ang || c.amp) === Math.sign(dy) && Math.abs(Math.abs(c.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy)) && Math.abs(c.d - e) < W)
+      .map(c => ({ c, p: Math.exp(-((c.d - e) ** 2) / (2 * (W / 2) ** 2)) })).sort((a, b) => b.p - a.p).slice(0, 6);
+    if (!cands.length) return { sup, seeded: 0 };
+    const ps = cands.reduce((a, x) => a + x.p, 0), share = Math.round(N * o.seedShare);
+    let k = 0;
+    for (const { c, p } of cands) {
+      const n = Math.max(8, Math.round(share * p / ps)), vAfter = Math.min(Math.max(this.est.v, 6), this.sp.at(this.sp.plan, c.d1));
+      for (let q = 0; q < n && k < share; q++, k++) {
+        const i = Math.floor(this.rnd() * N), v = clamp(vAfter * (0.7 + 0.5 * this.rnd()), 1, this.vmax);
+        const dNow = clamp(c.d + v * 0.8 * ago + this.gauss() * (25 + 0.15 * v * ago), 0, this.idx.total);
+        this.d[i] = dNow; this.v[i] = v; this.m[i] = this.mMed != null ? this.pickM(this.mMed) : this.pickM();
+        for (let h = 0; h < this.hn; h++) { const jj = (this.hi - 1 - h + Hn) % Hn, back = t - this.ht[jj]; this.hd[i * Hn + jj] = clamp(dNow - v * 0.85 * back, 0, this.idx.total); }
+        this.w[i] = 1 / N;
+      }
+    }
+    this.normalize(); this.estimate();
+    return { sup, seeded: k, cands: cands.map(x => Math.round(x.c.d)) };
+  }
+  // наступна контрольна точка попереду
+  nextCp(d = this.est.d, minAhead = 30) { return this.cps.find(c => c.d1 > d + minAhead) || null; }
+}
