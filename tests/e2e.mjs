@@ -220,6 +220,7 @@ async function readCheck(page, rootSel, scrollSel) {
       for (let n = walker.nextNode(); n; n = walker.nextNode()) {
         if (!n.textContent.trim()) continue;
         const el = n.parentElement; if (!el || el.closest('[hidden]') || el.closest('svg')) continue;
+        { const d = el.closest('details'); if (d && !d.open && !el.closest('summary')) continue; }       // згорнутий вміст <details> не видно
         const cs = getComputedStyle(el); if (cs.visibility === 'hidden' || cs.display === 'none' || +cs.opacity === 0) continue;
         const rg = document.createRange(); rg.selectNodeContents(n); const rects = [...rg.getClientRects()].filter(r => r.width > 1 && r.height > 1); if (!rects.length) continue;
         const r = rects.reduce((a, b) => ({ left: Math.min(a.left, b.left), right: Math.max(a.right, b.right), top: Math.min(a.top, b.top), bottom: Math.max(a.bottom, b.bottom) }));
@@ -1562,7 +1563,11 @@ if (run('14')) for (const [sc, th] of SCREENS.filter(x => ['S10', 'tiny', 'land'
   await shot(page, `r-${sc.n}-feed`);
   await page.click('#panelBody .pb-back button');
   await page.click('#tabs button[data-panel="places"]'); await R('«Місця»', '#panel', '#panelBody'); await page.click('#panelClose');
-  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await R('«Параметри» (з прокруткою)', '#panel', '#panelBody'); await page.click('#panelClose');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]');
+  await app(page, () => { window.__app.S.ttsVoice = 'uk:1'; window.__voice = { packs: { uk: { ver: 2, size: 87e6 } } }; window.__reis('voice', { state: 'fallback', error: 'audio init' }); }); await sleep(200);
+  await app(page, () => document.querySelectorAll('#panelBody details').forEach(d => { d.open = true; }));   // «Щоденник голосу» розгорнуто — його теж перевіряємо
+  await R('«Параметри» (з прокруткою, щоденник голосу розгорнуто)', '#panel', '#panelBody'); await page.click('#panelClose');
+  await app(page, () => { window.__app.S.ttsVoice = 'system'; });
   await page.click('#tabs button[data-panel="gps"]'); await R('GPS', '#panel', '#panelBody'); await page.click('#panelClose');
   await page.click('#tabRep'); await R('«Що на дорозі?»', '#repSheet'); await page.click('#repSheet [data-rep="x"]');
   await page.click('#bQuick'); await R('швидкі налаштування', '#quick'); await page.click('#quick [data-q="close"]');
