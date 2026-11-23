@@ -198,7 +198,7 @@ async function readCheck(page, rootSel, scrollSel) {
   return page.evaluate(async ([rootSel, scrollSel]) => {
     const root = document.querySelector(rootSel); if (!root) return ['немає ' + rootSel];
     const sc = scrollSel ? document.querySelector(scrollSel) : null, out = new Set();
-    const lum = c => { const m = c.match(/[\d.]+/g); if (!m) return null; const [r, g, b, a] = m.map(Number); if (a === 0) return null; const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return { L: 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b), a: a == null ? 1 : a }; };
+    const lum = c => { const m = c.match(/[\d.]+/g); if (!m) return null; let [r, g, b, a] = m.map(Number); if (/^color\(/.test(c)) { r *= 255; g *= 255; b *= 255; } if (a === 0) return null; const f = v => { v /= 255; return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); }; return { L: 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b), a: a == null ? 1 : a }; };
     // тло — найближчий шар, що помітно зафарбований (скляні плашки над картою — це теж тло); картинка чи градієнт — не оцінюємо
     // (дійшли до body — під текстом сама карта, тло невідоме: не оцінюємо)
     const bgOf = el => { for (let e = el; e && e !== document.body; e = e.parentElement) { const cs = getComputedStyle(e); if (cs.backgroundImage && cs.backgroundImage !== 'none') return null; const l = lum(cs.backgroundColor); if (l && l.a >= 0.5) return l.L; } return null; };
@@ -1522,9 +1522,13 @@ if (run('13')) try {
 } catch (e) { ok('прохід «спідометр» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 14: сприйняття — усе читається, нічого не обрізане й не перекрите (кожен екран, з прокруткою) ============ */
-if (run('14')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tall', 'notch'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n)))) try {
+// Тема не має залежати від того, о котрій годині запустили тести (раніше прохід випадково йшов лише вночі):
+// кожен екран перевіряємо вдень, а два основні (S10 і альбомний) — ще й уночі.
+if (run('14')) for (const [sc, th] of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tall', 'notch'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n))).flatMap(x => ['S10', 'land'].includes(x.n) ? [[x, 'day'], [x, 'night']] : [[x, 'day']])) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
-  const T = 'сприйняття, ' + sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await app(page, th => { window.__app.S.theme = th; window.__app.map.applyTheme(); }, th);
+  ok(`сприйняття, ${sc.title}: тема «${th === 'day' ? 'день' : 'ніч'}» увімкнена`, await app(page, th => document.body.dataset.theme === th, th));
+  const T = 'сприйняття (' + (th === 'day' ? 'день' : 'ніч') + '), ' + sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   if (sc.st) await app(page, ([st, sb]) => { const r = document.documentElement.style; r.setProperty('--st', st + 'px'); r.setProperty('--sb', sb + 'px'); }, [sc.st, sc.sb]);
   const R = async (what, root, scroll) => { const L = await readCheck(page, root, scroll); ok(`${T}: ${what} — читається, нічого не обрізано й не перекрито`, L.length === 0, L.join('; ')); };
   // вибір маршруту
@@ -1539,10 +1543,10 @@ if (run('14')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tal
   await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick[data-mode="trip"]'); await sleep(500);
   await R('«Маршрут» у дорозі', '#routePick');
   if (sc.n === 'S10') {   // сама перевірка ловить обрізаний текст: на мить робимо надпис задовгим
-    await app(page, () => { const b = document.querySelector('#routePick [data-ts="stop"]'); b.dataset.old = b.textContent; b.textContent = 'Завершити маршрут повністю й назавжди'; });
+    await app(page, () => { const b = document.querySelector('#routePick .ts-more'); b.dataset.old = b.textContent; b.style.maxWidth = '70px'; b.style.overflow = 'hidden'; b.style.whiteSpace = 'nowrap'; b.textContent = 'Усі деталі цього маршруту повністю'; });
     const L = await readCheck(page, '#routePick');
     ok(`${T}: перевірка сприйняття справді помічає задовгий надпис на кнопці`, L.some(x => /не влазить|обрізано|за краєм/.test(x)), L.join('; '));
-    await app(page, () => { const b = document.querySelector('#routePick [data-ts="stop"]'); b.textContent = b.dataset.old; });
+    await app(page, () => { const b = document.querySelector('#routePick .ts-more'); b.textContent = b.dataset.old; b.style.maxWidth = b.style.overflow = b.style.whiteSpace = ''; });
   }
   await page.click('#routePick [data-ts="via"]'); await page.fill('#tsViaIn', 'Чугу'); await page.waitForSelector('#routePick [data-tsg]');
   await R('контрольна точка (пошук)', '#routePick');

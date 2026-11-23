@@ -441,7 +441,8 @@ body[data-theme="night"]{
 .vp-row b{font-size:17px}
 .vp-row small{color:var(--ink-2);font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .vp-row .vp-w{color:var(--ink);font-weight:600}
-.vp-stars{color:#e2a400;letter-spacing:1px;font-size:14px}
+.vp-stars{color:#b97400;letter-spacing:1px;font-size:14px}            /* удень темніше золото — на світлому тлі читається (контраст ≥ 3) */
+body[data-theme="night"] .vp-stars{color:#e2a400}
 .vp-stars.big{font-size:20px}
 .vp-photos{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x mandatory;margin:0 -4px 6px;padding:0 4px}
 .vp-photos img{flex:0 0 86%;height:220px;object-fit:cover;border-radius:14px;scroll-snap-align:start;background:var(--line);cursor:zoom-in}
