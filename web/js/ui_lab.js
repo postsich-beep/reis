@@ -167,6 +167,9 @@ function settingsHtml() {
     ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5', TRUCK_MAX_T)}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
   <div class="muted" style="margin-top:6px">${t('setTruckHint')}</div>
+  <div class="muted" style="margin:12px 2px 6px">${t('setHgvBan')}</div>
+  ${seg('hgvBan', [['avoid', t('hgv_avoid'), S.hgvBan === 'avoid'], ['ask', t('hgv_ask'), (S.hgvBan || 'ask') === 'ask'], ['go', t('hgv_go'), S.hgvBan === 'go']])}
+  <div class="muted" id="hgvHint" style="margin:-4px 2px 10px">${t('hgvHint_' + (S.hgvBan || 'ask'))}</div>
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
 
   <div class="sec">${t('setAhead')}</div><div class="form">
@@ -216,6 +219,7 @@ definePanel('settings', {
         else if (k === 'lang') S.lang = v;
         else if (k === 'glass') S.glass = v;
         else if (k === 'passed') S.passed = v;
+        else if (k === 'hgvBan') S.hgvBan = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }

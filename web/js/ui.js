@@ -8,7 +8,7 @@ import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnaps
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, reverse, buildRoute, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
+import { geocode, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
@@ -484,6 +484,20 @@ function planHtml() {
     <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
     <div id="savedBox">${savedHtml()}</div>`;
 }
+// Знак «фурам заборонено», а іншої дороги немає й усі їздять: рейс уже показано, тим часом питаємо сервер про варіант
+// через такі дороги. Якщо він помітно коротший — додаємо третьою карткою; вибирає водій.
+async function softOffer(trip, strict) {
+  try {
+    await new Promise(r => setTimeout(r, 1200));                       // публічний сервер — не частіше запиту на секунду
+    if (plan.trip !== trip) return;
+    const sv = await softVariant(trip, strict);
+    if (!sv || plan.trip !== trip || g.active || plan.routes.some(x => x.soft === 'alt')) return;
+    plan.routes = [...plan.routes, sv].slice(0, 3);
+    previewAlts(plan.routes.map((x, k) => [k, x.coords]).filter(([k]) => k !== plan.sel));
+    refresh('trip'); if (!$('routePick').hidden) { pickShow(); }
+    toast(t('softFound', sv.saves.km, sv.saves.min), 'yellow', 9000);
+  } catch (e) { log('info', 'варіант через заборону для фур: ' + (e && e.message)); }
+}
 // Фура чи легковик: для фури — габарити, маса, мости, обмежувач; для легковика — без обмежень
 function vehHtml() {
   const v = S.vehicle === 'auto' ? 'auto' : 'truck';
@@ -497,13 +511,15 @@ function altCardsHtml(force = false) {
   return `<div class="alts">` + rs.map((r, i) => {
     const red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
     const ky = kyivOnRoute(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000);
-    const flags = [red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', r.time === best && rs.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
-    return `<button class="alt${i === plan.sel ? ' on' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
+    const softCard = truck && ['alt', 'only', 'chosen'].includes(r.soft);
+    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', r.time === best && rs.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    return `<button class="alt${i === plan.sel ? ' on' : ''}${softCard ? ' soft' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
   }).join('') + `</div>`;
 }
 function selectAlt(i) {
   const tr = plan.trip, r = plan.routes[i]; if (!tr || !r) return;
   plan.sel = i; tr.route = r; tr.regions = []; tr.towns = []; tr.chosen = null;
+  tr.soft = ['alt', 'only', 'chosen'].includes(r.soft) ? (r.soft === 'only' ? 'only' : 'chosen') : null;      // вибрано варіант через знак «фурам заборонено» — у дорозі перебудовуємо так само
   previewRoute(r.coords, r); previewAlts(plan.routes.map((x, k) => [k, x.coords]).filter(([k]) => k !== i));
   hud(); refresh('trip'); loadRegions(tr);
   if (!$('routePick').hidden) pickShow();
@@ -528,9 +544,17 @@ function pickHtml() {
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
 }
 // для фури проїзду не знайшлося — показуємо звичайний маршрут із червоним попередженням; старт/фініш перенесено на основну дорогу — тихо кажемо
+// Варіант дорогою зі знаком «фурам заборонено»: чесно кажемо, що це за варіант і що враховано
+function softWarnHtml(r, cls = 'rp-warn soft') {
+  if (!r || r.costing === 'auto') return '';
+  if (r.soft === 'only') return `<div class="${cls}"><b>${t('softOnlyTitle')}.</b> ${t('softOnlyText')}</div>`;
+  if (r.soft === 'alt' || r.soft === 'chosen') return `<div class="${cls}"><b>${t('softTitle')}.</b> ${r.saves ? t('softSaves', r.saves.km, r.saves.min) + ' ' : ''}${t('softText')}</div>`;
+  if (r.soft === 'go') return `<div class="${cls} mild">${t('softGo')}</div>`;
+  return '';
+}
 function pickWarnHtml() {
   const r = plan.routes[plan.sel] || plan.trip.route;
-  return r && r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : r && r.snapped ? `<div class="rp-warn">${t('truckSnapped')}</div>` : '';
+  return r && r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : softWarnHtml(r) || (r && r.snapped ? `<div class="rp-warn">${t('truckSnapped')}</div>` : '');
 }
 function pickShow() {
   if (!plan.trip || g.active) return pickHide();
@@ -759,7 +783,7 @@ function planSumHtml() {
       <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
     : r.truckFail ? `<div class="card" style="margin-top:8px;border:2px solid var(--red)"><div style="font-weight:700;color:var(--red)">${t('truckFailTitle')}</div><div class="muted" style="margin-top:4px">${t('truckFailText')}</div></div>`
     : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>`
-    : r.snapped ? `<div class="muted" style="margin-top:8px">${t('truckSnapped')}</div>` : '';
+    : softWarnHtml(r, 'card softcard') || (r.snapped ? `<div class="muted" style="margin-top:8px">${t('truckSnapped')}</div>` : '');
   return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
     ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
@@ -806,7 +830,8 @@ async function doBuild() {
     trip.route = r;
     plan.trip = trip; mapM.previewPoints(trip); previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
     loadRegions(trip);
-    plan.busy = false; closePanel(); pickShow(); return;
+    plan.busy = false; closePanel(); pickShow();
+    softOffer(trip, r); return;
   } catch (e) {
     // помилки сервера — людською мовою, а не «No path could be found for input»
     plan.err = e.code ? t('routeFail') + ' ' + (e.code === 171 ? t('noEdge') : [170, 442].includes(e.code) ? t('noPath') : (e.message || '')) : t('netErr') + ' ' + (e.message || '');

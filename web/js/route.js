@@ -78,15 +78,20 @@ export const oblastOf = s => { if (!s) return null; const o = OBLASTS.find(o => 
 export const oblastName = id => { const o = OBLASTS.find(o => o.id === id); return o ? (S.lang === 'ru' ? o.ru : o.uk) : id; };
 
 /* ---------- маршрут ---------- */
-export function truckOptions() {
+// Дороги зі знаком «рух вантажівок заборонено» (hgv=no в OpenStreetMap). Буває, що знак є, а іншої дороги немає — і всі фури
+// їздять саме нею (Івано-Франківськ). «М'який» рейс (1.1.12): такі дороги дозволені, але кожен в'їзд на них «коштує» кілька хвилин,
+// тож сервер веде ними лише тоді, коли об'їзд справді довгий. Висота, маса, довжина й небезпечний вантаж перевіряються, як і завжди.
+export const HGV_SOFT = { ask: 600, go: 120 };            // «ціна» в'їзду під знак, секунд: варіант на вибір / «їхати завжди»
+export function truckOptions(soft = 0) {
   const t = S.truck, o = { height: +t.height, width: +t.width, length: +t.length, weight: Math.min(+t.weight, TRUCK_MAX_T), axle_load: +t.axle, hazmat: !!t.hazmat };
   if (+t.vmax > 0) o.top_speed = Math.round(+t.vmax);      // обмежувач: час у дорозі рахується для фури, а не для легковика
+  if (soft > 0) o.hgv_no_access_penalty = soft;            // менше 43200 — сервер дозволяє дороги без доступу для фур, із цим штрафом
   return o;
 }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
 // snap — «чіпляти» точки лише за дороги не нижче цього класу ('unclassified' — без дворів, заправок, житлових вуличок;
 // 'tertiary' — лише траси й проспекти) і лише за добре з'єднані ділянки
-export async function requestRoute(pts, heading, costing = 'truck', alternates = 0, snap = null) {
+export async function requestRoute(pts, heading, costing = 'truck', alternates = 0, snap = null, soft = 0) {
   const locations = pts.map((p, i) => {
     const l = { lat: +p.lat.toFixed(6), lon: +p.lon.toFixed(6), type: (i === 0 || i === pts.length - 1) ? 'break' : 'through' };
     if (snap) { l.search_filter = { min_road_class: snap }; l.minimum_reachability = 300; }
@@ -96,7 +101,7 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     return l;
   });
   const body = {
-    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions() } : {},
+    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions(soft) } : {},
     units: 'kilometers', language: S.lang === 'ru' ? 'ru-RU' : 'uk-UA', directions_type: 'instructions'
   };
   if (alternates > 0 && pts.length === 2) body.alternates = alternates;      // запасні варіанти — лише для А → Б без проміжних
@@ -183,12 +188,12 @@ export const tripTitle = t => (t.a.label || '?') + ' → ' + (t.v ? t.v.label + 
 // Сервер не знайшов проїзду для фури: 442 — шляху немає, 170 — точки в не з'єднаних частинах дороги, 171 — біля точки немає дороги для фури.
 // Найчастіше точка «прилипла» до двору, заправки, стоянки чи центру міста із забороною або обмеженням мосту для фур.
 export const NO_PATH = new Set([170, 171, 442]);
-async function truckRoute(pts, heading, alternates) {
+async function truckRoute(pts, heading, alternates, soft = 0) {
   let first;
-  try { return await requestRoute(pts, heading, 'truck', alternates); } catch (e) { if (!NO_PATH.has(e.code)) throw e; first = e; }
+  try { return await requestRoute(pts, heading, 'truck', alternates, null, soft); } catch (e) { if (!NO_PATH.has(e.code)) throw e; first = e; }
   for (const snap of ['unclassified', 'tertiary']) {
     await sleep(1100);                                   // публічний сервер — не частіше запиту на секунду
-    try { const r = await requestRoute(pts, heading, 'truck', alternates, snap); r.snapped = snap; log('info', 'рейс для фури знайдено, точки — на дорогах від «' + snap + '»'); return r; }
+    try { const r = await requestRoute(pts, heading, 'truck', alternates, snap, soft); r.snapped = snap; log('info', 'рейс для фури знайдено, точки — на дорогах від «' + snap + '»'); return r; }
     catch (e) { if (!NO_PATH.has(e.code)) throw e; }
   }
   throw first;
@@ -203,19 +208,30 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   }
   pts.push(trip.b);
   const costing = trip.costing || 'truck';
+  // Знак «фурам заборонено»: водій уже вибрав варіант через таку дорогу (trip.soft) або дозволив їх у налаштуваннях («Їхати»)
+  const soft0 = costing !== 'truck' ? 0 : trip.soft ? HGV_SOFT.ask : S.hgvBan === 'go' ? HGV_SOFT.go : 0;
   let r;
   if (costing === 'truck') {
-    try { r = await truckRoute(pts, heading, from ? 0 : alternates); r.costing = 'truck'; }
+    try { r = await truckRoute(pts, heading, from ? 0 : alternates, soft0); r.costing = 'truck'; if (soft0) r.soft = trip.soft ? (trip.soft === 'only' ? 'only' : 'chosen') : 'go'; }
     catch (e) {
       if (!NO_PATH.has(e.code)) throw e;
-      // для фури проїзду немає навіть від основних доріг — даємо звичайний маршрут із червоним попередженням, водій вирішує сам;
-      // у дорозі (уже з GPS) наступна перебудова знову спробує для фури
-      log('warn', 'для фури шляху немає (' + e.code + '), показую без обмежень для фур');
-      await sleep(1100);
-      r = await requestRoute(pts, heading, 'auto', from ? 0 : alternates); r.costing = 'auto'; r.truckFail = e.code;
+      // 1.1.12: суворого шляху для фури немає — спершу пробуємо дорогами зі знаком «фурам заборонено» (висота, маса, довжина — дотримані).
+      // Це краще за звичайний маршрут для легковика, який не знає про фуру нічого.
+      if (!soft0) {
+        await sleep(1100);
+        try { r = await requestRoute(pts, heading, 'truck', from ? 0 : alternates, null, HGV_SOFT.ask); r.costing = 'truck'; r.soft = 'only'; trip.soft = 'only'; log('warn', 'для фури шлях є лише дорогою зі знаком «фурам заборонено» — показую його з попередженням'); }
+        catch (e2) { if (!NO_PATH.has(e2.code)) throw e2; }
+      }
+      if (!r) {
+        // для фури проїзду немає навіть так — даємо звичайний маршрут із червоним попередженням, водій вирішує сам;
+        // у дорозі (уже з GPS) наступна перебудова знову спробує для фури
+        log('warn', 'для фури шляху немає (' + e.code + '), показую без обмежень для фур');
+        await sleep(1100);
+        r = await requestRoute(pts, heading, 'auto', from ? 0 : alternates); r.costing = 'auto'; r.truckFail = e.code;
+      }
     }
   } else { r = await requestRoute(pts, heading, costing, from ? 0 : alternates); r.costing = costing; }
-  for (const a of r.alts) { a.costing = r.costing; a.aD = null; a.viaD = null; a.detour = 1; }
+  for (const a of r.alts) { a.costing = r.costing; a.aD = null; a.viaD = null; a.detour = 1; if (r.soft) a.soft = r.soft; }
   // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
   // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.
   const straight = hav(pts[0], pts[pts.length - 1]);
@@ -228,6 +244,20 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   const at = p => { const loc = idx.locate(p, null); return loc && loc.off < 400 ? loc.d : null; };
   r.aD = from && !skipA ? at(trip.a) : null;            // де на маршруті точка А і проміжна
   r.viaD = trip.v && !skipVia ? at(trip.v) : null;
+  return r;
+}
+/** Варіант «дорогою зі знаком "фурам заборонено"» до вже побудованого рейсу для фури.
+ *  Повертає маршрут, лише якщо він помітно коротший (об'їзд справді великий); інакше null — це той самий рейс. */
+export async function softVariant(trip, strict) {
+  if ((trip.costing || 'truck') !== 'truck' || !strict || strict.costing !== 'truck' || strict.soft || (S.hgvBan || 'ask') !== 'ask') return null;
+  const pts = [trip.a, ...(trip.v ? [trip.v] : []), trip.b];
+  const r = await requestRoute(pts, null, 'truck', 0, strict.snapped || null, HGV_SOFT.ask);
+  const km = (strict.dist - r.dist) / 1000, min = (strict.time - r.time) / 60;
+  if (!((km >= 3 && r.dist <= strict.dist * 0.9) || min >= 8)) return null;
+  const idx = new RouteIndex(r.coords), loc = trip.v ? idx.locate(trip.v, null) : null;
+  r.costing = 'truck'; r.soft = 'alt'; r.alts = []; r.aD = null; r.viaD = loc && loc.off < 400 ? loc.d : null; r.detour = 1;
+  r.saves = { km: Math.max(0, Math.round(km)), min: Math.max(0, Math.round(min)) };
+  if (strict.snapped) r.snapped = strict.snapped;
   return r;
 }
 export const distToStart = (trip, p) => hav(p, trip.a);

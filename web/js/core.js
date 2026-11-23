@@ -39,7 +39,7 @@ const DEFAULTS = {
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { ...BASE_STOPS },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 20, axle: 11.5, hazmat: false, vmax: 90 }, truckV: 1,
-  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
+  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', hgvBan: 'ask', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',

@@ -1959,7 +1959,7 @@ if (run('20')) try {
   const r1 = routeReqs.slice(n0).map(q => q.costing + ':' + cls(q));
   const w1 = await app(page, () => (document.querySelector('#routePick .rp-warn') || { textContent: '' }).textContent);
   ok('сервер «шляху для фури немає» — програма сама пробує від основних доріг і знаходить рейс для фури', r1.join() === 'truck:,truck:unclassified,truck:tertiary' && /перенесено на найближчу основну дорогу/.test(w1) && await app(page, () => window.__app.ui ? true : true), JSON.stringify({ r1, w1 }));
-  await page.click('#routePick [data-rp="x"]'); await sleep(300);
+  await page.click('#routePick [data-rp="x"]'); await sleep(1600);
   // 2) для фури проїзду немає зовсім — звичайний маршрут із червоним попередженням, водій вирішує
   n0 = routeReqs.length;
   ROUTE.fn = q => q.costing === 'truck' ? NP : null;
@@ -1967,7 +1967,7 @@ if (run('20')) try {
   await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 15000 });
   const r2 = routeReqs.slice(n0).map(q => q.costing + ':' + cls(q));
   const w2 = await app(page, () => { const w = document.querySelector('#routePick .rp-warn.red'); return w ? w.textContent : ''; });
-  ok('для фури зовсім немає — показано звичайний маршрут з червоним «Для фури проїзду не знайшлося… їдьте за знаками»', r2.join() === 'truck:,truck:unclassified,truck:tertiary,auto:' && /Для фури проїзду не знайшлося/.test(w2) && /їдьте за знаками/.test(w2), JSON.stringify({ r2, w2 }));
+  ok('для фури зовсім немає (і дорогою зі знаком «фурам заборонено» теж) — звичайний маршрут з червоним «Для фури проїзду не знайшлося… їдьте за знаками»', r2.join() === 'truck:,truck:unclassified,truck:tertiary,truck:,auto:' && routeReqs[n0 + 3].costing_options.truck.hgv_no_access_penalty === 600 && /Для фури проїзду не знайшлося/.test(w2) && /їдьте за знаками/.test(w2), JSON.stringify({ r2, w2 }));
   await shot(page, '22-truck-nopath');
   await page.click('#routePick [data-rp="x"]'); await sleep(300);
   // 3) і звичайного немає — помилка людською мовою, без англійської
@@ -2309,6 +2309,91 @@ if (run('25')) for (const sc of TABS.filter(x => !process.env.SCR || process.env
   ok(`[${T}] прохід 25 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`прохід 25 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
+
+// ---------- Прохід 26: дороги зі знаком «фурам заборонено» — варіант на вибір, ручний режим ----------
+if (run('26')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const NP = { status: 400, body: { error_code: 442, error: 'No path could be found for input', status_code: 400, status: 'Bad Request' } };
+  // короткий шлях навпростець (дорогою зі знаком): Харків → Полтава по діагоналі
+  const N = 120, softCoords = Array.from({ length: N + 1 }, (_, i) => [A[0] + (B[0] - A[0]) * i / N, A[1] + (B[1] - A[1]) * i / N]);
+  const R = 6371000, rad = Math.PI / 180, havT = (a, b) => { const dLat = (b[0] - a[0]) * rad, dLon = (b[1] - a[1]) * rad, q = Math.sin(dLat / 2) ** 2 + Math.cos(a[0] * rad) * Math.cos(b[0] * rad) * Math.sin(dLon / 2) ** 2; return 2 * R * Math.asin(Math.sqrt(q)); };
+  const softLen = havT(A, B) / 1000, softTime = Math.round(softLen * 1000 / 15);
+  const softJson = { trip: { legs: [{ shape: enc6(softCoords), maneuvers: [{ type: 1, instruction: 'Рушайте вулицею Об’їзною.', street_names: ['вулиця Об’їзна'], length: softLen, time: softTime, begin_shape_index: 0, end_shape_index: N },
+    { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: N, end_shape_index: N }], summary: { length: softLen, time: softTime } }], summary: { length: softLen, time: softTime }, status: 0 } };
+  const pen = q => ((q.costing_options || {}).truck || {}).hgv_no_access_penalty;
+  const build = async () => { if (!(await page.$('#in_b'))) await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#in_b'); await page.fill('#in_b', 'Полтава'); await page.waitForSelector('#sg_b button', { timeout: 5000 }); await page.click('#sg_b button'); await page.click('[data-act="build"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 20000 }); };
+  const cards = () => app(page, () => [...document.querySelectorAll('#routePick .alt')].map(c => ({ t: c.textContent.replace(/\s+/g, ' ').trim(), soft: c.classList.contains('soft'), on: c.classList.contains('on'), fl: [...c.querySelectorAll('.fl i')].map(i => i.textContent + ':' + i.className).join('|') })));
+  const closePick = async () => { await page.click('#routePick [data-rp="x"]'); await sleep(1700); };
+  await emitN('loc', { prov: 'gps', lat: A[0], lon: A[1], acc: 5, spd: 0, t: Date.now() }); await sleep(300);
+  // налаштування: три режими, за замовчуванням «Пропонувати»
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('[data-seg="hgvBan:ask"]');
+  const st = await app(page, () => ({ on: [...document.querySelectorAll('[data-seg^="hgvBan:"]')].map(b => b.dataset.seg.split(':')[1] + (b.classList.contains('on') ? '*' : '')).join(), hint: document.getElementById('hgvHint').textContent, mode: window.__app.S.hgvBan }));
+  ok('«Налаштування → Фура»: дороги зі знаком «фурам заборонено» — Оминати · Пропонувати · Їхати; за замовчуванням «Пропонувати»', st.on === 'avoid,ask*,go' && st.mode === 'ask' && /варіант — «через заборону для фур»/.test(st.hint) && /Висоту, масу й довжину враховано завжди/.test(st.hint), JSON.stringify(st));
+  await page.click('#panelClose');
+  // 1) об'їзду немає: рейс для фури суворий, запит «через заборону» дає те саме — зайвої картки немає
+  let n0 = routeReqs.length;
+  await build(); await sleep(2600);
+  let rq = routeReqs.slice(n0), cs = await cards();
+  ok('рейс для фури: спершу суворо (без доріг зі знаком), потім — тихий запит варіанта «через заборону» з тими самими габаритами', rq.length === 2 && rq[0].costing === 'truck' && pen(rq[0]) === undefined && pen(rq[1]) === 600 && rq[1].costing_options.truck.height === rq[0].costing_options.truck.height && rq[1].costing_options.truck.weight === 20 && rq[1].locations.length === 2, JSON.stringify(rq.map(q => [q.costing, pen(q), q.alternates])));
+  ok('варіант через заборону нічого не скорочує — третьої картки й попереджень немає', cs.length === 2 && cs.every(c => !c.soft) && await app(page, () => !document.querySelector('#routePick .rp-warn.soft')), JSON.stringify(cs));
+  await closePick();
+  // 2) об'їзд великий: з'являється третя картка «через заборону для фур»
+  ROUTE.fn = q => q.costing === 'truck' && pen(q) ? { status: 200, body: softJson } : null;
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  await build(); await page.waitForFunction(() => document.querySelectorAll('#routePick .alt').length === 3, null, { timeout: 8000 }).catch(() => {});
+  cs = await cards();
+  const tst = await app(page, () => ({ toast: document.getElementById('toasts').textContent, alts: window.__app.map.map.getSource('route-alts')._data.features.length, sel: window.__app.guide.g.active }));
+  const saveKm = Math.round(total / 1000 - softLen);
+  ok(`є коротший шлях під знак — третя картка «через заборону для фур» (пунктирна рамка), повідомлення «−${saveKm} км»`, cs.length === 3 && cs[2].soft && /через заборону для фур:warn/.test(cs[2].fl) && cs[0].on && !cs[0].soft && new RegExp('−' + saveKm + ' км').test(tst.toast) && tst.alts === 2, JSON.stringify({ cs, tst }));
+  await shot(page, '32-hgv-soft-card');
+  await page.click('#routePick .alt.soft'); await sleep(500);
+  const w = await app(page, () => ({ warn: (document.querySelector('#routePick .rp-warn.soft') || { textContent: '' }).textContent, soft: window.__app.route ? null : null, on: [...document.querySelectorAll('#routePick .alt')].map(c => c.classList.contains('on')), go: !!document.querySelector('#routePick [data-rp="go"]') }));
+  ok('вибрали цей варіант — чесне попередження: дорога зі знаком, на скільки коротше, габарити враховано, вирішує водій', /знак забороняє рух фур/.test(w.warn) && new RegExp('Коротший на ' + saveKm + ' км').test(w.warn) && /Висоту, масу й довжину враховано/.test(w.warn) && /вирішуєте ви/.test(w.warn) && w.on[2] && w.go, JSON.stringify(w));
+  await shot(page, '33-hgv-soft-chosen');
+  await page.click('#routePick [data-rp="go"]'); await sleep(900);
+  const act = await app(page, () => ({ active: window.__app.guide.g.active, soft: window.__app.guide.g.trip.soft, n: window.__app.guide.g.route.coords.length, costing: window.__app.guide.g.route.costing }));
+  ok('поїхали варіантом через заборону — рейс для фури (не «легковий»), позначено як вибір водія', act.active && act.soft === 'chosen' && act.n === N + 1 && act.costing === 'truck', JSON.stringify(act));
+  // перебудова в дорозі — так само з дозволеними дорогами під знак
+  n0 = routeReqs.length;
+  const details = async () => { if (await page.$('#panelBody [data-act="stop"]')) return; await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick [data-ts="details"]'); await page.click('#routePick [data-ts="details"]'); await page.waitForSelector('#panelBody [data-act="stop"]'); };
+  for (let k = 1; k <= 4; k++) { const f = k * 12 / (softLen * 1000 / N); await emitN('loc', { prov: 'gps', lat: A[0] + (softCoords[1][0] - A[0]) * f, lon: A[1] + (softCoords[1][1] - A[1]) * f, acc: 5, spd: 12, t: Date.now() }); await sleep(1000); }
+  await details(); await page.click('[data-act="reroute"]'); await sleep(2500);
+  rq = routeReqs.slice(n0);
+  ok('перебудова в дорозі — теж для фури й теж із дозволеною дорогою під знак (а не навколо)', rq.length >= 1 && rq[0].costing === 'truck' && pen(rq[0]) === 600, JSON.stringify({ rq: rq.map(q => [q.costing, pen(q)]), st: await app(page, () => ({ mode: window.__app.nav.pos.mode, pend: window.__app.guide.g.reroutePending, rr: window.__app.guide.g.rerouting, log: window.__app.core.getLog().slice(-4).map(l => l.msg || l.text) })) }));
+  await details(); await page.click('#panelBody [data-act="stop"]'); await sleep(700);
+  ok('рейс завершено — знову форма нового рейсу', await app(page, () => !window.__app.guide.g.active && !!document.getElementById('in_b')));
+  // 3) суворого шляху немає зовсім, а дорогою під знак — є: показуємо її (для фури!), а не «легковий» маршрут
+  ROUTE.fn = q => q.costing === 'truck' ? (pen(q) ? { status: 200, body: softJson } : NP) : null;
+  n0 = routeReqs.length;
+  await build(); await sleep(400);
+  rq = routeReqs.slice(n0);
+  const w3 = await app(page, () => ({ soft: (document.querySelector('#routePick .rp-warn.soft') || { textContent: '' }).textContent, red: !!document.querySelector('#routePick .rp-warn.red'), costing: window.__app.guide.g.active }));
+  ok('іншого шляху для фури немає — показано дорогу під знак із жовтим попередженням (а не червоний «легковий» маршрут)', rq.map(q => q.costing + ':' + (pen(q) || '')).join() === 'truck:,truck:,truck:,truck:600' && /шлях є лише дорогою зі знаком «фурам заборонено»/.test(w3.soft) && /Іншої дороги немає/.test(w3.soft) && !w3.red, JSON.stringify({ rq: rq.map(q => q.costing + ':' + (pen(q) || '')), w3 }));
+  await sleep(2400);
+  ok('…і зайвого запиту «варіанта» після цього немає', routeReqs.length === n0 + 4, String(routeReqs.length - n0));
+  await closePick();
+  // 4) «Оминати» — варіант через заборону не шукаємо й не пропонуємо
+  ROUTE.fn = q => q.costing === 'truck' && pen(q) ? { status: 200, body: softJson } : null;
+  await app(page, () => { window.__app.S.hgvBan = 'avoid'; });
+  n0 = routeReqs.length; await build(); await sleep(2600);
+  cs = await cards();
+  ok('режим «Оминати»: лише суворий рейс, варіанта «через заборону» немає', routeReqs.length === n0 + 1 && pen(routeReqs[n0]) === undefined && cs.length === 2 && cs.every(c => !c.soft), JSON.stringify(cs.map(c => c.soft)));
+  await closePick();
+  // 5) «Їхати» — знак не враховуємо зовсім (габарити — так), про це сказано
+  await app(page, () => { window.__app.S.hgvBan = 'go'; });
+  n0 = routeReqs.length; await build(); await sleep(2600);
+  const w5 = await app(page, () => (document.querySelector('#routePick .rp-warn.soft.mild') || { textContent: '' }).textContent);
+  ok('режим «Їхати»: рейс одразу дорогами під знак (малий штраф у часі), габарити в запиті, про вибір нагадано', routeReqs.length === n0 + 1 && pen(routeReqs[n0]) === 120 && routeReqs[n0].costing_options.truck.height > 0 && /не враховано — так вибрано в налаштуваннях/.test(w5), JSON.stringify({ p: pen(routeReqs[n0]), w5 }));
+  await closePick();
+  // 6) легковик — знак для фур його не стосується
+  await app(page, () => { window.__app.S.hgvBan = 'ask'; window.__app.S.vehicle = 'auto'; });
+  n0 = routeReqs.length; await build(); await sleep(2600);
+  ok('легкова: жодних запитів «через заборону для фур»', routeReqs.length === n0 + 1 && routeReqs[n0].costing === 'auto' && pen(routeReqs[n0]) === undefined && await app(page, () => !document.querySelector('#routePick .rp-warn.soft')));
+  ROUTE.fn = null;
+  ok('прохід 26 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ROUTE.fn = null; ok('прохід 26 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
