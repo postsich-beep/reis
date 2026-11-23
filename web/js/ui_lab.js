@@ -1,5 +1,5 @@
 // Панелі «Лабораторія», «Налаштування», «Telegram-канали», «GPS», «Діагностика», «Про застосунок».
-import { bus, log, getLog, S, VERSION, fmtClock, fmtMS, fmtDist } from './core.js';
+import { bus, log, getLog, S, VERSION, fmtClock, fmtMS, fmtDist, TRUCK_MAX_T } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, debugState, speedView, gpsJournal, gq } from './nav.js';
 import { g, say } from './guide.js';
@@ -124,7 +124,7 @@ function pointsHtml() {
     <div class="muted" style="margin-top:6px">${t('legHint')}</div>`;
 }
 function settingsHtml() {
-  const tr = S.truck, num = (id, label, v, step = '0.1') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}" value="${v}"></label>`;
+  const tr = S.truck, num = (id, label, v, step = '0.1', max = '') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}"${max ? ` max="${max}"` : ''} value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
   const styleOn = STYLES.find(x => x[1] === S.styleUrl);
   return `<div class="btns" style="margin-top:0"><button class="btn wide" data-act="labOpen">${ICON.lab}${t('labOpen')}</button></div>
@@ -162,7 +162,7 @@ function settingsHtml() {
   ${seg('lang', [['uk', 'Українська', S.lang === 'uk'], ['ru', 'Русский', S.lang === 'ru']])}
 
   <div class="sec">${t('setTruck')}</div><div class="form">
-    ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5')}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
+    ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5', TRUCK_MAX_T)}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
   <div class="muted" style="margin-top:6px">${t('setTruckHint')}</div>
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
@@ -237,7 +237,11 @@ definePanel('settings', {
       if (id.startsWith('tr_')) {
         const k = id.slice(3), tr = { ...S.truck };
         if (k === 'hazmat') tr.hazmat = v === '1';
-        else { const n = parseFloat(String(v).replace(',', '.')); if (!(n > 0) && !(k === 'vmax' && n === 0)) return; tr[k] = n; }   // обмежувач 0 — вимкнено
+        else {
+          let n = parseFloat(String(v).replace(',', '.')); if (!(n > 0) && !(k === 'vmax' && n === 0)) return;   // обмежувач 0 — вимкнено
+          if (k === 'weight' && n > TRUCK_MAX_T) { n = TRUCK_MAX_T; e.target.value = n; toast(t('trWeightMax', TRUCK_MAX_T), 'yellow', 5000); }
+          tr[k] = n;
+        }
         S.truck = tr;
       } else if (id.startsWith('s_')) {
         const k = id.slice(2);

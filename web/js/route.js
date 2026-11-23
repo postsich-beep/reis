@@ -1,5 +1,5 @@
 // Рейси: пошук адрес, маршрут для фури (Valhalla), регіони на шляху, збереження.
-import { bus, log, S, db, hav, decodePolyline6, RouteIndex, uid, sleep } from './core.js';
+import { bus, log, S, db, hav, decodePolyline6, RouteIndex, uid, sleep, TRUCK_MAX_T } from './core.js';
 import { getJson, http } from './platform.js';
 
 const PHOTON = 'https://photon.komoot.io';
@@ -79,7 +79,7 @@ export const oblastName = id => { const o = OBLASTS.find(o => o.id === id); retu
 
 /* ---------- маршрут ---------- */
 export function truckOptions() {
-  const t = S.truck, o = { height: +t.height, width: +t.width, length: +t.length, weight: +t.weight, axle_load: +t.axle, hazmat: !!t.hazmat };
+  const t = S.truck, o = { height: +t.height, width: +t.width, length: +t.length, weight: Math.min(+t.weight, TRUCK_MAX_T), axle_load: +t.axle, hazmat: !!t.hazmat };
   if (+t.vmax > 0) o.top_speed = Math.round(+t.vmax);      // обмежувач: час у дорозі рахується для фури, а не для легковика
   return o;
 }

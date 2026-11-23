@@ -87,10 +87,10 @@ const PLACES_JSON = { v: 1, date: '20261121', rows: [
   [49.588, 34.551, 'c', 'Полтава', '', 'poltava', 279593], [49.835, 36.686, 'c', 'Чугуїв', 'Чугуев', 'kharkiv', 31000],
   [48.66, 25.51, 'v', 'Львівка', '', 'chernivtsi', 0], [50.02, 30.12, 'v', 'Харківці', '', 'kyiv', 0], [B[0], B[1], 'c', 'Полтава-тест', '', 'poltava', 1]
 ] };
-// проблемні для фури місця (як web/data/hazards.json, формат 2): міст 20 т на М-03 уздовж маршруту,
+// проблемні для фури місця (як web/data/hazards.json, формат 2): міст 15 т на М-03 уздовж маршруту (фура в парку — до 20 т),
 // низький проїзд на вулиці навхрест (має ігноруватися), ґрунт 1,2 км, міст 55 т (фурі не заважає)
 const HAZ_JSON = (() => {
-  const groups = [['w', 20, 'М-03', 300, 1], ['h', 3.8, 'вулиця Навхрест', 50, 0], ['u', 2, 'Т-2101', 1200, 0], ['w', 55, 'М-03', 100, 1]];
+  const groups = [['w', 15, 'М-03', 300, 1], ['h', 3.8, 'вулиця Навхрест', 50, 0], ['u', 2, 'Т-2101', 1200, 0], ['w', 55, 'М-03', 100, 1]];
   const raw = [[coords[turnIdx[3] + 100], 315, 0], [coords[turnIdx[3] + 150], 45, 1]];
   for (let i = 0; i <= 24; i += 6) raw.push([coords[turnIdx[3] + 200 + i], 315, 2]);
   raw.push([coords[turnIdx[3] + 260], 315, 3]);
@@ -428,10 +428,10 @@ if (run('1')) try {
   await page.waitForFunction(() => document.querySelectorAll('#planSum .pill').length >= 2, null, { timeout: 30000 }).catch(() => {});
   ok('області на шляху визначено', (await page.$$eval('#planSum .pill', e => e.map(x => x.textContent))).join(',').includes('Полтавська'));
   // дороги очима фури
-  await page.waitForFunction(() => /Міст до 20 т/.test(document.getElementById('panelBody').textContent), null, { timeout: 8000 }).catch(() => {});
+  await page.waitForFunction(() => /Міст до 15 т/.test(document.getElementById('panelBody').textContent), null, { timeout: 8000 }).catch(() => {});
   const tk = await page.textContent('#panelBody');
   ok('план: частка доріг за категоріями (М-03 ≈ 75%)', /траси М і Н 7[45]%/.test(tk) && /місцеві й вулиці 2[56]%/.test(tk), (tk.match(/траси М і Н \d+%|місцеві й вулиці \d+%/g) || []).join(' '));
-  ok('план: міст 20 т на маршруті — червоним, з вагою фури', /Міст до 20 т/.test(tk) && /ваша фура 40 т/.test(tk) && await page.$$eval('.hz-item.red', e => e.some(x => /Міст до 20 т/.test(x.textContent))));
+  ok('план: міст 15 т на маршруті — червоним, з вагою фури (20 т)', /Міст до 15 т/.test(tk) && /ваша фура 20 т/.test(tk) && await page.$$eval('.hz-item.red', e => e.some(x => /Міст до 15 т/.test(x.textContent))));
   ok('план: без переліку душів (зайве прибрано)', !/Душ попереду/.test(tk));
   ok('план: ґрунт ≈ 1,2 км', /Ґрунт або щебінь — 1,[12] км/.test(tk), (tk.match(/Ґрунт[^·]*?км/) || [''])[0]);
   ok('проїзд на вулиці навхрест і міст 55 т не вважаються проблемою', !/3,8 м/.test(tk) && !/55 т/.test(tk));
@@ -467,7 +467,7 @@ if (run('1')) try {
   await page.waitForFunction(() => window.__app.guide.g.active && window.__app.guide.g.idx, null, { timeout: 8000 });
   ok('рейс активний', true);
   { const q = routeReqs.find(x => x.costing === 'truck') || {}, tk = (q.costing_options || {}).truck || {};
-    ok('запит маршруту: профіль фури з габаритами, мова підказок українська', q.costing === 'truck' && tk.height === 4 && tk.weight === 40 && q.language === 'uk-UA' && q.locations.length === 2 && q.locations[0].type === 'break', JSON.stringify({ c: q.costing, tk, l: q.language })); }
+    ok('запит маршруту: профіль фури з габаритами, мова підказок українська', q.costing === 'truck' && tk.height === 4 && tk.weight === 20 && q.language === 'uk-UA' && q.locations.length === 2 && q.locations[0].type === 'break', JSON.stringify({ c: q.costing, tk, l: q.language })); }
   // черга голосу могла бути зайнята (тривога, подія) — даємо їй договорити; на CI це бувало повільніше
   ok('сказано «маршрут побудовано»', await page.waitForFunction(() => window.__spoken.some(s => /Рейс прокладено/.test(s)), null, { timeout: 8000 }).then(() => true, () => false), JSON.stringify(await app(page, () => window.__spoken.slice(-5))));
 
@@ -661,7 +661,7 @@ if (run('1')) try {
   ok('перемикач вібрації', await app(page, () => window.__app.S.vibrate === false));
   await page.click('#panelClose');
   await shot(page, '10-night');
-  ok('у дорозі голосом попереджено про міст 20 т', await app(page, () => window.__spoken.some(s => /Міст до 20 т/.test(s))), (await app(page, () => window.__spoken.filter(s => /Міст|Ґрунт/.test(s)).join(' | '))));
+  ok('у дорозі голосом попереджено про міст 15 т', await app(page, () => window.__spoken.some(s => /Міст до 15 т/.test(s))), (await app(page, () => window.__spoken.filter(s => /Міст|Ґрунт/.test(s)).join(' | '))));
   // Київ у години пік
   const ky = await app(page, () => {
     const R = window.__app.roads, route = { coords: [[50.95, 30.45], [50.70, 30.50], [50.45, 30.52], [50.20, 30.60]] };
@@ -676,10 +676,10 @@ if (run('1')) try {
     r.fulfill({ status: 200, contentType: 'application/json', headers: { 'access-control-allow-origin': '*' }, body: JSON.stringify(Array.from({ length: n }, () => ({ hourly: { time, temperature_2m: z(31), precipitation: z(0), snowfall: z(0), weather_code: z(1), wind_gusts_10m: z(10), visibility: z(20000) } }))) }); });
   const heat = await app(page, async () => {
     const W = window.__app.weather, S = window.__app.S, route = { coords: [[49.99, 36.23], [49.8, 35.5], [49.6, 34.55]], dist: 140000, time: 7200 };
-    const h = await W.heatAlong(route); const heavy = W.heatApplies(); S.heatExempt = true; const ex = W.heatApplies(); S.heatExempt = false;
-    return { maxT: h && h.maxT, first: !!(h && h.first), heavy, ex };
+    const h = await W.heatAlong(route), w0 = S.truck.weight; const light = W.heatApplies(); S.truck = { ...S.truck, weight: 40 }; const heavy = W.heatApplies(); S.heatExempt = true; const ex = W.heatApplies(); S.heatExempt = false; S.truck = { ...S.truck, weight: w0 };
+    return { maxT: h && h.maxT, first: !!(h && h.first), heavy, ex, light };
   });
-  ok('спека: прогноз +31 °C на маршруті, обмеження для фури 40 т, пільговий вантаж — без обмеження', heat.maxT === 31 && heat.first && heat.heavy === true && heat.ex === false, JSON.stringify(heat));
+  ok('спека: прогноз +31 °C на маршруті; наша фура 20 т — без обмеження (воно для фур понад 24 т); 40 т — обмеження, пільговий вантаж — без', heat.maxT === 31 && heat.first && heat.light === false && heat.heavy === true && heat.ex === false, JSON.stringify(heat));
   // тряска за датчиками: калібрування і погана ділянка
   const rg = await app(page, () => {
     const R = window.__app.rough, base = [49.70, 35.00];
@@ -1959,10 +1959,20 @@ if (run('20')) try {
   await page.click('#routePick [data-rp="x"]'); await sleep(300);
   // 3) і звичайного немає — помилка людською мовою, без англійської
   ROUTE.fn = () => NP;
-  await build(); await sleep(5000);
+  await build(); await page.waitForFunction(() => /не прокладено/.test(document.getElementById('panelBody').textContent), null, { timeout: 15000 }).catch(() => {});
   const err = await app(page, () => document.getElementById('panelBody').textContent);
   ok('шляху немає взагалі — «Рейс для фури не прокладено: проїзду між цими точками не знайшлося», без англійської', /проїзду між цими точками не знайшлося/.test(err) && !/No path/.test(err), err.replace(/\s+/g, ' ').slice(0, 300));
   ROUTE.fn = null;
+  // фури в парку — до 20 т: за замовчуванням 20 т; збережені раніше 40 т стали 20 т; більше 20 не поставити
+  ok('фура за замовчуванням — 20 т', await app(page, () => window.__app.S.truck.weight === 20));
+  await app(page, () => { const s = JSON.parse(localStorage.getItem('reis.settings') || '{}'); s.truck = { ...(s.truck || {}), weight: 40 }; delete s.truckV; localStorage.setItem('reis.settings', JSON.stringify(s)); });
+  await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
+  ok('телефон, де було збережено 40 т, — після оновлення 20 т', await app(page, () => window.__app.S.truck.weight === 20 && JSON.parse(localStorage.getItem('reis.settings')).truck.weight === 20));
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#tr_weight');
+  await app(page, () => { const i = document.getElementById('tr_weight'); i.value = '40'; i.dispatchEvent(new Event('change', { bubbles: true })); }); await sleep(300);
+  const wcap = await app(page, () => ({ w: window.__app.S.truck.weight, max: document.getElementById('tr_weight').max, v: document.getElementById('tr_weight').value, toast: document.getElementById('toasts').textContent }));
+  ok('у «Параметрах» більше 20 т не поставити: 40 → 20 і пояснення', wcap.w === 20 && wcap.max === '20' && wcap.v === '20' && /Найважча фура в парку — 20 т/.test(wcap.toast), JSON.stringify(wcap));
+  await page.click('#panelClose');
   ok('прохід 20 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ROUTE.fn = null; ok('прохід 20 дійшов до кінця', false, String(e.message).split('\n')[0]); }
