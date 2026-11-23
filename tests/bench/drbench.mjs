@@ -92,8 +92,8 @@ function truth(road, seed, opts = {}) {
 }
 /* ---------- рейс для навігатора: маневри з плановим часом (як Valhalla для фури) ---------- */
 // як Valhalla для фури: маневр на кожному повороті, час ділянки — за типом дороги (місто 40, з'їзд 35, траса 80 км/год)
-function tripFor(idx, tr, road) {
-  const n = idx.c.length, cuts = [0], SPD = { city: 11.1, ramp: 9.7, hwy: 22.2 };
+function tripFor(idx, tr, road, planK = 1) {
+  const n = idx.c.length, cuts = [0], SPD = { city: 11.1 * planK, ramp: 9.7 * planK, hwy: 22.2 * Math.min(1, planK * 1.6) };
   for (const m of road.marks) if (m.ang != null && Math.abs(m.ang) >= 30) cuts.push(m.d0);
   cuts.push(idx.total);
   const zones = road.marks.filter(m => m.zone).sort((a, b) => a.d - b.d), zoneAt = d => { let z = 'hwy'; for (const x of zones) if (x.d <= d + 1) z = x.zone; return z; };
@@ -113,7 +113,7 @@ export function run(name, o = {}) {
   const fr = x => x - Math.floor(x), sd = o.seed || 7;
   o = { zoneK: 0.92 + 0.14 * fr(sd * 0.618), aLat: 1.2 + 0.5 * fr(sd * 0.414), acc: 0.35 + 0.15 * fr(sd * 0.732), bias: (fr(sd * 0.27) - 0.5) * 2.4, ...o };
   const tr = truth(road, sd, o);
-  const idx = tr.idx, trip = tripFor(idx, tr, road);
+  const idx = tr.idx, trip = tripFor(idx, tr, road, o.planK || 1);
   // скидаємо стан навігатора
   nav.setManualSpeed(null); mem.clear(); nav.setRoute(null);
   NOW += 3600e3;
@@ -122,7 +122,8 @@ export function run(name, o = {}) {
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return s * Math.SQRT2; };
   const gpsUntil = o.gpsSec != null ? o.gpsSec : 90, bias = (o.bias != null ? o.bias : 0.6) / 60;   // дрейф гіроскопа, °/с
   const errs = [], log = [];
-  let yawOff = 0, wig = null, lastNet = -999;
+  let yawOff = 0, wig = null, lastNet = -999, grab = null, grabNext = gpsUntil + 40 + 60 * Math.abs(rnd());
+  globalThis.__motionHint = o.grab === 'hint' ? () => ({ handled: !!grab, tilt: grab ? 30 : 1, peak: 20 }) : () => null;
   const t0 = NOW;
   for (const s of tr.out) {
     NOW = t0 + s.t * 1000;
@@ -135,12 +136,15 @@ export function run(name, o = {}) {
     // перестроювання на трасі: ±6° туди й назад за 6 с — гіроскоп це бачить, а дорога ні
     if (!wig && s.v > 15 && rnd() > 0.495 + 0.004) wig = { t: s.t, a: (rnd() > 0 ? 1 : -1) * 6 };
     let w = 0; if (wig) { const k = (s.t - wig.t) / 6; if (k >= 1) wig = null; else w = wig.a * Math.sin(Math.PI * k); }
-    const yaw = o.noGyro ? undefined : s.yaw + bias * s.t + gauss() * 0.7 + w;
+    // телефон узяли в руки: 'fast' — ривок 100–150° за 2 с; 'hint'/'slow' — повільно, 20°/с три секунди (видно лише за нахилом телефона)
+    if (o.grab && !grab && s.t >= grabNext) grab = { t: s.t, dur: o.grab === 'fast' ? 2 : 3, rate: (rnd() > 0 ? 1 : -1) * (o.grab === 'fast' ? 50 + 25 * Math.abs(rnd()) * 2 : 20) };
+    if (grab) { if (s.t - grab.t >= grab.dur) { grabNext = s.t + 90 + 240 * Math.abs(rnd()); grab = null; } else yawOff += grab.rate; }
+    const yaw = o.noGyro ? undefined : s.yaw + bias * s.t + gauss() * 0.7 + w + yawOff;
     bus.emit('sens', { var: s.v > 0.3 ? 0.08 + Math.abs(gauss()) * 0.02 : 0.0004 + Math.abs(gauss()) * 0.0001, yaw });
     if (o.place != null && s.t === gpsUntil + 10) nav.placeAtD(Math.max(0, s.d + o.place));     // стартова помилка (напр. з вишок)
     nav.benchTick();
     const P = nav.pos;
-    if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, sig: st ? st.sig : null, tr: st ? st.trust : null }); }
+    if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, sig: st ? st.sig : null, tr: st ? st.trust : null, g: st && st.gate ? `${st.cpi}:${st.gate.state || '-'}:${st.gate.prog}:${st.gate.ang}${st.gate.handled ? ':H' : ''}` : '' }); }
   }
   const ab = errs.map(x => Math.abs(x.e)).sort((a, b) => a - b), q = p => ab.length ? ab[Math.min(ab.length - 1, Math.floor(p * ab.length))] : NaN;
   // похибка одразу після кожної контрольної точки (через 20 с після виходу з повороту)
@@ -153,6 +157,10 @@ export const SCEN = {
   'mix': {}, 'mix:зсув+600': { road: 'mix', place: 600 }, 'mix:зсув−500': { road: 'mix', place: -500 }, 'mix:затор': { road: 'mix', jam: { d0: 9000, d1: 13000, v: 4 } }, 'mix:стоп-поїхали': { road: 'mix', jam: { d0: 9000, d1: 12000, v: 7, go: true } },
   'mix:вишки': { road: 'mix', net: 1500 }, 'mix:без гіроскопа': { road: 'mix', noGyro: true }, 'mix:дрейф 3°/хв': { road: 'mix', bias: 3 },
   'hwy': {}, 'hwy:вишки': { road: 'hwy', net: 1500 }, 'city': {}, 'city:зсув+300': { road: 'city', place: 300 },
+  // 1.1.12 — як на справжній дорозі: план удвічі повільніший за водія (Львів: 17 за планом, 42 насправді), GPS зник ще на стоянці,
+  // телефон беруть у руки (ривком; повільно — з підказкою датчика нахилу і без неї)
+  'city:план÷2': { road: 'city', planK: 0.5 }, 'city:зі стоянки': { road: 'city', gpsSec: 2, planK: 0.5 }, 'mix:план÷1.6': { road: 'mix', planK: 0.6 },
+  'mix:телефон ривком': { road: 'mix', grab: 'fast' }, 'mix:телефон у руках': { road: 'mix', grab: 'hint' }, 'mix:крутили непомітно': { road: 'mix', grab: 'slow' },
 };
 // Кожен сценарій — в окремому процесі: стан навігатора не переходить із прогону в прогін (як свіжий телефон)
 const one = process.argv.indexOf('--one');
