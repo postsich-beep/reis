@@ -1348,7 +1348,7 @@ if (run('9')) try {
   ok('голос: за замовчуванням — голос телефону (оболонці сказано «системний»)', (await calls()).includes('setVoice::0:'));
   await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow');
   let v = await vs();
-  ok('Налаштування → Голос: телефону, Тетяна (жіночий), Микита (чоловічий), Лада', v.rows.length === 4 && /Голос телефону/.test(v.rows[0]) && /Тетяна — жіночий/.test(v.rows[1]) && /Микита — чоловічий/.test(v.rows[2]) && v.on === 'system', JSON.stringify(v.rows));
+  ok('Налаштування → Голос: лише голос телефону, Тетяна (жіночий) і Микита (чоловічий) — писклявої Лади більше немає', v.rows.length === 3 && !/Лада/.test(v.text) && /Голос телефону/.test(v.rows[0]) && /Тетяна — жіночий/.test(v.rows[1]) && /Микита — чоловічий/.test(v.rows[2]) && v.on === 'system', JSON.stringify(v.rows));
   ok('якісних голосів ще немає — «потрібен пакет», кнопка «Завантажити пакет»', /потрібен пакет/.test(v.rows[1]) && /Завантажити пакет/.test(v.text));
   await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200);
   let c = await calls(); v = await vs();
@@ -1384,9 +1384,9 @@ if (run('9')) try {
   await emitN('voice', { state: 'spoke', eng: 'neural', ms: 700 }); await sleep(150);
   ok('голос запустився й сказав фразу — пояснення про помилку зникло', !/не спрацював/.test((await vs()).text) && /Говорить якісний голос/.test((await vs()).text), (await vs()).text.slice(0, 200));
   // перемикання голосів: кожен — свій диктор
-  for (const [id, sid] of [['uk:0', 0], ['uk:1', 1], ['uk:2', 2]]) { await page.click(`#voiceSec .vrow[data-voice="${id}"]`); await sleep(120); }
+  for (const [id, sid] of [['uk:1', 1], ['uk:2', 2]]) { await page.click(`#voiceSec .vrow[data-voice="${id}"]`); await sleep(120); }
   c = await calls();
-  ok('перемикання Лада → Микита → Тетяна — оболонці sid 0, 1, 2', ['setVoice:uk:0:uk', 'setVoice:uk:1:uk', 'setVoice:uk:2:uk'].every(x => c.includes(x)), c.slice(-6).join());
+  ok('перемикання Микита → Тетяна — оболонці диктори 1 і 2 (нульового, Ладу, не вмикаємо)', ['setVoice:uk:1:uk', 'setVoice:uk:2:uk'].every(x => c.includes(x)) && !c.includes('setVoice:uk:0:uk'), c.slice(-6).join());
   // стара оболонка 1.1.2–1.1.4: якісний голос не вмикаємо, пропонуємо оновити застосунок
   await app(page, () => { window.__nativeRev = 3; window.__nativeCalls.length = 0; });
   await page.click('#voiceSec .vrow[data-voice="uk:1"]'); await sleep(200); v = await vs(); c = await calls();
@@ -1403,6 +1403,10 @@ if (run('9')) try {
   ok('російський інтерфейс, вибрано голос телефону: так і написано', /Говорит голос телефона — так выбрано/.test((await vs()).text), (await vs()).text.slice(0, 120));
   await app(page, () => { window.__app.S.lang = 'uk'; });
   ok('прохід «голос» без помилок JS', errors.length === 0, errors.join(' | '));
+  // у кого була вибрана Лада — після оновлення говорить Тетяна
+  await app(page, () => { const st = JSON.parse(localStorage.getItem('reis.settings') || '{}'); st.ttsVoice = 'uk:0'; localStorage.setItem('reis.settings', JSON.stringify(st)); });
+  await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S && window.__app.map && window.__app.map.map);
+  ok('була вибрана Лада — після оновлення вибрано Тетяну', await app(page, () => window.__app.S.ttsVoice === 'uk:2' && JSON.parse(localStorage.getItem('reis.settings')).ttsVoice === 'uk:2'));
   await ctx.close();
 } catch (e) { ok('прохід «голос» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 

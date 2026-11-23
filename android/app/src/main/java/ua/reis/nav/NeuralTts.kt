@@ -200,10 +200,20 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
 
     private fun newTrack(attrs: AudioAttributes, sr: Int, enc: Int): AudioTrack {
         val fmt = AudioFormat.Builder().setEncoding(enc).setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
-        val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, enc)
-        val quarter = if (enc == AudioFormat.ENCODING_PCM_FLOAT) sr else sr / 2            // чверть секунди звуку в байтах
-        val tr = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(fmt)
-            .setBufferSizeInBytes(maxOf(minBuf, quarter)).setTransferMode(AudioTrack.MODE_STREAM).build()
+        val frame = if (enc == AudioFormat.ENCODING_PCM_FLOAT) 4 else 2                    // байтів на один відлік (моно)
+        val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, enc).coerceAtLeast(0)
+        // Розмір буфера мусить ділитися на розмір відліку. До 1.1.11 брали «пів частоти» байтів: для голосу 22 050 Гц це 11 025 —
+        // непарне число, і Android відмовляв: «Invalid audio buffer size» — якісний голос мовчав, фразу казав голос телефону.
+        val align = { n: Int -> (maxOf(n, frame) + frame - 1) / frame * frame }
+        val make = { bytes: Int ->
+            AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(fmt)
+                .setBufferSizeInBytes(bytes).setTransferMode(AudioTrack.MODE_STREAM).build()
+        }
+        val want = align(maxOf(minBuf, sr / 4 * frame))                                    // чверть секунди звуку
+        val tr = try { make(want) } catch (e: IllegalArgumentException) {
+            // якщо телефон не прийняв і такий розмір — беремо найменший дозволений (або 8192 байти, якщо телефон його не назвав)
+            make(align(if (minBuf > 0) minBuf * 2 else 8192))
+        }
         if (tr.state != AudioTrack.STATE_INITIALIZED) {
             try { tr.release() } catch (_: Exception) {}
             throw IOException("audio init")

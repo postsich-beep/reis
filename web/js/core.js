@@ -55,6 +55,8 @@ try {
   // 1.1.10: у нас фури не важчі за 20 т — збережені 40 т (старе значення за замовчуванням) стають 20 т
   settings.truck.weight = Math.min(+settings.truck.weight || TRUCK_MAX_T, TRUCK_MAX_T);
   if ((raw.truckV || 0) < 1 && raw.truck) { settings.truckV = 1; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
+  // 1.1.12: голос «Лада» прибрано (писклявий) — у кого він був вибраний, тепер говорить Тетяна
+  if (settings.ttsVoice === 'uk:0') { settings.ttsVoice = 'uk:2'; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
   // Телефон, на якому «Рейс» уже стояв: один раз ставимо базові галочки шарів, далі вибір водія не чіпаємо
   if ((raw.layersDefV || 0) < 1 && Object.keys(raw).length) {
     Object.assign(settings, { mapStops: true, mapStopTypes: { ...BASE_STOPS }, mapVerified: false, mapEvents: false, mapHazards: false, roughMap: false, layersDefV: 1 });
