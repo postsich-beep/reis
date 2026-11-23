@@ -787,19 +787,14 @@ if (run('2г')) try {
   if (tr0) {
     await app(page, d => window.__app.nav.snapToRoute(null) || true, 0);
     await app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(d); window.__app.nav.setManual({ lat: p.lat, lon: p.lon }); }, tr0.d - 120);
-    await emitN('sens', { var: 0.05, yaw: 0 });
-    await sleep(9500);
+    // 1.1.8: гіроскоп — як у телефоні, раз на секунду. 12 с курс рівний: позначка доїжджає до перехрестя й чекає на ньому
+    for (let k = 0; k < 12; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
     const held = await app(page, () => window.__app.nav.pos.rd);
-    ok('перед поворотом позначка чекає на гіроскоп', held < tr0.d && held > tr0.d - 40, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
-    await emitN('sens', { var: 0.05, yaw: 0 });
-    await app(page, () => { window.__realNow = Date.now; const b = Date.now(); Date.now = () => b + 8000; });
-    await emitN('sens', { var: 0.05, yaw: tr0.ang });
-    await app(page, () => { const b = window.__realNow(); Date.now = () => b + 10500; });   // курс устоявся — поворот завершено
-    await emitN('sens', { var: 0.05, yaw: tr0.ang });
-    await app(page, () => { Date.now = window.__realNow; });
-    await sleep(300);
+    ok('перед поворотом позначка чекає на гіроскоп (стоїть біля перехрестя ±25 м, не проскакує)', held <= tr0.d + 25 && held > tr0.d - 60, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
+    // поворот: 6 с повертаємо, далі рівно — позначка за поворотом, похибка мала, далі розгін
+    for (let k = 1; k <= 14; k++) { await emitN('sens', { var: 0.05, yaw: tr0.ang * Math.min(1, k / 6) }); await sleep(1000); }
     const after = await app(page, () => window.__app.nav.pos.rd);
-    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 450 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}`);
+    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 450 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}, ±${await app(page, () => window.__app.nav.pos.acc)} м`);
   }
   // 5) вишки «стрибають» на 3 км за 30 с — швидкість 360 км/год не показуємо
   await app(page, () => { window.__realNow = Date.now; });
@@ -975,7 +970,7 @@ if (run('5')) for (const sc of FAILS.filter(x => !process.env.SCEN || process.en
       prevRd = last.rd; hist.push(last.rd);
     }
     const r = { ...last, err: Math.round(last.rd - last.truth), maxJump: Math.round(maxJump), moved60: Math.round(Math.abs(hist[hist.length - 1] - hist[Math.max(0, hist.length - 7)])), rd: Math.round(last.rd), truth: Math.round(last.truth) };
-    if (process.env.DEBUG) console.log(sc.n, JSON.stringify(hist.map(Math.round)), await app(page, () => JSON.stringify({ turns: window.__app.nav.routeTurns(), log: window.__app.core.getLog().slice(-12).map(l => l.msg || l.text || JSON.stringify(l)), st: window.__app.nav.debugState().gyroSeen, yh: window.__app.nav.debugState().yawHist, mv: window.__app.nav.debugState().moving })));
+    if (process.env.DEBUG) console.log(sc.n, JSON.stringify(hist.map(Math.round)), await app(page, () => JSON.stringify({ turns: window.__app.nav.routeTurns(), log: window.__app.core.getLog().slice(-12).map(l => l.msg || l.text || JSON.stringify(l)), st: window.__app.nav.debugState().gyroSeen, yh: window.__app.nav.debugState().yawHist, mv: window.__app.nav.debugState().moving, pf: window.__app.nav.debugState().pf })));
     ok(T, sc.check(r), JSON.stringify(r));
     ok(T + ' — без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close();
@@ -1757,11 +1752,84 @@ if (run('17')) try {
     await ctx.close(); }
 } catch (e) { ok('прохід 17 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
+/* ============ прохід 18 (1.1.8): без GPS — контрольні повороти, пояснення водієві, рейс не перебудовується, масштаб як із GPS, підписи над лінією ============ */
+if (run('18')) try {
+  // стиль як OpenFreeMap Liberty: назви вулиць (transportation_name) і щит траси; тайлів немає — перевіряємо самі шари
+  const style = { version: 8, glyphs: 'https://tiles.example.test/fonts/{fontstack}/{range}.pbf', sources: { openmaptiles: { type: 'vector', tiles: ['https://tiles.example.test/t/{z}/{x}/{y}.pbf'], maxzoom: 14 } },
+    layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } },
+      { id: 'highway-name-minor', type: 'symbol', source: 'openmaptiles', 'source-layer': 'transportation_name', minzoom: 15, layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'symbol-placement': 'line' }, paint: { 'text-color': '#666', 'text-halo-width': 1 } },
+      { id: 'highway-shield-non-us', type: 'symbol', source: 'openmaptiles', 'source-layer': 'transportation_name', minzoom: 8, layout: { 'icon-image': 'road_1', 'text-field': ['get', 'ref'], 'text-font': ['Noto Sans Regular'], 'text-size': 10 } }] };
+  const { page, ctx, errors } = await newPage(true, { style });
+  await page.route('**/tiles.example.test/**', r => r.fulfill({ status: 404, body: '' }));
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await page.waitForFunction(() => window.__app.map.map && window.__app.map.map.getLayer('route-line'), null, { timeout: 15000 });
+  const ly = await app(page, () => { const m = window.__app.map.map, ids = m.getStyle().layers.map(l => l.id), at = id => ids.indexOf(id), h = m.getLayer('reis-house');
+    return { line: at('route-line'), near: at('route-near-line'), done: at('route-done'), name: at('highway-name-minor'), fuel: at('fuel-label'), house: at('reis-house'), houseZ: h ? h.minzoom : null,
+      halo: m.getPaintProperty('highway-name-minor', 'text-halo-width'), size: JSON.stringify(m.getLayoutProperty('highway-name-minor', 'text-size')), shieldHalo: m.getPaintProperty('highway-shield-non-us', 'text-halo-width') }; });
+  ok('назви вулиць — поверх лінії рейсу (лінія під підписами), наші значки АЗС — згори', ly.line >= 0 && ly.line < ly.name && ly.near < ly.name && ly.done < ly.name && ly.fuel > ly.name, JSON.stringify(ly));
+  ok('назви вулиць — більші, з товстим білим обідком; щит траси не чіпаємо', ly.halo === 2.4 && /17,17/.test(ly.size) && ly.shieldHalo == null, JSON.stringify(ly));
+  ok('номери будинків — окремий шар лише зблизька (від 17) і під назвами вулиць', ly.house >= 0 && ly.house < ly.name && ly.houseZ === 17, JSON.stringify(ly));
+  // рейс із поворотами: 90° ліворуч на 2 км, 90° праворуч на 3,5 км, 45° на 6 км і 26 км
+  const n = coords.length;
+  const trip = { id: 't-cp', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  await emitN('loc', { prov: 'gps', lat: coords[0][0], lon: coords[0][1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  const cps = await app(page, () => window.__app.nav.routeCps().map(c => ({ d: c.d, cls: c.cls, ang: c.ang })));
+  ok('контрольні точки розставлено наперед: перехрестя 90° — червоні, поворот траси 45° — жовтий', cps.filter(c => c.cls === 'red').length === 2 && cps.some(c => c.cls === 'yellow' && Math.abs(c.ang) >= 40 && Math.abs(c.ang) <= 50) && Math.abs(cps[0].d - 2000) < 60 && cps[0].ang < -80 && cps[1].ang > 80, JSON.stringify(cps));
+  await app(page, () => { window.__app.sim.setSpeed(60); window.__app.sim.start(); });
+  await sleep(5000);
+  const cpN = () => app(page, () => { const s = window.__app.map.map.getSource('cps'); const d = s.serialize ? s.serialize().data : s._data; return (d && d.features || []).map(f => f.properties.c); });
+  const zG = await app(page, () => window.__app.map.map.getZoom());
+  ok('з GPS контрольних точок на карті не видно (карта чиста)', (await cpN()).length === 0, JSON.stringify(await cpN()));
+  // GPS зник
+  await app(page, () => { window.__spoken.length = 0; document.getElementById('toasts').innerHTML = ''; window.__app.sim.setLost(true); });
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 12000 });
+  await sleep(3500);
+  const lost = await app(page, () => ({ spoken: window.__spoken.slice(), toasts: [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent).join(' | '), mode: window.__app.nav.pos.mode, acc: window.__app.nav.pos.acc,
+    accN: (s => { const d = s.serialize ? s.serialize().data : s._data; return d && d.features ? d.features.length : -1; })(window.__app.map.map.getSource('acc')), z: window.__app.map.map.getZoom(), spd: window.__app.nav.pos.spd }));
+  ok('водієві пояснено: «нічого страшного», рейс той самий, звірю місце на повороті через …', lost.spoken.some(s => /Нічого страшного/.test(s) && /звірю місце/.test(s) && /Через \d+ (метрів|кілометр)/.test(s)), JSON.stringify(lost.spoken));
+  ok('…і плашка: без перебудови, найближчий поворот і що це за поворот', /без перебудови/.test(lost.toasts) && /найближчий через .* — перехрестя чи різкий поворот ліворуч/.test(lost.toasts), lost.toasts.slice(0, 220));
+  const cpd = await cpN();
+  ok('без GPS на карті — контрольні повороти попереду (червоні й жовті)', cpd.length >= 3 && cpd[0] === 'red' && cpd.includes('yellow'), JSON.stringify(cpd));
+  ok('без GPS масштаб той самий, що з GPS — не віддаляємо карту', lost.z > 15 && Math.abs(lost.z - zG) < 0.6, JSON.stringify({ zG, zD: lost.z, acc: lost.acc, spd: lost.spd }));
+  ok('без GPS на рейсі — без кілометрового кола похибки', lost.accN === 0, JSON.stringify({ accN: lost.accN, acc: lost.acc }));
+  await shot(page, '18-dr-cps');
+  await page.click('#tabGps'); await sleep(400);
+  const gpsTxt = await page.textContent('#panelBody');
+  ok('у панелі GPS — де наступна звірка', /Звірка на повороті.*(м|км) · перехрестя чи різкий поворот ліворуч/.test(gpsTxt.replace(/\s+/g, ' ')), gpsTxt.replace(/\s+/g, ' ').slice(0, 400));
+  await page.click('#panelClose');
+  // звірка на повороті — коротка зелена плашка з наступною точкою
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; const P = window.__app.nav.pos; window.__app.core.bus.emit('turnMatch', { ang: -90, cls: 'red', d: P.rd - 20, was: 900, now: 40, next: { d: P.rd + 1500, cls: 'red', ang: 90 } }); });
+  await sleep(250);
+  const tm = await app(page, () => ({ t: [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent).join(' | '), s: window.__spoken.slice(-1)[0] }));
+  ok('після звірки: «Місце звірено на повороті · ±40 м. Наступна звірка через 1,5 км»', /Місце звірено на повороті · ±40 м\. Наступна звірка через 1[,.]5 км/.test(tm.t) && /уточнено на повороті/.test(tm.s), JSON.stringify(tm));
+  // без GPS рейс не перебудовуємо: «новий шлях» і «заїхати через» — відкладаються до GPS
+  const n0 = routeReqs.length;
+  await app(page, () => { window.__spoken.length = 0; document.getElementById('toasts').innerHTML = ''; window.__app.guide.rerouteNow(true); });
+  await sleep(1200);
+  const rw = await app(page, () => ({ pend: window.__app.guide.g.reroutePending, t: document.getElementById('toasts').textContent, s: window.__spoken.slice() }));
+  ok('без GPS «новий шлях» не будує рейс заново — відкладено, водієві сказано чому', routeReqs.length === n0 && rw.pend && rw.pend.fresh && /Без GPS рейс не перебудовую/.test(rw.t) && rw.s.some(x => /не перебудовую/.test(x)), JSON.stringify({ reqs: routeReqs.length - n0, ...rw }));
+  await app(page, () => window.__app.guide.setVia({ lat: 49.99, lon: 36.0, label: 'Мерефа' }));
+  await sleep(800);
+  ok('«заїхати через» без GPS — теж без перебудови, рейс на екрані той самий', routeReqs.length === n0 && await app(page, () => window.__app.guide.g.route.coords.length) === n, String(routeReqs.length - n0));
+  await app(page, () => window.__app.sim.setLost(false));
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
+  await page.waitForFunction(n0 => window.__app.guide.g.reroutePending == null, n0, { timeout: 8000 }).catch(() => {});
+  await sleep(800);
+  ok('GPS повернувся — відкладену перебудову виконано (одна, з точкою «через»)', routeReqs.length === n0 + 1 && routeReqs[n0].locations.length === 3 && await app(page, () => window.__app.guide.g.reroutePending == null), JSON.stringify(routeReqs.slice(n0).map(q => q.locations.length)));
+  await app(page, () => window.__app.sim.stop());
+  ok('прохід 18 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 18 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
   const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);
   ok('офлайн-карта: стиль Protomaps із файлу PMTiles завантажився', okSrc && rangeHits > 0, 'запитів шматками: ' + rangeHits);
   ok('офлайн-карта: шари маршруту на місці', await app(page, () => !!window.__app.map.map.getLayer('route-line') && !!window.__app.map.map.getLayer('route-done')));
+  ok('офлайн-карта: лінія рейсу під назвами вулиць, номери будинків — від 17', await app(page, () => { const m = window.__app.map.map, ids = m.getStyle().layers.map(l => l.id), a = m.getLayer('address_label');
+    return ids.indexOf('route-line') < ids.indexOf('roads_labels_major') && ids.indexOf('route-line') < ids.indexOf('roads_labels_minor') && a && a.minzoom === 17 && m.getPaintProperty('roads_labels_minor', 'text-halo-width') === 2.4; }));
   await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
   const offTxt = await page.textContent('#offSec');
   ok('налаштування: розділ офлайн-карти показує стан і вибір карти', /У телефоні/.test(offTxt) && /Онлайн/.test(offTxt), offTxt.slice(0, 120));

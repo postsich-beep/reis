@@ -1,5 +1,6 @@
 // Двигун позиції: довіра до GPS, детектор підміни, розрахунок шляху без сигналу, ручна поправка ±100 м.
 import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.js';
+import { RouteTracker } from './drpf.js';
 
 export const pos = {
   mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
@@ -34,6 +35,18 @@ const SUS_SPD = () => vmaxKmh() ? (vmaxKmh() + 15) / 3.6 : MAX_SPD; // м/с —
 const startT = Date.now();
 let lockT = 0, netInnov = [], manualSpd = null, manualSpdT = 0;
 let turns = [], yawHist = [], lastTurnEv = 0, holdSince = 0, gyroSeen = 0, heldTurn = null, plan = [];
+// 1.1.8: без GPS по рейсу веде «хмара» можливих положень (drpf.js), звірена з гіроскопом на кожному повороті.
+// Старий фільтр (kf) лишився запасним: без рейсу і для порівняння на стенді (S.drAlgo = 'kf').
+let trk = null, trkFor = null, trkCal = null;
+const usePf = () => S.drAlgo !== 'kf';
+function tracker() {
+  if (!route) return null;
+  if (trkFor !== route) { trk = new RouteTracker(route, { planFn: planSpeed, vmax: VMAX(), ...(S.drOpts || {}) }); trkFor = route; }
+  return trk;
+}
+export const drTracker = () => (trk && trk.on && pos.mode === 'dr') ? trk : null;
+// звідки контрольні точки рейсу (для карти й підказок): є навіть до втрати GPS
+export function routeCps() { const t = tracker(); return t ? t.cps : []; }
 /* ---------- фільтр «місце і швидкість уздовж маршруту» (без GPS) ----------
    Один стан на все: d — де ми на маршруті, v — швидкість, P — наскільки впевнені. Кожну секунду: d += v·dt.
    Вишки й Wi-Fi проєктуються на маршрут (помилка вбік на 1,5 км тоді не заважає) і м'яко тягнуть d і v.
@@ -142,7 +155,7 @@ function placeOnRoute(d, accBase, reason) {
   const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
   if (pos.mode !== 'dr') { pos.mode = 'approx'; enterDR(reason); carry = 0; }    // оцінка вже врахувала час
   else pos.reason = reason;
-  pos.accRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
+  pos.accRef = pos.manRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
   kfInit(pos.rd, accBase);
   bus.emit('pos', pos);
 }
@@ -155,6 +168,7 @@ function kfInit(d, sig) {
   else if (apSpd != null && now - apSpdT < 60000) { v = Math.min(apSpd, VMAX()); sv = Math.max(3, apSpdErr || 3); src = 'net'; }
   else { v = planSpeed(d); sv = 7; src = 'plan'; }
   Object.assign(kf, { on: true, d, v, Pdd: sig * sig, Pdv: 0, Pvv: sv * sv, src, out: [], measT: 0 });
+  if (usePf() && tracker()) { trk.init(d, Math.max(sig, 15), v, Math.max(sv, 1.5), now / 1000, src === 'gps' || src === 'manual'); trkCal = { sig: trk.est.sig, t: now }; }
 }
 // Вишки/Wi-Fi: точка, спроєктована на маршрут. Викиди (стрибок вишки на 10 км) ігноруємо, доки 3 поспіль не скажуть те саме.
 function kfMeasure(z, acc) {
@@ -207,8 +221,16 @@ export const manualSpeed = () => manualSpd == null ? null : Math.round(manualSpd
 // Вишки й Wi-Fi під час розрахунку по маршруту: у фільтр (місце і швидкість уздовж маршруту)
 function netCorrect() {
   if (pos.mode !== 'dr' || !route || !pos.onRoute || pos.rd == null || !kf.on) return;
-  if (pos.reason === 'manual' && pos.drDist - pos.accRef < 1500) return;      // водій щойно сам поставив точку — перші 1,5 км вишкам не перебивати
+  // водій щойно сам поставив точку — перші 1,5 км вишкам не перебивати (відлік від його точки, а не від останньої вишки)
+  if (pos.reason === 'manual' && pos.drDist - (pos.manRef ?? pos.accRef) < 1500) return;
   const l = route.locate(net, kf.d); if (!l || l.off > Math.max(6000, 3 * net.acc)) return;
+  if (drTracker()) {
+    const was = trk.est.d; trk.measure(l.d, net.acc, Date.now() / 1000); kf.d = trk.est.d; kf.measT = Date.now();
+    if (Math.abs(trk.est.d - was) > 300) log('info', `розрахунок виправлено за вишками на ${Math.round(trk.est.d - was)} м`);
+    pos.rd = trk.est.d; const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
+    pos.acc = Math.round(clamp(trk.est.sig, 15, 9999)); pos.accBase = pos.acc; pos.accRef = pos.drDist;
+    bus.emit('pos', pos); return;
+  }
   const was = kf.d;
   if (kfMeasure(l.d, net.acc)) {
     if (Math.abs(kf.d - was) > 300) log('info', `розрахунок виправлено за вишками на ${Math.round(kf.d - was)} м`);
@@ -250,6 +272,7 @@ export function findTurns(idx) {
 }
 // Гіроскоп відчув поворот: знаходимо такий самий поворот маршруту поблизу й ставимо позначку точно на нього.
 function onTurn(ang, ago) {
+  if (drTracker()) return;                                            // хмара звіряє повороти сама, безперервно
   if (pos.mode !== 'dr' || !route || !pos.onRoute || pos.rd == null || !turns.length) return;
   const v = curSpeed(), at = pos.rd - v * ago;                        // де ми були посеред повороту
   const w = clamp(300 + 0.25 * (pos.drDist - pos.accRef) + pos.accBase, 400, 3000);
@@ -289,6 +312,7 @@ export function detectTurn(hist, now) {
 }
 function onYaw(yaw) {
   const now = Date.now();
+  if (trk) trk.addYaw(now / 1000, yaw, !moving);
   yawHist.push({ t: now, yaw }); while (yawHist.length && now - yawHist[0].t > 45000) yawHist.shift();
   const n = yawHist.length;
   if (n >= 4 && Math.abs(yaw - yawHist[n - 4].yaw) > 6) { moving = true; stillT = 0; }     // машина крутиться — отже, їде
@@ -416,7 +440,7 @@ function approx(f) {
 function enterDR(reason) {
   if (pos.lat == null || pos.mode === 'dr') return;
   pos.mode = 'dr'; pos.reason = reason; pos.lostSince = Date.now(); kf.on = false;
-  pos.drDist = 0; pos.accRef = 0; pos.accBase = clamp(pos.acc || 15, 15, 60);
+  pos.drDist = 0; pos.accRef = 0; pos.manRef = 0; pos.accBase = clamp(pos.acc || 15, 15, 60);
   pos.pending = null; cand = []; badRun = 0;
   // Машина їхала й ті секунди, поки ми помічали втрату: надолужимо їх на першому ж кроці.
   carry = reason === 'manual' ? 0 : clamp((Date.now() - lastFixT) / 1000, 0, 15);
@@ -500,7 +524,7 @@ export function setManual(p) {
   if (route) { const l = route.locate(p, pos.rd); if (l && l.off < 300) { placeOnRoute(l.d, 50, 'manual'); saveGood(); return; } }
   const was = pos.mode;
   pos.lat = p.lat; pos.lon = p.lon; pos.acc = 50; pos.spd = 0;
-  if (was === 'dr') { pos.reason = 'manual'; pos.accRef = pos.drDist; pos.accBase = 50; pos.pending = null; }
+  if (was === 'dr') { pos.reason = 'manual'; pos.accRef = pos.manRef = pos.drDist; pos.accBase = 50; pos.pending = null; }
   else { pos.mode = 'approx'; enterDR('manual'); pos.accBase = 50; }
   matchRoute(pos, 0);
   saveGood();
@@ -520,11 +544,12 @@ export function nudge(d) {
     pos.rd = clamp(pos.rd + d, 0, route.total);
     const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
     if (!kf.on) kfInit(pos.rd, 30); else { kf.d = pos.rd; kf.Pdd = 30 * 30; kf.Pdv = 0; kf.out = []; }
+    if (drTracker()) trk.shift(pos.rd - trk.est.d, 30);
   } else {
     const p = destPoint(pos, d >= 0 ? pos.hdg : (pos.hdg + 180) % 360, Math.abs(d));
     pos.lat = p.lat; pos.lon = p.lon;
   }
-  pos.accRef = pos.drDist; pos.accBase = 30; pos.acc = 30;
+  pos.accRef = pos.manRef = pos.drDist; pos.accBase = 30; pos.acc = 30;
   bus.emit('pos', pos);
 }
 
@@ -535,6 +560,19 @@ function tick() {
   if (pos.mode !== 'dr') { kf.on = false; return; }          // фільтр живе лише під час розрахунку; наступний старт — з поточного місця
   if (manualSpd === 0 && now - manualSpdT > 5 * 60000) { manualSpd = null; if (kf.on) { kf.src = 'plan'; kf.Pvv = 36; } }   // «стою» саме минає за 5 хв, як у BlindDriver
   if (route && pos.onRoute && pos.rd != null && !kf.on) kfInit(pos.rd, Math.max(pos.acc || 50, 50));
+  if (kf.on && route && pos.onRoute && pos.rd != null && drTracker()) {
+    const T = dt + carry; carry = 0;
+    const before = trk.est.d;
+    trk.step(now / 1000, Math.max(T, 0.2), { moving, manualV: manualSpd, proven: now - gyroSeen < 40 * 60000 });
+    const e = trk.est;
+    kf.d = e.d; kf.v = manualSpd != null ? manualSpd : (moving ? e.v : 0);
+    calibrationCheck(now, before, e);
+    const step = Math.max(0, e.d - pos.rd);
+    pos.rd = e.d; const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
+    pos.drDist += step; pos.spd = kf.v; pos.acc = Math.round(clamp(e.sig, 15, 9999));
+    bus.emit('pos', pos);
+    return;
+  }
   if (kf.on && route && pos.onRoute && pos.rd != null) {
     // швидкість: водій > «стоїмо» (акселерометр) > фільтр; без жодних даних швидкість повільно тягнеться до планової
     const T = dt + carry; carry = 0;
@@ -577,6 +615,20 @@ function tick() {
   bus.emit('pos', pos);
 }
 
+// Звірка відбулась: хмара була розмита (>120 м) і зібралась (<70 м) біля контрольного повороту — кажемо водієві
+function calibrationCheck(now, before, e) {
+  if (!trkCal) trkCal = { sig: e.sig, t: now, peak: e.sig };
+  trkCal.peak = Math.max(trkCal.peak || 0, e.sig);
+  if (trkCal.peak > 120 && e.sig < 70) {
+    const cp = trk.cps.find(c => e.d >= c.d0 - 60 && e.d <= c.d1 + 500);
+    if (cp) {
+      const nx = trk.nextCp(e.d, 200);
+      log('info', `звірка на повороті ${cp.ang}° (${cp.cls === 'red' ? 'різкий' : 'дуга'}): похибка була ±${Math.round(trkCal.peak)} м, тепер ±${Math.round(e.sig)} м`);
+      bus.emit('turnMatch', { ang: cp.ang, cls: cp.cls, d: cp.d, was: Math.round(trkCal.peak), now: Math.round(e.sig), next: nx ? { d: nx.d, cls: nx.cls, ang: nx.ang } : null });
+    }
+    trkCal = { sig: e.sig, t: now, peak: e.sig };
+  }
+}
 function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
   if (s.yaw != null) { yawNow = s.yaw; onYaw(s.yaw); }
@@ -588,6 +640,8 @@ function onSens(s) {
   // поріг «їдемо» — ближче до рівня стоянки (чутливіше удвічі, ніж середнє геометричне); «стоїмо» — лише після 6 с спокою
   const thr = (varStop != null && varMove != null && varMove > 2.5 * varStop) ? varStop * Math.pow(varMove / varStop, 0.3) : 0.002;
   if (s.var > thr) { moving = true; stillT = 0; } else if (++stillT >= 6) moving = false;
+  // телефон узяли в руки (трясе набагато сильніше за дорогу) — кілька секунд гіроскоп не про фуру
+  if (trk && varMove != null && s.var > 40 * varMove) trk.handled(Date.now() / 1000);
 }
 
 // AGC і C/N0: поки GPS справжній — вчимо еталон телефона; далі порівнюємо. Глушіння: обидва падають.
@@ -630,7 +684,11 @@ export function start() {
   } catch (_) {}
 }
 export const routeTurns = () => turns.slice();
-export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen });
+// Стенд перевірки ведення без GPS (tests/bench): ті самі обробники, але час і такт задає стенд
+export function benchStart() { bus.on('gps', onGps); bus.on('sens', onSens); lastTick = Date.now(); }
+export const benchTick = () => tick();
+export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
+  pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
   return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };

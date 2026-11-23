@@ -1,6 +1,6 @@
 // Карта: MapLibre + кеш тайлів у пам'яті телефону (офлайн), маршрут, позначка машини, камери, зупинки.
 import { bus, log, S, db, isNight, clamp, sleep } from './core.js';
-import { pos } from './nav.js';
+import { pos, routeCps } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
@@ -279,26 +279,30 @@ function addLayers() {
   map.addSource('route-bad', { type: 'geojson', data: EMPTY });
   map.addSource('rough', { type: 'geojson', data: EMPTY });
   map.addSource('marks', { type: 'geojson', data: EMPTY });
+  map.addSource('cps', { type: 'geojson', data: EMPTY });
+  // Лінії рейсу кладемо під підписи карти: назви вулиць і міст читаються поверх синьої лінії, як у звичних навігаторах.
+  // Наші значки (АЗС, стоянки, позначки) лишаються згори.
+  const under = firstSymbolId();
   // Лабораторія: якість покриття за власними замірами — маленькі кольорові крапки на дорозі
   map.addLayer({ id: 'rough-dot', type: 'circle', source: 'rough', minzoom: 10.5, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
-    'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } });
+    'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } }, under);
   // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
-  map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } });
-  map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } });
+  map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } }, under);
+  map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } }, under);
   map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f) bus.emit('altTap', f.properties.k); });
   const casePaint = { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) }, linePaint = { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) };
-  map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: casePaint });
-  map.addLayer({ id: 'route-near-case', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: casePaint });
-  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: linePaint });
-  map.addLayer({ id: 'route-near-line', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: linePaint });
+  map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: casePaint }, under);
+  map.addLayer({ id: 'route-near-case', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: casePaint }, under);
+  map.addLayer({ id: 'route-line', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: linePaint }, under);
+  map.addLayer({ id: 'route-near-line', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: linePaint }, under);
   // ґрунт і погане покриття на маршруті — червоний пунктир поверх
-  map.addLayer({ id: 'route-bad', type: 'line', source: 'route-bad', layout: { 'line-join': 'round' }, paint: { 'line-color': '#e5484d', 'line-width': w(3, 5, 9), 'line-dasharray': [1.2, 1.2] } });
+  map.addLayer({ id: 'route-bad', type: 'line', source: 'route-bad', layout: { 'line-join': 'round' }, paint: { 'line-color': '#e5484d', 'line-width': w(3, 5, 9), 'line-dasharray': [1.2, 1.2] } }, under);
   // пройдене — світло-сіро-блакитне поверх синього
-  map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
-  map.addLayer({ id: 'done-near', type: 'line', source: 'done-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } });
+  map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
+  map.addLayer({ id: 'done-near', type: 'line', source: 'done-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
   // похибка позиції — лише тонкий пунктирний контур, без заливки
-  map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } });
+  map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } }, under);
   // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
   const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, 'h', TYPES.h.color, '#1f2937'];
   // точка з душем — товстий бірюзовий обідок, щоб душ було видно серед АЗС і стоянок
@@ -331,13 +335,64 @@ function addLayers() {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 12], 'circle-color': SHOWER_COLOR,
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
   map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f) bus.emit('markTap', f.properties.id); });
+  // контрольні повороти рейсу (без GPS): червоні — перехрестя й різкі повороти, жовті — довгі дуги трас
+  map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 13, 6, 17, 10], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
+    'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 14, 2.5], 'circle-opacity': 0.95 } });
   for (const id of ['stops-major', 'stops-all']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
-  doneD = -1; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks();
+  doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps();
+  tuneLabels();
   if (clean) setClean(true);
+}
+const firstSymbolId = () => { try { const l = (map.getStyle().layers || []).find(x => x.type === 'symbol'); return l ? l.id : undefined; } catch (_) { return undefined; } };
+// Назви вулиць — більші, темні, з товстим білим обідком: читаються навіть поверх лінії рейсу.
+// Номери будинків — лише зблизька (коли водій сам наблизив карту), щоб на ходу не захаращували.
+export const HOUSE_Z = 17;
+function tuneLabels() {
+  let style; try { style = map.getStyle(); } catch (_) { return; }
+  const ls = style.layers || [], size = ['interpolate', ['linear'], ['zoom'], 12, 12.5, 15, 14.5, 17, 17, 19, 19];
+  let omt = null, firstRoad = null, house = false;
+  for (const l of ls) {
+    if (l.type !== 'symbol') continue;
+    const sl = l['source-layer'];
+    if (sl === 'housenumber' || l.id === 'address_label') { house = true; try { map.setLayerZoomRange(l.id, HOUSE_Z, 24); } catch (_) {} continue; }
+    const road = (sl === 'transportation_name' && !(l.layout && l.layout['icon-image'])) || (sl === 'roads' && /label/.test(l.id));
+    if (!road) continue;
+    if (sl === 'transportation_name') omt = omt || l.source;
+    firstRoad = firstRoad || l.id;
+    try {
+      map.setLayoutProperty(l.id, 'text-size', size);
+      map.setPaintProperty(l.id, 'text-color', '#1d2330');
+      map.setPaintProperty(l.id, 'text-halo-color', '#ffffff');
+      map.setPaintProperty(l.id, 'text-halo-width', 2.4);
+      map.setPaintProperty(l.id, 'text-halo-blur', 0.2);
+    } catch (_) {}
+  }
+  // OpenMapTiles (онлайн-карта): у стилі немає шару номерів — додаємо свій із того ж джерела, нижче назв вулиць
+  if (!house && omt && !map.getLayer('reis-house')) {
+    try {
+      map.addLayer({ id: 'reis-house', type: 'symbol', source: omt, 'source-layer': 'housenumber', minzoom: HOUSE_Z,
+        layout: { 'text-field': ['to-string', ['get', 'housenumber']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 17, 11, 19, 14], 'text-padding': 3 },
+        paint: { 'text-color': '#5a5145', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } }, firstRoad || undefined);
+    } catch (e) { log('warn', 'номери будинків: ' + e.message); }
+  }
+}
+// Контрольні повороти наперед (до 25 км, до 12 штук): видно, коли GPS немає, або коли водій увімкнув їх у Лабораторії
+let cpKey = '';
+function drawCps() {
+  const src = map && map.getSource && map.getSource('cps'); if (!src) return;
+  let key = 'off', feats = [];
+  if (g.active && g.idx && pos.rd != null && pos.onRoute && (pos.mode === 'dr' || S.cpsShow)) {
+    const d = pos.rd, ahead = routeCps().filter(c => c.d1 > d - 20 && c.d < d + 25000).slice(0, 12);
+    key = ahead.map(c => c.d).join(',');
+    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
+  }
+  if (key === cpKey) return;
+  cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });
 }
 
 /* ---------- день / ніч ---------- */
@@ -404,7 +459,9 @@ function targetZoom() {
   let zoom = clamp(16.8 - kmh / 45, 14.4, 16.8);
   if (g.active && g.next && g.distNext < 350) zoom = Math.max(zoom, 16.3);
   // позиція приблизна — віддаляємо карту, щоб коло похибки вміщалося на екрані
-  if ((pos.mode === 'approx' || pos.mode === 'dr') && pos.acc > 80) zoom = Math.min(zoom, clamp(16.6 - Math.log2(pos.acc / 50), 10, 16.6));
+  // Без GPS на рейсі — той самий масштаб, що й із GPS: стрілка їде лінією рейсу, віддаляти нема чого.
+  // Лише місце «за вишками» поза рейсом — трохи далі, але не дрібніше за квартал.
+  if (pos.mode === 'approx' && !onRouteNow() && pos.acc > 150) zoom = Math.min(zoom, clamp(16.6 - 0.5 * Math.log2(pos.acc / 50), 14.5, 16.6));
   return clamp(zoom + view.zoomBias, 5, 19);
 }
 const camFree = () => view.down && Date.now() - view.touchT < 8000 || Date.now() - (view.touchT || 0) < 700;   // палець на карті
@@ -490,8 +547,10 @@ function onPos() {
   const est = pos.mode === 'dr' || pos.mode === 'approx';
   puckEl.classList.toggle('dr', est);
   const src = map.getSource && map.getSource('acc');
+  drawCps();
   if (src) {
-    if (est) { src.setData(circle(pos, Math.max(20, pos.acc || 20))); accShown = true; }
+    // на рейсі без GPS кола похибки не малюємо: місце — на самій лінії рейсу, а кілометрове коло лише плутає
+    if (est && !(pos.mode === 'dr' && onRouteNow())) { src.setData(circle(pos, Math.max(20, pos.acc || 20))); accShown = true; }
     else if (accShown) { src.setData(EMPTY); accShown = false; }
   }
   kick();
