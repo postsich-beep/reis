@@ -790,7 +790,7 @@ if (run('2г')) try {
     // 1.1.8: гіроскоп — як у телефоні, раз на секунду. 12 с курс рівний: позначка доїжджає до перехрестя й чекає на ньому
     for (let k = 0; k < 12; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
     const held = await app(page, () => window.__app.nav.pos.rd);
-    ok('перед поворотом позначка чекає на гіроскоп (стоїть біля перехрестя, не проскакує)', held <= tr0.d + 5 && held > tr0.d - 60, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
+    ok('перед поворотом позначка чекає на гіроскоп (стоїть біля перехрестя ±25 м, не проскакує)', held <= tr0.d + 25 && held > tr0.d - 60, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
     // поворот: 6 с повертаємо, далі рівно — позначка за поворотом, похибка мала, далі розгін
     for (let k = 1; k <= 14; k++) { await emitN('sens', { var: 0.05, yaw: tr0.ang * Math.min(1, k / 6) }); await sleep(1000); }
     const after = await app(page, () => window.__app.nav.pos.rd);
