@@ -1,5 +1,5 @@
 // Панелі «Лабораторія», «Налаштування», «Telegram-канали», «GPS», «Діагностика», «Про застосунок».
-import { bus, log, getLog, S, VERSION, fmtClock, fmtMS } from './core.js';
+import { bus, log, getLog, S, VERSION, fmtClock, fmtMS, fmtDist } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, debugState, speedView, gpsJournal, gq } from './nav.js';
 import { g, say } from './guide.js';
@@ -13,14 +13,14 @@ import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } 
 import * as rough from './rough.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
-import { locState, lostReason } from './ui.js';
+import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
   ['sec', 'labMain'], ['lookahead'],
   ['sec', 'labWatch'], ['tg'], ['air'], ['weather'], ['cams'], ['stops'], ['drive'], ['aiFilter'],
-  ['sec', 'labPos'], ['spoof'], ['offline'], ['rec']
+  ['sec', 'labPos'], ['spoof'], ['cpsShow'], ['offline'], ['rec']
 ];
 const SOON = ['obd', 'camera', 'mesh', 'localAi', 'traffic'];
 function simHtml() {
@@ -293,7 +293,10 @@ function gpsHtml() {
   rows.push([t('gpsNet'), d.net ? t('gpsNetYes', Math.round(d.net.acc)) : t('gpsNetNo')]);
   rows.push([t('gpsSpoofDet'), (S.spoof ? t('on') : t('off')) + (pos.spoofAt ? ' · ' + t('spoofLast', fmtClock(new Date(pos.spoofAt))) : '')]);
   if (pos.spoofAt) rows.push([t('spoofWhat'), t('spoofWhy_' + pos.spoofWhy) + ' · ' + pos.spoofProv + ' · ' + pos.spoofLat.toFixed(3) + ', ' + pos.spoofLon.toFixed(3) + (pos.spoofSpd != null ? ' · ' + Math.round(pos.spoofSpd * 3.6) + ' ' + t('kmh') : '')]);
-  if (pos.mode === 'dr') { rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]); }
+  if (pos.mode === 'dr') {
+    rows.push([t('gpsDrTime'), fmtMS((Date.now() - pos.lostSince) / 1000) + ' · ' + Math.round(pos.drDist) + ' ' + t('m')]); rows.push([t('gpsWhy'), lostReason()]);
+    if (g.active) { const c = nextCp(); rows.push([t('gpsNextCp'), c ? fmtDist(c.d - pos.rd) + ' · ' + cpWhat(c) : t('gpsCpNone')]); }
+  }
   if (gq.t && Date.now() - gq.t < 15000) {
     const f1 = x => x == null ? '—' : x.toFixed(1).replace('.', ',');
     rows.push([t('gpsSignal'), `AGC ${f1(gq.agc)}${gq.agcBase != null ? ' (' + t('gpsNorm') + ' ' + f1(gq.agcBase) + ')' : ''} · C/N0 ${f1(gq.cn0)} · ${t('gq_' + (gq.verdict || 'ok'))}`]);

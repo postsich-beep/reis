@@ -8,7 +8,7 @@ import { t } from './i18n.js';
 export const g = {
   trip: null, route: null, idx: null, active: false, arrived: false,
   manI: 0, next: null, after: null, distNext: 0, remain: 0, remTime: 0, eta: 0,
-  rerouting: false, offRoute: false, passedA: true, passedV: false, leadPending: false
+  rerouting: false, offRoute: false, passedA: true, passedV: false, leadPending: false, reroutePending: null
 };
 let said = {}, offSince = 0, lastReroute = 0, lastManI = -1;
 
@@ -100,7 +100,7 @@ function throughChosen() {
   return pts.sort((a, b) => a.d - b.d).map(({ lat, lon, brg }) => ({ lat, lon, brg }));
 }
 export async function startTrip(trip, opts = {}) {
-  g.trip = trip; g.active = true; g.arrived = false;
+  g.trip = trip; g.active = true; g.arrived = false; g.reroutePending = null;
   let route = trip.route;
   if (!trip.chosen) trip.chosen = chosenOf(route);
   // Стартуємо не з точки А — ведемо до неї від поточного місця (крім випадку, коли водій уже їде цим маршрутом).
@@ -115,13 +115,22 @@ export async function startTrip(trip, opts = {}) {
 }
 export function stopTrip() {
   clearActive();
-  g.active = false; g.trip = null; g.route = null; g.idx = null; g.next = null; g.arrived = false; g.rerouting = false;
+  g.active = false; g.trip = null; g.route = null; g.idx = null; g.next = null; g.arrived = false; g.rerouting = false; g.reroutePending = null;
   setRoute(null); queue.length = 0;
   bus.emit('route', g); bus.emit('trip', g); bus.emit('guide', g);
 }
 
 async function reroute(lead = false, fresh = false) {
   if (g.rerouting || !g.trip) return;
+  // Без GPS рейс НЕ перебудовуємо: місце лише розраховане, перебудова від нього може повести не туди.
+  // Прохання водія (новий шлях, «заїхати через») запам'ятовуємо й виконуємо, щойно GPS повернеться.
+  if (pos.mode !== 'gps') {
+    const was = g.reroutePending;
+    g.reroutePending = { lead: lead || !!(was && was.lead), fresh: fresh || !!(was && was.fresh) };
+    if (!was) { log('info', 'перебудову рейсу відкладено до GPS'); bus.emit('rerouteWait', g.reroutePending); }
+    bus.emit('guide', g); return;
+  }
+  g.reroutePending = null;
   g.rerouting = true; lastReroute = Date.now(); bus.emit('guide', g);
   try {
     const heading = pos.spd > 2 ? pos.hdg : null;
@@ -137,7 +146,7 @@ async function reroute(lead = false, fresh = false) {
 }
 // Заїхати по дорозі: точка стає проміжною, маршрут перебудовується від поточного місця.
 export function setVia(p) { if (!g.trip) return; g.trip.v = p; g.passedV = false; rerouteNow(true); }
-export function rerouteNow(fresh = false) { lastReroute = 0; if (pos.lat != null && online()) reroute(false, fresh); }
+export function rerouteNow(fresh = false) { lastReroute = 0; if (pos.lat != null && (online() || pos.mode !== 'gps')) reroute(false, fresh); }
 
 function announce() {
   const n = g.next; if (!n || !pos.onRoute) return;
@@ -154,6 +163,7 @@ function announce() {
 function update() {
   if (!g.active || !g.idx || pos.lat == null) return;
   const mans = g.route.mans, idx = g.idx, now = Date.now();
+  if (g.reroutePending && pos.mode === 'gps' && !g.rerouting && online()) { const p = g.reroutePending; log('info', 'GPS є — виконую відкладену перебудову'); reroute(p.lead, p.fresh); return; }
   if (g.leadPending && pos.mode === 'gps') {
     g.leadPending = false;
     if (hav(pos, g.trip.a) > 400 && online()) { reroute(true); return; }

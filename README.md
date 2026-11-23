@@ -46,6 +46,14 @@ npm install --no-save playwright-core
 node tests/e2e.mjs --shots shots
 ```
 
+Стенд «два телефони» для руху без GPS (з 1.1.8): справжній `nav.js` веде машину лише за гіроскопом
+і рейсом, а поруч — «правда» з GPS. 12 ситуацій (місто, траса, затор, стоп-поїхали, зсув, дрейф гіроскопа,
+без гіроскопа, вишки) × кілька водіїв; друкує середню похибку, 95% і найгіршу.
+
+```
+BENCH_SEEDS=7,11,23 node tests/bench/drbench.mjs --quiet --summary   # DR_ALGO=kf — старий фільтр для порівняння
+```
+
 ## Джерела даних
 
 OpenStreetMap, OpenMapTiles, OpenFreeMap (карта) · Valhalla, сервер FOSSGIS (маршрути) · Photon (пошук) ·

@@ -1,8 +1,8 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow } from './nav.js';
-import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive } from './guide.js';
+import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps } from './nav.js';
+import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
@@ -156,6 +156,10 @@ function railState() {
 const WHY = { timeout: 'whyTimeout', spoof: 'whySpoof', weak: 'whyWeak', manual: 'whyManual' };
 let lostShown = null;
 export const lostReason = () => t(WHY[pos.reason] || 'whyTimeout') + ' ' + (pos.onRoute ? t('drRoute') : t('drFree'));
+// найближчий контрольний поворот попереду на рейсі (там без GPS місце звіряється за гіроскопом)
+export function nextCp(min = 150) { if (!g.active || pos.rd == null || !pos.onRoute) return null; const d = pos.rd; return routeCps().find(c => c.d > d + min) || null; }
+export const cpWhat = c => t(c.cls === 'red' ? 'cpRed' : 'cpYellow', t(c.ang > 0 ? 'cpRight' : 'cpLeft'));
+
 export const locState = { known: false, enabled: null, gps: null, fine: null, listening: false, error: '' };
 let searchSince = Date.now(), indoorHinted = false, offWarned = false;
 const accText = a => a == null ? '' : a >= 1000 ? (a / 1000).toFixed(1).replace('.', ',') + ' ' + t('km') : a + ' ' + t('m');
@@ -1053,7 +1057,26 @@ export function initUI() {
     const src = it.src === 'tg' ? '@' + it.ch : t(SRC[it.src] || 'srcSys');
     toast(src + ' · ' + ago(it.time) + (it.locName ? ' · ' + it.locName : '') + '\n' + (it.sum || it.text).replace(/\s+/g, ' ').slice(0, 260), it.level, 12000, () => openPanel('feed'));
   });
-  bus.on('gpsLost', d => { if (d.reason !== 'manual') say(t(d.reason === 'spoof' ? 'voiceSpoof' : 'voiceLost'), { urgent: true }); P.vibrate(300); });
+  // GPS зник: пояснюємо водієві, що нічого страшного — ведемо тим самим рейсом і де саме звіримо місце
+  bus.on('gpsLost', d => {
+    P.vibrate(300);
+    if (d.reason === 'manual') return;
+    if (d.reason === 'spoof') { say(t('voiceSpoof'), { urgent: true }); return; }
+    const c = nextCp();
+    if (c && c.d - pos.rd < 30000) { const m = c.d - pos.rd; say(t('voiceLostCp', distWords(m)), { urgent: true }); toast(t('lostCpToast', fmtDist(m), cpWhat(c)), 'yellow', 12000, () => openPanel('gps')); }
+    else if (g.active && pos.onRoute) { say(t('voiceLostRoute'), { urgent: true }); toast(t('lostRouteToast'), 'yellow', 10000, () => openPanel('gps')); }
+    else say(t('voiceLost'), { urgent: true });
+  });
+  let tmToastT = 0, tmVoiceT = 0;
+  bus.on('turnMatch', m => {
+    if (!m || pos.mode !== 'dr') return;
+    const now = Date.now(), nx = m.next && pos.rd != null && m.next.d > pos.rd ? m.next.d - pos.rd : null;
+    if (m.was > 300 && now - tmVoiceT > 180000) { tmVoiceT = now; say(t('voiceTurnMatch')); }
+    if (now - tmToastT < 45000) return;
+    tmToastT = now;
+    toast(t('turnMatchToast', m.now != null ? m.now : pos.acc) + (nx != null ? ' ' + t('turnMatchNext', fmtDist(nx)) : ''), 'green', 6000);
+  });
+  bus.on('rerouteWait', () => { say(t('voiceRerouteWait')); toast(t('rerouteWait'), 'yellow', 9000); });
   bus.on('gpsBack', d => { if (d.reason !== 'sim') { say(t('voiceBack')); toast(t('gpsBackToast', d.err), 'green', 5000); } });
   bus.on('arrived', () => { toast(t('arrived'), 'green', 8000); });
   bus.on('mapBlank', () => toast(t('mapBlank'), 'yellow', 9000));

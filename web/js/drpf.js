@@ -69,7 +69,7 @@ function speedProfile(prof, planFn, vmax, aLat) {
 
 /* ---------- сама хмара ---------- */
 export const PF_DEFAULTS = {
-  N: 1000, hist: 64, windows: [3, 8, 20, 40, 60], slow: 0.1, regime: 0.001, cluster: 400, clusterMass: 0.6, alpha: 0.3, sig0: 10, sigK: 0.06, eps: 0.03, rateGain: 0.25, mWalk: 0.003, supportMin: 0.12, slowEnd: 0.003, seedShare: 0.4,
+  N: 1400, hist: 64, windows: [3, 8, 20, 40, 60], slow: 0.1, regime: 0.001, cluster: 400, clusterMass: 0.6, alpha: 0.3, sig0: 10, sigK: 0.06, eps: 0.03, rateGain: 0.25, mWalk: 0.003, supportMin: 0.12, slowEnd: 0.003, seedShare: 0.4,
   aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, mLo: 0.82, mHi: 1.18, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
 };
 export class RouteTracker {
