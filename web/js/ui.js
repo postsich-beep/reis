@@ -173,7 +173,7 @@ const TURN_IC = {
 let turnKey = '', waitHintFor = null, waitVoiced = false;
 function turnBtnSync(lost) {
   const b = $('bTurn'), c = lost ? pos.cp : null;
-  if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
+  if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
   const label = c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
   const key = [c.sgn, c.cls, c.state, label, c.handled].join('|');
   if (key !== turnKey) {
@@ -181,7 +181,7 @@ function turnBtnSync(lost) {
     b.className = 'turn-btn ' + c.cls + ' st-' + c.state + (c.handled ? ' hand' : '');
     b.innerHTML = TURN_IC[c.sgn > 0 ? 'r' : c.sgn < 0 ? 'l' : 'o'] + `<span>${esc(label)}</span>`;
   }
-  if (b.hidden) { b.hidden = false; requestAnimationFrame(layoutVars); }
+  if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); requestAnimationFrame(layoutVars); }
   // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
   if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
     waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
@@ -561,11 +561,13 @@ function pickShow() {
   const box = $('routePick'); box.innerHTML = pickHtml(); box.hidden = false;
   requestAnimationFrame(pickFit);
 }
+// Скільки лишити праворуч, щоб рейс не ховався під стовпчиком кнопок масштабу (він стоїть біля правого краю шторки)
+const zoomPad = box => { const z = box.querySelector('.rp-zoom'); return z ? window.innerWidth - z.getBoundingClientRect().left + 14 : 70; };
 // Увесь маршрут (обидва варіанти) цілком — у вільній частині карти над шторкою
 function pickFit() {
   const box = $('routePick'); if (box.hidden || !plan.trip) return;
   const tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
-  fitRoutes(plan.routes.map(r => r.coords), top, bottom);
+  fitRoutes(plan.routes.map(r => r.coords), top, bottom, zoomPad(box));
 }
 function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
 function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
@@ -731,7 +733,7 @@ function tsFit() {
   if (!tsOpen() || !g.idx) return;
   const box = $('routePick'), tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
   const cs = g.idx.slice(Math.max(0, pos.rd || 0), g.idx.total).map(c => [c[1], c[0]]);
-  if (cs.length >= 2) fitRoutes([cs], top, bottom);
+  if (cs.length >= 2) fitRoutes([cs], top, bottom, zoomPad(box));
 }
 function tsHide(follow = true) {
   const box = $('routePick'); if (box.dataset.mode !== 'trip') return;
@@ -1064,8 +1066,8 @@ function onMapPick(p) {
   const box = $('pick'); box.hidden = false;
   const pts = g.active ? '' : ptBtnsHtml();
   box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
-    ${pts}<button class="btn" data-k="here">${t('iAmHere')}</button><button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
-    <div class="row"><button class="btn sm" data-k="shower">${ICON.shower}${t('showerMarkAction')}</button></div>`;
+    ${pts}${pts ? '' : `<button class="btn" data-k="here">${t('iAmHere')}</button>`}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
+    <div class="row">${pts ? `<button class="btn sm" data-k="here">${ICON.here}${t('iAmHere')}</button>` : ''}<button class="btn sm" data-k="shower">${ICON.shower}${t('showerMarkAction')}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;

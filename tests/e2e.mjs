@@ -407,7 +407,7 @@ if (run('1')) try {
   const whole = () => pickWhole(page);
   const w1 = await whole();
   ok('вибір: увесь маршрут видно цілком, без прокрутки (обидва варіанти між верхньою плашкою і шторкою)', w1.n > 20 && w1.out === 0 && w1.under === 0, JSON.stringify(w1));
-  ok('вибір: зверху шторки А → С (звідки й куди)', /А\s*Харків.*С\s*Полтава/.test(w1.head), w1.head);
+  ok('вибір: зверху шторки старт → фініш (звідки й куди) зі значками', /Харків.*Полтава/.test(w1.head) && await app(page, () => { const h = [...document.querySelectorAll('#routePick .rp-head .rp-t')]; return h.length === 2 && h[0].classList.contains('a') && h[1].classList.contains('b') && h.every(x => x.querySelector('svg')); }), w1.head);
   // на повільному сервері GitHub анімація масштабу триває довше — чекаємо, доки карта зупиниться (до 4 с), а не фіксовані 0,5 с
   const settle = z0 => page.waitForFunction(z0 => { const m = window.__app.map.map; return !m.isMoving() && Math.abs(m.getZoom() - z0) > 0.3; }, z0, { timeout: 4000 }).catch(() => {});
   await page.click('#routePick [data-rp="zin"]'); await settle(w1.zoom);
@@ -1770,6 +1770,12 @@ if (run('17')) try {
   ok('якісний голос не спрацював — на екрані час, причина й «Перевірити зараз»', w.code === 'err' && /не спрацював \(audio init\)/.test(w.text) && /О \d\d:\d\d/.test(w.text) && w.btn === 'vTest', JSON.stringify(w));
   ok('…і одна плашка зрозумілою мовою', (await toasts()).filter(x => /не запустився/.test(x)).length === 1, JSON.stringify(await toasts()));
   ok('у «Щоденнику голосу» є запис про збій', /фразу сказав голос телефону: audio init/.test(w.log), w.log.slice(0, 200));
+  // 1.1.12: «audio: Invalid audio buffer size.» — помилка старої оболонки (до №6): не «перевірте ще раз», а «оновіть застосунок»
+  await emitN('voice', { state: 'fallback', error: 'audio: Invalid audio buffer size.' }); await sleep(250); w = await why();
+  ok('«Invalid audio buffer size» на старій оболонці — пояснення й кнопка «оновити застосунок» (а не «спробуйте ще»)', w.code === 'oldaudio' && /не може відкрити звук/.test(w.text) && /Оновіть застосунок/.test(w.text) && w.btn === 'vApk', JSON.stringify(w));
+  await app(page, () => { window.__nativeRev = 6; }); await emitN('voice', { state: 'fallback', error: 'audio: Invalid audio buffer size.' }); await sleep(250); w = await why();
+  ok('…на новій оболонці (№6) така помилка показується як звичайний збій із «Перевірити зараз»', w.code === 'err' && w.btn === 'vTest', JSON.stringify(w));
+  await app(page, () => { window.__nativeRev = 4; }); await emitN('voice', { state: 'fallback', error: 'audio init' }); await sleep(250);
   await app(page, () => { window.__nativeCalls.length = 0; window.__spoken.length = 0; document.getElementById('toasts').innerHTML = ''; });
   await page.click('#voiceSec [data-act="vTest"]'); await sleep(300);
   ok('«Перевірити зараз» — фраза пішла, якісний голос знову вибрано в оболонці', await app(page, () => window.__spoken.length > 0) && (await calls()).includes('setVoice:uk:1:uk'), JSON.stringify(await calls()));

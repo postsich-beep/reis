@@ -358,7 +358,10 @@ body[data-theme="night"]{
 .pt-bar .btn[data-pt="route"]{flex:1 1 0}
 .pt-cross.a{border-color:#2f9e62}.pt-cross.a::before,.pt-cross.a::after{background:#2f9e62}
 .pt-cross.v{border-color:#5f6a75}.pt-cross.v::before,.pt-cross.v::after{background:#5f6a75}
-.btn.pt-b{gap:6px;padding:0 10px;flex:1 1 auto}.btn.pt-b .rp-t{width:24px;height:24px}.btn.pt-b .rp-t svg{width:16px;height:16px}
+/* кнопки «Старт · Через · Фініш» у картках на карті: значок над підписом — три в ряд уміщаються й на найвужчому екрані */
+.btn.pt-b{flex:1 1 0;min-width:0;flex-direction:column;gap:3px;padding:5px 4px;min-height:54px;font:600 12.5px/1 var(--f-ui)}
+.btn.pt-b .rp-t{width:26px;height:26px;border-radius:8px}.btn.pt-b .rp-t svg{width:18px;height:18px}
+#pick .row .btn[data-k="x"]{flex:none}
 .wp-plan{filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
 /* ---- 1.1.12: логотип у «Налаштуваннях» (на ньому — прихований вхід до Лабораторії) ---- */
 .app-logo{display:flex;flex-direction:column;align-items:center;gap:4px;margin:4px auto 6px;padding:6px 18px 8px;width:max-content;max-width:100%;
@@ -815,15 +818,20 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .rp-warn.soft{border:2px solid var(--yellow)} .rp-warn.soft.mild{border:0;color:var(--ink-2);font-size:13px}
 .card.softcard{margin-top:8px;border:2px solid var(--yellow);font-size:14px;line-height:1.35} .card.softcard.mild{border:0;color:var(--ink-2)}
 .alts.rp-cards .alt:nth-child(3):last-child{grid-column:1/-1;min-height:0}
-#routePick{max-height:calc(100% - var(--st) - 12px);overflow-y:auto;overscroll-behavior:contain}   /* три картки й попередження на малому екрані — прокручується, а не вилазить за екран */
+.alts.rp-cards{max-height:max(118px,calc(100vh - var(--st) - 330px));overflow-y:auto;overscroll-behavior:contain}   /* три картки на малому екрані — прокручуються, шторка не вилазить за екран */
 
 /* 1.1.11: камера в списку шарів — тим самим значком, що й на карті */
 .sdot.cam{width:22px;height:22px;border:0;background:none;box-shadow:none;padding:0}
 .sdot.cam svg{width:22px;height:22px;display:block}
 
 /* ---------- 1.1.12: кнопка «Поворот» (без GPS) — над ↑100/↓100 ---------- */
-.nudge .turn-btn{height:48px;border-width:3px;gap:3px;font:800 17px/1 var(--f-num);padding:0 4px}
-.nudge .turn-btn svg{width:22px;height:22px;flex:none}
+/* «Поворот» стоїть ЛІВОРУЧ від ±100 на всю їхню висоту (а не третім рядком): нижня плашка не росте й не з'їдає карту */
+.nudge.has-turn{display:grid;grid-template-columns:auto 88px;grid-template-rows:40px 40px;gap:6px}
+.nudge.has-turn .turn-btn{grid-column:1;grid-row:1/span 2}
+.nudge.has-turn #bFwd100{grid-column:2;grid-row:1}.nudge.has-turn #bBack100{grid-column:2;grid-row:2}
+.nudge .turn-btn{width:68px;height:86px;border-radius:20px;flex-direction:column;border-width:3px;gap:4px;font:800 16px/1 var(--f-num);padding:0 2px}
+#tripbar:has(.nudge.has-turn) .tb-row{flex-wrap:wrap;row-gap:2px}
+.nudge .turn-btn svg{width:30px;height:30px;flex:none}
 .nudge .turn-btn span{white-space:nowrap}
 .nudge .turn-btn.red{border-color:#e5484d}.nudge .turn-btn.yellow{border-color:#f6bd16}
 .nudge .turn-btn.st-wait{background:#f6bd16;color:#1b1b1b;border-color:#b98a00;text-shadow:none;animation:turnwait 1.6s ease-in-out infinite}

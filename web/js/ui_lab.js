@@ -413,6 +413,8 @@ function voiceWhy() {
   if (!st.packs || !st.packs[v[1]]) return { ok: false, code: 'nopack', text: t('vwNoPack'), act: 'vDl', btn: t('vDl') };
   if (!packOk(st)) return { ok: false, code: 'oldpack', text: t('vwOldPack'), act: 'vDl', btn: t('vPackUpd') };
   const e = verrGet();
+  // 1.1.6–1.1.11: оболонка відкривала звук із розміром буфера, який Android не приймає («Invalid audio buffer size») — лікує лише новий APK (оболонка №6)
+  if (e && /buffer size/i.test(e.e || '') && (+P.appInfo().nativeRev || 0) < 6) return { ok: false, code: 'oldaudio', text: t('vwOldAudio'), act: 'vApk', btn: t('vFixBtn') };
   if (e) return { ok: false, code: 'err', text: t('vwErr', vTime(e.t), e.e), act: 'vTest', btn: t('vwTest') };
   return { ok: true, code: 'neural', text: t('vwOk', name) + (st.loaded === v[1] ? '' : ' ' + t('vwLoading')) };
 }

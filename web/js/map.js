@@ -742,7 +742,7 @@ export function showRoute(coords) {
 }
 // Вибір варіанта: обидва маршрути цілком у верхній частині екрана (над шторкою вибору), як у BlindDriver.
 // Поки вибираємо, карта сама не повертається до машини.
-export function fitRoutes(list, padTop, padBottom) {
+export function fitRoutes(list, padTop, padBottom, padRight = 70) {
   if (!map || !list || !list.length) return;
   const b = new maplibregl.LngLatBounds();
   for (const coords of list) {
@@ -752,7 +752,7 @@ export function fitRoutes(list, padTop, padBottom) {
   }
   view.follow = false; view.lastTouch = Date.now() + 3600e3; bus.emit('view', view);
   const h = map.getContainer().clientHeight, w = map.getContainer().clientWidth;
-  const land = sideLayout(w, h), side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: 70 };   // справа — кнопки масштабу
+  const land = sideLayout(w, h), side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: Math.max(70, Math.round(padRight)) };   // справа — кнопки масштабу (на планшеті шторка вужча за екран, і кнопки не біля краю)
   // вільного місця по висоті має лишитись хоча б 90 px — інакше карта «не вміщає» рейс і не рухається зовсім
   let pt = Math.round(padTop), pb = Math.round(land ? 30 : padBottom); const free = h - pt - pb;
   if (free < 90) { const k = Math.max(0, (h - 90)) / Math.max(1, pt + pb); pt = Math.floor(pt * k); pb = Math.floor(pb * k); }
