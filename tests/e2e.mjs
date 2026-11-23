@@ -1977,6 +1977,22 @@ if (run('20')) try {
   await ctx.close();
 } catch (e) { ROUTE.fn = null; ok('прохід 20 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
+/* ============ прохід 21 (1.1.11): камери на карті — значком камери (пропозиція Діми) ============ */
+if (run('21')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  await page.waitForFunction(() => { const m = window.__app.map.map; return window.__app.stopsdb.sdb.ready && m && m.getLayer('cams-ico'); }, null, { timeout: 10000 });
+  await app(page, ([la, lo]) => { window.__app.map.setFollow(false); window.__app.map.map.jumpTo({ center: [lo, la], zoom: 14.5, bearing: 0 }); }, camPt);
+  await sleep(1200);
+  const cm = await app(page, ([la, lo]) => { const m = window.__app.map.map, p = m.project([lo, la]), box = [[p.x - 20, p.y - 20], [p.x + 20, p.y + 20]];
+    return { img: m.hasImage('cam-ico'), ico: m.queryRenderedFeatures(box, { layers: ['cams-ico'] }).length, dot: m.queryRenderedFeatures(box, { layers: ['stops-all'] }).filter(f => f.properties.t === 'c').length }; }, camPt);
+  ok('камера на карті — значком камери (білий круг, червоний обідок, фотоапарат), а не червоним кружечком', cm.img && cm.ico === 1 && cm.dot === 0, JSON.stringify(cm));
+  await shot(page, '23-camera-icon');
+  await page.click('#bLayers'); await sleep(300);
+  ok('у «Що показувати на карті» біля «Камери» — той самий значок', await app(page, () => !!document.querySelector('#quick .ly-row .sdot.cam svg')));
+  ok('прохід 21 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 21 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
   const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);

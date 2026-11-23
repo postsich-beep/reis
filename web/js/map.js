@@ -151,7 +151,10 @@ export function initMap() {
   });
   map.on('style.load', addLayers);
   map.on('click', e => { if (tapHook) tapHook({ lat: e.lngLat.lat, lon: e.lngLat.lng }); });
-  map.on('styleimagemissing', e => { if (!e.id.startsWith('fuel:') || map.hasImage(e.id)) return; try { const f = fuelImage(e.id.slice(5)); map.addImage(e.id, f.img, { pixelRatio: f.dpr }); } catch (_) {} });
+  map.on('styleimagemissing', e => {
+    if (map.hasImage(e.id)) return;
+    try { const f = e.id === 'cam-ico' ? camImage() : e.id.startsWith('fuel:') ? fuelImage(e.id.slice(5)) : null; if (f) map.addImage(e.id, f.img, { pixelRatio: f.dpr }); } catch (_) {}
+  });
   // запасна страховка: якщо стиль змінився, а наших шарів немає — повертаємо їх
   map.on('styledata', () => { if (map.isStyleLoaded() && !map.getSource('route')) addLayers(); });
   // Стиль не завантажився (немає мережі й кешу) — показуємо хоча б маршрут на порожньому тлі.
@@ -206,7 +209,7 @@ export function initMap() {
 // Вибір варіанта маршруту і «Маршрут» у дорозі відкриваються без допоміжних позначок (піт-стопи, плашки АЗС, камери,
 // події, перевірені місця, позначки водіїв, проблемні місця): видно лише дороги, області й сам маршрут із точками А, Б, С.
 // Кнопкою на тих екранах позначки можна повернути.
-const AUX_LAYERS = ['stops-major', 'stops-all', 'fuel-label', 'poi-dot', 'marks-dot', 'rough-dot'];
+const AUX_LAYERS = ['stops-major', 'stops-all', 'cams-ico', 'fuel-label', 'poi-dot', 'poi-cam', 'marks-dot', 'rough-dot'];
 let clean = false;
 export function setClean(on) {
   clean = !!on; document.body.classList.toggle('map-clean', clean);     // DOM-позначки (.rpm, .vpm, .evm, .hzm) ховає CSS
@@ -266,6 +269,23 @@ export const hiddenDots = () => [...labHid];
 
 // Плашка АЗС: значок колонки + назва мережі; колір — наш, за назвою (не фірмовий)
 const FUEL_COL = ['#0f766e', '#1d4ed8', '#7c3aed', '#b45309', '#be123c', '#047857', '#4338ca', '#0e7490', '#a16207', '#334155'];
+// Камера фіксації — значок фотоапарата в білому колі з червоним обідком (як знак): одразу зрозуміло, що це камера,
+// а не червона крапка. Малюємо самі на полотні — працює й офлайн, без шрифтів і картинок карти.
+function camImage() {
+  const dpr = 2, D = 30 * dpr, c = document.createElement('canvas'), x = c.getContext('2d'), m = D / 2;
+  c.width = D; c.height = D;
+  x.beginPath(); x.arc(m, m, m - 1.5 * dpr, 0, Math.PI * 2); x.fillStyle = '#ffffff'; x.fill();
+  x.lineWidth = 3.2 * dpr; x.strokeStyle = '#e5484d'; x.stroke();
+  const rr = (X, Y, W, H, R) => { x.beginPath(); x.moveTo(X + R, Y); x.lineTo(X + W - R, Y); x.quadraticCurveTo(X + W, Y, X + W, Y + R); x.lineTo(X + W, Y + H - R); x.quadraticCurveTo(X + W, Y + H, X + W - R, Y + H); x.lineTo(X + R, Y + H); x.quadraticCurveTo(X, Y + H, X, Y + H - R); x.lineTo(X, Y + R); x.quadraticCurveTo(X, Y, X + R, Y); x.closePath(); };
+  const bw = 17 * dpr, bh = 11.5 * dpr, bx = m - bw / 2, by = m - bh / 2 + 1.2 * dpr;
+  x.fillStyle = '#1f2937';
+  rr(m - 3.6 * dpr, by - 2.8 * dpr, 7.2 * dpr, 3.6 * dpr, 1 * dpr); x.fill();          // видошукач
+  rr(bx, by, bw, bh, 2.4 * dpr); x.fill();                                                 // корпус
+  x.beginPath(); x.arc(m, by + bh / 2, 3.9 * dpr, 0, Math.PI * 2); x.fillStyle = '#ffffff'; x.fill();   // об'єктив
+  x.beginPath(); x.arc(m, by + bh / 2, 2.3 * dpr, 0, Math.PI * 2); x.fillStyle = '#1f2937'; x.fill();
+  x.beginPath(); x.arc(bx + bw - 2.8 * dpr, by + 2.6 * dpr, 1.2 * dpr, 0, Math.PI * 2); x.fillStyle = '#e5484d'; x.fill();   // вогник запису
+  return { img: x.getImageData(0, 0, D, D), dpr };
+}
 function fuelImage(nm) {
   const dpr = 2, fs = 15 * dpr, pad = 7 * dpr, ico = 14 * dpr, h = 26 * dpr;
   const c = document.createElement('canvas'), x = c.getContext('2d');
@@ -290,6 +310,7 @@ function fuelImage(nm) {
 function addLayers() {
   clearTimeout(styleTimer);
   if (map.getSource('route')) return;
+  try { if (!map.hasImage('cam-ico')) { const ci = camImage(); map.addImage('cam-ico', ci.img, { pixelRatio: ci.dpr }); } } catch (_) {}
   const w = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 6, a, 12, b, 17, c];
   map.addSource('route', { type: 'geojson', data: EMPTY });
   map.addSource('route-alts', { type: 'geojson', data: EMPTY });
@@ -340,15 +361,21 @@ function addLayers() {
     'circle-stroke-color': ['case', ['==', ['get', 'sh'], 1], SHOWER_COLOR, ['match', ['get', 't'], 'c', '#e5484d', '#ffffff']],
     'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, ['case', ['==', ['get', 'sh'], 1], 1.6, 0.8], 12, ['case', ['==', ['get', 'sh'], 1], 3.5, 2]]
   });
-  map.addLayer({ id: 'stops-major', type: 'circle', source: 'stops', minzoom: 5, maxzoom: 9.5, filter: ['>=', ['get', 'r'], 2], paint: stopPaint(2.2) });
-  map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, paint: stopPaint(2.6) });
+  map.addLayer({ id: 'stops-major', type: 'circle', source: 'stops', minzoom: 5, maxzoom: 9.5, filter: ['all', ['>=', ['get', 'r'], 2], ['!=', ['get', 't'], 'c']], paint: stopPaint(2.2) });
+  map.addLayer({ id: 'stops-all', type: 'circle', source: 'stops', minzoom: 9.5, filter: ['!=', ['get', 't'], 'c'], paint: stopPaint(2.6) });
+  // камери — значком камери (пропозиція Діми): здалеку дрібніше, зблизька — як справжній знак
+  const camSize = ['interpolate', ['linear'], ['zoom'], 7.5, 0.5, 10, 0.7, 13, 1.0, 16, 1.25];
+  map.addLayer({ id: 'cams-ico', type: 'symbol', source: 'stops', minzoom: 7.5, filter: ['==', ['get', 't'], 'c'],
+    layout: { 'icon-image': 'cam-ico', 'icon-size': camSize, 'icon-allow-overlap': true, 'icon-padding': 0 } });
   // АЗС — плашка з назвою мережі (OKKO, WOG, UPG…), щоб одразу видно, яка заправка далі. Малюємо самі, без шрифтів карти — працює й офлайн.
   map.addLayer({ id: 'fuel-label', type: 'symbol', source: 'stops', minzoom: 10, filter: ['==', ['get', 't'], 'f'],
     layout: { 'icon-image': ['concat', 'fuel:', ['get', 'nm']], 'icon-anchor': 'bottom', 'icon-offset': [0, 1], 'icon-allow-overlap': false, 'icon-padding': 2,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.85, 14, 1.05], 'symbol-sort-key': ['-', 0, ['get', 'r']] } });
   map.on('click', 'fuel-label', e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
+  map.addLayer({ id: 'poi-cam', type: 'symbol', source: 'poi', minzoom: 7.5, filter: ['==', ['get', 'k'], 'cam'],
+    layout: { 'icon-image': 'cam-ico', 'icon-size': camSize, 'icon-allow-overlap': true, 'icon-padding': 0 } });
   map.addLayer({
-    id: 'poi-dot', type: 'circle', source: 'poi', minzoom: 8,
+    id: 'poi-dot', type: 'circle', source: 'poi', minzoom: 8, filter: ['!=', ['get', 'k'], 'cam'],
     paint: {
       'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3, 13, 7, 16, 10],
       'circle-color': '#1f2937', 'circle-stroke-color': '#e5484d', 'circle-stroke-width': 2.5
@@ -363,7 +390,7 @@ function addLayers() {
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 13, 6, 17, 10], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 14, 2.5], 'circle-opacity': 0.95 } });
-  for (const id of ['stops-major', 'stops-all']) {
+  for (const id of ['stops-major', 'stops-all', 'cams-ico']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });

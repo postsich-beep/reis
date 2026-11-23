@@ -50,6 +50,8 @@ function staticLabels() {
   railState();
 }
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
+// значок камери — такий самий, як на карті: фотоапарат у білому колі з червоним обідком
+const CAM_SVG = '<svg viewBox="0 0 30 30" aria-hidden="true"><circle cx="15" cy="15" r="13" fill="#fff" stroke="#e5484d" stroke-width="3.2"/><rect x="11.4" y="8.6" width="7.2" height="3.6" rx="1" fill="#1f2937"/><rect x="6.5" y="10.45" width="17" height="11.5" rx="2.4" fill="#1f2937"/><circle cx="15" cy="16.2" r="3.9" fill="#fff"/><circle cx="15" cy="16.2" r="2.3" fill="#1f2937"/><circle cx="20.7" cy="13" r="1.2" fill="#e5484d"/></svg>';
 const LAYERS = [
   ['fuel', 'f', 'lyFuel'], ['food', 'e', 'lyFood'], ['park', 'p', 'lyPark'], ['motel', 'm', 'lyMotel'], ['shower', 'h', 'lyShower'], ['cam', 'c', 'lyCam'],
   ['@mapVerified', '', 'lyVerified'], ['@mapReports', '', 'lyReports'], ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
@@ -68,7 +70,8 @@ function setLayer(k, v) {
 function layersHtml() {
   const dot = (ty, k) => k === '@mapVerified' ? '<span class="sdot" style="background:#f5a524;border-color:#f5b301"></span>' : k === '@mapReports' ? '<span class="sdot" style="background:#2f6bff;border-color:#ffd34d"></span>' : k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
     : k === '@mapHazards' ? '<span class="sdot hz">20</span>' : k === '@roughMap' ? '<span class="sdot" style="background:linear-gradient(90deg,#2f9e62 33%,#f6bd16 33% 66%,#e5484d 66%)"></span>'
-    : `<span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
+    : ty === 'c' ? `<span class="sdot cam">${CAM_SVG}</span>`
+    : `<span class="sdot" style="background:${TYPES[ty].color}${ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
   const anyOn = LAYERS.some(([k]) => layerOn(k));
   return `<div class="ly-head">${t('lyTitle')}</div>` + LAYERS.map(([k, ty, lbl]) => {
     const on = layerOn(k);
