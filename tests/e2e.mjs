@@ -322,7 +322,7 @@ if (run('1')) try {
   await page.click('#panelClose');
   // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
   await page.click('#bLayers');
-  ok('кнопка «Шари» справа на головному екрані → одразу 10 галочок і «вимкнути все», без «Назад»', await page.$$eval('#quick .ly-row', e => e.length) === 10 && /Вимкнути все/.test(await page.textContent('#quick')) && !(await page.$('#quick [data-q="back"]')) && await app(page, () => document.getElementById('bLayers').classList.contains('on')));
+  ok('кнопка «Шари» справа на головному екрані → одразу 11 галочок і «вимкнути все», без «Назад»', await page.$$eval('#quick .ly-row', e => e.length) === 11 && /Вимкнути все/.test(await page.textContent('#quick')) && !(await page.$('#quick [data-q="back"]')) && await app(page, () => document.getElementById('bLayers').classList.contains('on')));
   await shot(page, '01d-layers');
   const feats = () => app(page, async () => { const m = window.__app.map.map; const s = await m.getSource('stops').getData(), k = await m.getSource('marks').getData(); return { stops: s.features.map(f => f.properties.t).join(''), marks: k.features.length }; });
   await page.click('#quick [data-ly="#off"]'); await sleep(200);
@@ -479,7 +479,7 @@ if (run('1')) try {
   ok('швидкість на екрані', +s1.spd > 40 && +s1.spd < 70, s1.spd);
   // «Місця» в дорозі: лише попереду по маршруту, до 50 км від траси
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-scope');
-  const pl = await app(page, () => ({ ids: [...document.querySelectorAll('.vp-row')].map(x => x.dataset.vpid).join(), scope: document.querySelector('.vp-scope').textContent, w: [...document.querySelectorAll('.vp-w')].map(x => x.textContent).join(' | ') }));
+  const pl = await app(page, () => ({ ids: [...document.querySelectorAll('.vp-row')].map(x => x.dataset.vpid).join(), scope: ([...document.querySelectorAll('.vp-scope')].find(x => /Перевірені/.test(x.textContent)) || { textContent: '' }).textContent, w: [...document.querySelectorAll('.vp-w')].map(x => x.textContent).join(' | ') }));
   ok('«Місця» в дорозі: лише по маршруту попереду (до 50 км від траси), Львів — ні', /^test-bistro/.test(pl.ids) && !/test-far/.test(pl.ids) && /У рейсі попереду/.test(pl.scope) && /через 15 км/.test(pl.w), JSON.stringify(pl));
   await page.click('#panelClose');
   await shot(page, '03-drive');
@@ -1133,7 +1133,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     const z0 = s0.zb; s1 = await tap('zin'); const z1 = s1.zb; s1 = await tap('zout'); s1 = await tap('zout');
     ok(`${T}: масштаб + і −`, z1 === z0 + 1 && s1.zb === z0 - 1, `${z0} → ${z1} → ${s1.zb}`); await tap('zin');
     await page.click('#quick [data-q="close"]'); await page.click('#bLayers'); await sleep(200);
-    ok(`${T}: кнопка «Шари» справа — 10 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 10 && q.getBoundingClientRect().bottom <= innerHeight; }));
+    ok(`${T}: кнопка «Шари» справа — 11 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 11 && q.getBoundingClientRect().bottom <= innerHeight; }));
     await page.click('#quick [data-ly="fuel"]'); ok(`${T}: галочка в «Шарах» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
     await page.click('#quick [data-ly="fuel"]');
     await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває «Шари»`, await app(page, () => document.getElementById('quick').hidden && !document.getElementById('bLayers').classList.contains('on')));
@@ -1663,7 +1663,7 @@ if (run('15')) try {
     return { vis: !b.hidden && r.width >= 44, below: r.top >= rq.bottom, right: innerWidth - r.right < 20, svg: !!b.querySelector('svg path[fill="#f59e0b"]'), label: b.getAttribute('aria-label') }; });
   ok('кнопка «Шари» справа, під швидкими налаштуваннями, новий значок (шари з міткою)', lb.vis && lb.below && lb.right && lb.svg && /Що показувати на карті/.test(lb.label), JSON.stringify(lb));
   await page.click('#bLayers'); await sleep(200);
-  ok('«Шари» відкривають одразу галочки (без плиток)', await app(page, () => document.querySelectorAll('#quick .ly-row').length === 10 && !document.querySelector('#quick .q-tile')));
+  ok('«Шари» відкривають одразу галочки (без плиток)', await app(page, () => document.querySelectorAll('#quick .ly-row').length === 11 && !document.querySelector('#quick .q-tile')));
   await shot(page, '18d-layers');
   await page.click('#quick [data-ly="#off"]'); await sleep(150);
   ok('«Вимкнути все» — значок «Шарів» блідне', await app(page, () => document.getElementById('bLayers').classList.contains('off')));
@@ -1798,7 +1798,7 @@ if (run('17')) try {
       rows: [...document.querySelectorAll('#quick .ly-row')].map(r => (r.classList.contains('on') ? '✓' : '·') + r.textContent.trim()) }));
     await page.click('#bLayers'); await sleep(200);
     let L = await lay();
-    ok('перший запуск: у «Шарах» стоять лише АЗС і Камери — як на погодженому знімку', L.rows.filter(x => x[0] === '✓').map(x => x.slice(1)).join() === 'АЗС,Камери' && L.rows.length === 10, JSON.stringify(L.rows));
+    ok('перший запуск: у «Шарах» стоять АЗС і Камери, як на погодженому знімку (+ позначки водіїв, які й раніше було видно завжди)', L.rows.filter(x => x[0] === '✓').map(x => x.slice(1)).join() === 'АЗС,Камери,Позначки водіїв (поліція, ДТП…)' && L.rows.length === 11, JSON.stringify(L.rows));
     await page.click('#quick [data-ly="food"]'); await sleep(150); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
     ok('водій додав «Де поїсти» — після перезапуску вибір водія лишився', await app(page, () => window.__app.S.mapStopTypes.food === true && window.__app.S.mapStopTypes.fuel === true));
     ok('перший запуск без помилок JS', errors.length === 0, errors.join(' | '));
