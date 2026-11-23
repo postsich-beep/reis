@@ -488,8 +488,13 @@ function pickHtml() {
   const tr = plan.trip;
   return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <div class="rp-head"><i class="rp-t a">А</i><b>${esc(tr.a.label || '')}</b>${tr.v ? `<i class="rp-t v">Б</i><b>${esc(tr.v.label || '')}</b>` : ''}<i class="rp-t b">С</i><b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
-    ${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
+    ${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
+}
+// для фури проїзду не знайшлося — показуємо звичайний маршрут із червоним попередженням; старт/фініш перенесено на основну дорогу — тихо кажемо
+function pickWarnHtml() {
+  const r = plan.routes[plan.sel] || plan.trip.route;
+  return r && r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : r && r.snapped ? `<div class="rp-warn">${t('truckSnapped')}</div>` : '';
 }
 function pickShow() {
   if (!plan.trip || g.active) return pickHide();
@@ -647,7 +652,9 @@ function planSumHtml() {
   const warn = alt ? `<div class="card" style="margin-top:8px;border:2px solid var(--yellow)"><div style="font-weight:600">${t('detourTitle', fmtDist(r.dist), fmtDist(alt.dist))}</div>
       <div class="muted" style="margin-top:4px">${t('detourText')}</div>
       <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
-    : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>` : '';
+    : r.truckFail ? `<div class="card" style="margin-top:8px;border:2px solid var(--red)"><div style="font-weight:700;color:var(--red)">${t('truckFailTitle')}</div><div class="muted" style="margin-top:4px">${t('truckFailText')}</div></div>`
+    : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>`
+    : r.snapped ? `<div class="muted" style="margin-top:8px">${t('truckSnapped')}</div>` : '';
   return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
     ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
@@ -696,7 +703,8 @@ async function doBuild() {
     loadRegions(trip);
     plan.busy = false; closePanel(); pickShow(); return;
   } catch (e) {
-    plan.err = (e.code ? t('routeFail') : t('netErr')) + ' ' + (e.message || '');
+    // помилки сервера — людською мовою, а не «No path could be found for input»
+    plan.err = e.code ? t('routeFail') + ' ' + (e.code === 171 ? t('noEdge') : [170, 442].includes(e.code) ? t('noPath') : (e.message || '')) : t('netErr') + ' ' + (e.message || '');
     log('warn', 'маршрут: ' + e.message);
   }
   plan.busy = false; refresh('trip');
@@ -1186,6 +1194,7 @@ export function initUI() {
     tmToastT = now;
     toast(t('turnMatchToast', m.now != null ? m.now : pos.acc) + (nx != null ? ' ' + t('turnMatchNext', fmtDist(nx)) : ''), 'green', 6000);
   });
+  bus.on('truckFail', () => { say(t('voiceTruckFail')); toast(t('truckFailTitle') + '\n' + t('truckFailText'), 'red', 12000); });
   bus.on('rerouteWait', () => { say(t('voiceRerouteWait')); toast(t('rerouteWait'), 'yellow', 9000); });
   bus.on('gpsBack', d => { if (d.reason !== 'sim') { say(t('voiceBack')); toast(t('gpsBackToast', d.err), 'green', 5000); } });
   bus.on('arrived', () => { toast(t('arrived'), 'green', 8000); });

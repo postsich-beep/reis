@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 36, name: '1.1.9' };
+export const VERSION = { web: 37, name: '1.1.10' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -38,7 +38,7 @@ const DEFAULTS = {
   aiFilter: false, spoof: true, offline: true, rec: false,
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { ...BASE_STOPS },
-  truck: { height: 4.0, width: 2.55, length: 16.5, weight: 40, axle: 11.5, hazmat: false, vmax: 90 },
+  truck: { height: 4.0, width: 2.55, length: 16.5, weight: 20, axle: 11.5, hazmat: false, vmax: 90 }, truckV: 1,
   stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
@@ -47,10 +47,14 @@ const DEFAULTS = {
   channels: [],            // [{name:'channel', region:'kharkiv'|'all', on:true}]
   onboarded: false
 };
+export const TRUCK_MAX_T = 20;                       // найважча фура в парку — 20 т
 let settings = structuredClone(DEFAULTS);
 try {
   const raw = JSON.parse(localStorage.getItem('reis.settings') || '{}');
   settings = { ...settings, ...raw, truck: { ...DEFAULTS.truck, ...(raw.truck || {}) } };
+  // 1.1.10: у нас фури не важчі за 20 т — збережені 40 т (старе значення за замовчуванням) стають 20 т
+  settings.truck.weight = Math.min(+settings.truck.weight || TRUCK_MAX_T, TRUCK_MAX_T);
+  if ((raw.truckV || 0) < 1 && raw.truck) { settings.truckV = 1; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
   // Телефон, на якому «Рейс» уже стояв: один раз ставимо базові галочки шарів, далі вибір водія не чіпаємо
   if ((raw.layersDefV || 0) < 1 && Object.keys(raw).length) {
     Object.assign(settings, { mapStops: true, mapStopTypes: { ...BASE_STOPS }, mapVerified: false, mapEvents: false, mapHazards: false, roughMap: false, layersDefV: 1 });

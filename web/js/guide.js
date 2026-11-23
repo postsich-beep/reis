@@ -140,7 +140,10 @@ async function reroute(lead = false, fresh = false) {
     if (through) { try { r = await buildRoute(g.trip, { from: pos, heading, through }); } catch (e) { log('warn', 'повернення на вибраний маршрут: ' + e.message); } }
     if (!r) r = await buildRoute(g.trip, { from: pos, heading, skipA: lead ? false : g.passedA, skipVia: g.passedV });
     if (fresh) g.trip.chosen = chosenOf(r);
-    if (g.active) { applyRoute(r); say(t(through ? 'voiceRejoin' : 'voiceReroute')); }
+    if (g.active) {
+      applyRoute(r); say(t(through ? 'voiceRejoin' : 'voiceReroute'));
+      if (r.truckFail) bus.emit('truckFail', r);         // для фури проїзду немає — веду звичайним, водій попереджений
+    }
   } catch (e) { log('warn', 'перерахунок: ' + e.message); }
   g.rerouting = false; bus.emit('guide', g);
 }
