@@ -192,7 +192,7 @@ definePanel('settings', {
     body.onclick = e => {
       const row = e.target.closest('[data-tg]'), b = e.target.closest('button');
       const vr = e.target.closest('[data-voice]'); if (vr) { selectVoice(vr.dataset.voice); return; }
-      if (b && /^v(Dl|Cancel|Del|Apk)$/.test(b.dataset.act || '')) { voiceAct(b); return; }
+      if (b && /^v(Dl|Cancel|Del|Apk|Test|LangUk)$/.test(b.dataset.act || '')) { voiceAct(b); return; }
       if (row) {
         const k = row.dataset.tg; S[k] = !S[k];
         const sw = row.querySelector('.sw'); sw.classList.toggle('on', !!S[k]); sw.setAttribute('aria-checked', !!S[k]);
@@ -221,7 +221,7 @@ definePanel('settings', {
         return;
       }
       const a = b.dataset.act;
-      if (a === 'testVoice') say(t('voiceTest'), { force: true, urgent: true });
+      if (a === 'testVoice') voiceTest();
       else if (a === 'resetLearn') { resetLearning(); toast(t('done'), 'green', 2500); }
       else if (a === 'clearFeed') { clearFeed(); toast(t('done'), 'green', 2500); }
       else if (a === 'appset') P.openAppSettings();
@@ -363,7 +363,21 @@ definePanel('diag', {
 /* =====================  ГОЛОС: телефону або якісний із пакета  ===================== */
 // Пакет «uk» (Piper ukrainian_tts) має трьох дикторів: 0 — Лада, 1 — Микита, 2 — Тетяна.
 const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta'], ['uk:0', 'uk', 0, 'vLada']];
-const vst = { dl: null, err: '', errShown: false };
+const vst = { dl: null, err: '', errShown: false, last: null, testing: 0, why: '' };
+// Щоденник голосу (1.1.7): що й коли сталося з якісним голосом — останні записи видно в «Параметри → Голос»,
+// тож причину «чому знову голос телефону» видно на самому телефоні, а не доводиться вгадувати.
+const VLOG_KEY = 'reis.voiceLog', VERR_KEY = 'reis.voiceErr';
+let vlogList = null;
+function vlogLoad() { if (!vlogList) { try { vlogList = JSON.parse(localStorage.getItem(VLOG_KEY) || '[]'); } catch (_) { vlogList = []; } if (!Array.isArray(vlogList)) vlogList = []; } return vlogList; }
+function vlog(m) {
+  const l = vlogLoad(), last = l[l.length - 1];
+  if (last && last.m === m && Date.now() - last.t < 60000) return;            // те саме поспіль — один запис
+  l.push({ t: Date.now(), m }); while (l.length > 30) l.shift();
+  try { localStorage.setItem(VLOG_KEY, JSON.stringify(l)); } catch (_) {}
+}
+function verrGet() { try { const e = JSON.parse(localStorage.getItem(VERR_KEY) || 'null'); return e && e.e ? e : null; } catch (_) { return null; } }
+function verrSet(e) { try { if (e) localStorage.setItem(VERR_KEY, JSON.stringify({ e: String(e).slice(0, 160), t: Date.now() })); else localStorage.removeItem(VERR_KEY); } catch (_) {} }
+const vTime = ts => { const d = new Date(ts), z = n => String(n).padStart(2, '0'); return (Date.now() - ts > 20 * 3600e3 ? z(d.getDate()) + '.' + z(d.getMonth() + 1) + ' ' : '') + z(d.getHours()) + ':' + z(d.getMinutes()); };
 const PACK_VER = 2;                                          // v1 читала текст через espeak і звучала невірно — такий пакет оновлюємо
 // Оболонки 1.1.2–1.1.4 (native 3) передавали рушію теку словника espeak, якої в пакеті v2 немає, — модель не запускалась.
 // Виправлено в оболонці native 4 (1.1.5): на старих якісний голос не вмикаємо, а пропонуємо оновити застосунок.
@@ -371,16 +385,43 @@ const VOICE_NATIVE = 4;
 const engineOk = () => (+P.appInfo().nativeRev || 0) >= VOICE_NATIVE;
 const packOk = st => { const p = st && st.packs && st.packs.uk; return !!p && (p.ver || 0) >= PACK_VER; };
 const fmtMB = b => Math.max(1, Math.round((b || 0) / 1e6)) + ' МБ';
+// Чому зараз звучить саме цей голос. ok — якісний голос працює (або водій сам вибрав голос телефону);
+// інакше code — причина, text — пояснення людською мовою, act/btn — що натиснути, щоб виправити.
+function voiceWhy() {
+  const cur = S.ttsVoice || 'system', v = VOICES.find(x => x[0] === cur);
+  if (!P.isNative || !P.hasVoices()) return { ok: true, code: 'web', text: '' };
+  if (!v || !v[1]) return { ok: true, code: 'system', text: t('vwSystem') };
+  const st = P.voiceStatus(), name = t(v[3]).split(' — ')[0];
+  if (S.lang === 'ru') return { ok: false, code: 'lang', text: t('vwLang'), act: 'vLangUk', btn: t('vwLangBtn') };
+  if (!engineOk()) return { ok: false, code: 'oldapp', text: t('vwOldApp', P.appInfo().app || '?'), act: 'vApk', btn: t('vFixBtn') };
+  if (!st) return { ok: false, code: 'nostatus', text: t('vwNoStatus') };
+  if (st.lib === false) return { ok: false, code: 'lib', text: t('vEngine') };
+  if (vst.dl || (st.dl && st.dl.pack === v[1])) return { ok: false, code: 'dl', text: t('vwDl') };
+  if (!st.packs || !st.packs[v[1]]) return { ok: false, code: 'nopack', text: t('vwNoPack'), act: 'vDl', btn: t('vDl') };
+  if (!packOk(st)) return { ok: false, code: 'oldpack', text: t('vwOldPack'), act: 'vDl', btn: t('vPackUpd') };
+  const e = verrGet();
+  if (e) return { ok: false, code: 'err', text: t('vwErr', vTime(e.t), e.e), act: 'vTest', btn: t('vwTest') };
+  return { ok: true, code: 'neural', text: t('vwOk', name) + (st.loaded === v[1] ? '' : ' ' + t('vwLoading')) };
+}
 export function applyVoice() {
-  const v = VOICES.find(x => x[0] === (S.ttsVoice || 'system'));
-  if (!v || !v[1] || !packOk(P.voiceStatus()) || !engineOk()) P.setVoice('', 0, ''); else P.setVoice(v[1], v[2], 'uk');
+  const v = VOICES.find(x => x[0] === (S.ttsVoice || 'system')), w = voiceWhy();
+  // оболонка не відповіла про пакети (буває під час перезапуску сторінки) — вибір не скидаємо: вона сама пам'ятає голос
+  if (w.code === 'nostatus') { vlog('оболонка не відповіла про пакети — вибір голосу не чіпаю'); return; }
+  const neural = !!(v && v[1]) && (w.code === 'neural' || w.code === 'err' || w.code === 'lang');
+  if (neural) P.setVoice(v[1], v[2], 'uk'); else P.setVoice('', 0, '');
+  const key = (S.ttsVoice || 'system') + '|' + w.code;
+  if (vst.why !== key) { vst.why = key; vlog((v ? t(v[3]).split(' — ')[0] : '?') + ': ' + (w.code === 'neural' ? 'якісний голос увімкнено' : w.code === 'system' ? 'вибрано голос телефону' : 'голос телефону — ' + w.code + (w.code === 'oldapp' ? ' (застосунок ' + (P.appInfo().app || '?') + ', оболонка ' + (P.appInfo().nativeRev || 0) + ')' : ''))); }
 }
 function voiceHtml() {
   if (!P.isNative) return `<div class="muted">${t('vWeb')}</div>`;
   if (!P.hasVoices()) return `<div class="muted">${t('vOldShell')}</div>`;
   const st = P.voiceStatus() || {}, cur = S.ttsVoice || 'system', old = st.packs && st.packs.uk && !packOk(st), have = packOk(st) && st.packs.uk;
-  const fix = engineOk() ? '' : `<div class="card vfix"><b>${t('vFixTitle')}</b><div class="muted">${t('vFixText')}</div><div class="btns"><button class="btn pri wide" data-act="vApk">${t('vFixBtn')}</button></div></div>`;
-  const err = engineOk() && vst.err ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vLoadErrD', esc(vst.err))}</div>` : '';
+  // зверху — що говорить зараз і, якщо це не вибраний якісний голос, чому та що зробити
+  const w = voiceWhy(), lastSaid = vst.last && Date.now() - vst.last.at < 6 * 3600e3 ? `<small class="vw-last">${t(vst.last.eng === 'neural' ? 'vwLastN' : 'vwLastS', vTime(vst.last.at), vst.last.ms != null ? (vst.last.ms / 1000).toFixed(1).replace('.', ',') : '')}</small>` : '';
+  const fix = w.code === 'oldapp' ? `<div class="card vfix"><b>${t('vFixTitle')}</b><div class="muted">${t('vFixText')}</div><div class="muted">${esc(w.text)}</div><div class="btns"><button class="btn pri wide" data-act="vApk">${t('vFixBtn')}</button></div></div>`
+    : w.text ? `<div class="card vwhy ${w.ok ? 'ok' : 'bad'}" id="vWhy" data-code="${w.code}"><b>${esc(w.text)}</b>${lastSaid}${w.act ? `<div class="btns"><button class="btn ${w.ok ? '' : 'pri '}wide" data-act="${w.act}">${esc(w.btn)}</button></div>` : ''}</div>` : '';
+  const lg = vlogLoad().slice(-8).reverse();
+  const err = lg.length ? `<details class="vlog"><summary>${t('vwLog')}</summary>${lg.map(x => `<div><i>${vTime(x.t)}</i> ${esc(x.m)}</div>`).join('')}<div class="muted">${esc(t('vwLogApp', P.appInfo().app || '?', P.appInfo().nativeRev || 0, VERSION.name))}</div></details>` : '';
   const dl = vst.dl || (st.dl && st.dl.pack === 'uk' ? { pct: st.dl.pct } : null);
   const rows = VOICES.map(([id, pack, , nk, dk]) => `<button class="vrow${cur === id ? ' on' : ''}" data-voice="${id}" aria-pressed="${cur === id}"><i class="vdot"></i><span class="grow"><b>${t(nk)}</b><small>${pack ? t('vNeuralD') + (have ? '' : ' · ' + t('vNeedPack')) : t(dk)}</small></span></button>`).join('');
   let pk;
@@ -388,22 +429,32 @@ function voiceHtml() {
   else if (have) pk = `<div class="vdl"><span class="muted">${t('vPackHave', fmtMB(have.size))}</span><button class="btn sm" data-act="vDel">${t('vDel')}</button></div>`;
   else pk = `<div class="muted">${old ? t('vPackOld') : t('vPackSize')}</div><div class="btns"><button class="btn pri wide" data-act="vDl">${old ? t('vPackUpd') : t('vDl')}</button></div>`;
   return fix + `<div class="list vlist">${rows}</div><div class="card vpack"><b>${t('vPack')}</b>${pk}</div>` +
-    (S.lang === 'ru' ? `<div class="muted" style="margin-top:6px">${t('vUkOnly')}</div>` : '') + (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '') + err;
+    (st.lib === false ? `<div class="muted" style="margin-top:6px;color:var(--red)">${t('vEngine')}</div>` : '') + err;
 }
 function voiceRefresh() { const el = $('voiceSec'); if (el) el.innerHTML = voiceHtml(); }
 function voiceDl(pack) { vst.dl = { pct: 0 }; if (!P.voiceDownload(pack)) vst.dl = null; voiceRefresh(); }
 function selectVoice(id) {
   const v = VOICES.find(x => x[0] === id); if (!v) return;
-  S.ttsVoice = id; vst.err = ''; applyVoice();
+  S.ttsVoice = id; vst.err = ''; verrSet(null); applyVoice();
   const st = P.voiceStatus() || {};
   if (v[1] && !packOk(st)) { if (!vst.dl && !(st.dl && st.dl.pack)) voiceDl(v[1]); }
   else if (v[1] && !engineOk()) toast(t('vFixTitle'), 'yellow', 5000);
-  else setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), v[1] ? 600 : 0);
+  else if (v[1] && S.lang === 'ru') toast(t('vwLang'), 'yellow', 7000);
+  else setTimeout(() => voiceTest(), v[1] ? 600 : 0);
   voiceRefresh();
+}
+// Перевірка голосу: кажемо фразу й дивимось, хто її справді сказав. Якісний голос не спрацював — причина одразу на екрані.
+function voiceTest() {
+  vst.testing = Date.now(); verrSet(null); vst.err = '';
+  applyVoice();                                                // ще раз сказати оболонці, який голос вибрано — раптом вона його «забула»
+  say(t('voiceTest'), { force: true, urgent: true });
+  setTimeout(() => { if (vst.testing && Date.now() - vst.testing >= 7000) { vst.testing = 0; voiceRefresh(); } }, 7500);
 }
 function voiceAct(b) {
   const a = b.dataset.act;
   if (a === 'vApk') { if (upd.apk) updTap(); else { toast(t('updChecking'), '', 2500); updCheck(); } }
+  else if (a === 'vTest') voiceTest();
+  else if (a === 'vLangUk') { S.lang = 'uk'; vlog('мову інтерфейсу перемкнено на українську'); applyVoice(); refresh('settings'); setTimeout(voiceTest, 500); }
   else if (a === 'vDl') voiceDl('uk');
   else if (a === 'vCancel') P.voiceCancel();
   else if (a === 'vDel') { if (b.dataset.sure) P.voiceDelete('uk'); else { b.dataset.sure = '1'; b.textContent = t('vDelSure'); } }
@@ -465,19 +516,29 @@ export function initLab() {
     const s = d && d.state;
     if (s === 'dl') vst.dl = { pct: d.pct };
     else if (s === 'unzip') vst.dl = { pct: 92, unzip: true };
-    else if (s === 'ready') { vst.dl = null; vst.err = ''; applyVoice(); toast(engineOk() ? t('vReady') : t('vReadyOld'), engineOk() ? 'green' : 'yellow', 6000); if (engineOk() && (S.ttsVoice || 'system') !== 'system') setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), 1800); }
-    else if (s === 'error' || s === 'cancel') { vst.dl = null; if (s === 'error') toast(t('vErr', d.error === 'space' ? t('vNoSpace') : (d.error || '')), 'yellow', 8000); }
-    else if (s === 'deleted') { vst.dl = null; vst.err = ''; }
+    else if (s === 'ready') { vst.dl = null; vst.err = ''; verrSet(null); vlog('пакет голосу завантажено'); applyVoice(); toast(engineOk() ? t('vReady') : t('vReadyOld'), engineOk() ? 'green' : 'yellow', 6000); if (engineOk() && (S.ttsVoice || 'system') !== 'system') setTimeout(() => say(t('voiceTest'), { force: true, urgent: true }), 1800); }
+    else if (s === 'error' || s === 'cancel') { vst.dl = null; if (s === 'error') vlog('пакет не завантажився: ' + (d.error || '?')); if (s === 'error') toast(t('vErr', d.error === 'space' ? t('vNoSpace') : (d.error || '')), 'yellow', 8000); }
+    else if (s === 'deleted') { vst.dl = null; vst.err = ''; verrSet(null); vlog('пакет голосу видалено'); applyVoice(); }
     else if (s === 'loadErr' || s === 'fallback') {
-      // модель не запустилась — одне зрозуміле повідомлення на сеанс, подробиці в журнал
+      // модель не запустилась або фразу довелося сказати голосом телефону — одна плашка на сеанс, а причина — у «Параметри → Голос»
       log('warn', 'якісний голос не спрацював: ' + (d.error || ''));
-      vst.err = d.error || '?';
-      if (!vst.errShown) { vst.errShown = true; toast(t('vLoadErr'), 'yellow', 7000); }
+      vst.err = d.error || '?'; verrSet(vst.err); vlog((s === 'loadErr' ? 'модель не запустилась: ' : 'фразу сказав голос телефону: ') + vst.err);
+      // одна плашка людською мовою; технічна причина — у «Параметри → Голос»
+      if (!vst.errShown || vst.testing) { vst.errShown = true; toast(t(vst.testing ? 'vwTestBad' : 'vLoadErr'), 'yellow', vst.testing ? 9000 : 7000); }
+      vst.testing = 0;
     }
-    else if (s === 'loaded') { vst.err = ''; log('info', `голос завантажено в памʼять за ${d.ms} мс`); }
+    else if (s === 'loaded') { vst.err = ''; verrSet(null); log('info', `голос завантажено в памʼять за ${d.ms} мс`); vlog(`модель у памʼяті за ${(d.ms / 1000).toFixed(1).replace('.', ',')} с`); }
+    else if (s === 'spoke') {
+      // оболонка 5+: хто справді сказав останню фразу і скільки тривав синтез
+      vst.last = { eng: d.eng, ms: d.ms, at: Date.now() };
+      if (d.eng === 'neural') { vst.err = ''; verrSet(null); }
+      if (vst.testing) { vst.testing = 0; toast(d.eng === 'neural' ? t('vwTestOk', (d.ms / 1000).toFixed(1).replace('.', ',')) : t('vwTestSys'), d.eng === 'neural' ? 'green' : '', 5000); vlog(d.eng === 'neural' ? `перевірка: сказав якісний голос, синтез ${(d.ms / 1000).toFixed(1).replace('.', ',')} с` : 'перевірка: сказав голос телефону'); }
+    }
     voiceRefresh();
   });
   applyVoice();
+  // повернулись у застосунок — ще раз сказати оболонці, який голос вибрано (якщо телефон за цей час перезапускав її частини)
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) applyVoice(); });
   bus.on('native:apk', d => {
     upd.apkSt = d.state || ''; if (d.pct != null) upd.pct = d.pct; if (d.error) { upd.error = d.error; log('warn', 'оновлення APK: ' + d.error); }
     updBar();
@@ -491,7 +552,7 @@ export function initLab() {
     if (upd.apkSt === 'perm') setTimeout(() => P.installApk(), 400);
     if (Date.now() - upd.checkedAt > UPD_EVERY) updCheck();
   });
-  bus.on('settings', k => { if (k === 'lang') updBar(); });
+  bus.on('settings', k => { if (k === 'lang') { updBar(); applyVoice(); voiceRefresh(); } });
   if (P.isNative) setInterval(() => { if (Date.now() - upd.checkedAt > UPD_EVERY - 60000) updCheck(); }, 5 * 60000);
   bus.on('native:saved', d => { if (d && d.error) toast(t('saveErr') + ' ' + d.error, 'yellow'); else if (d && /^reis-gps/.test(d.name || '')) toast(t('jSaved', d.path || d.name), 'green', 9000); });
   if (P.isNative) setTimeout(updCheck, 15000);

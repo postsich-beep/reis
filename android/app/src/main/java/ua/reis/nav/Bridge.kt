@@ -129,7 +129,10 @@ class Bridge(private val act: MainActivity) {
     /* ---------- синтез мови ---------- */
     private val ttsListener = object : UtteranceProgressListener() {
         override fun onStart(utteranceId: String?) {}
-        override fun onDone(utteranceId: String?) { emit("tts", JSONObject().put("id", utteranceId ?: "").put("state", "done")) }
+        override fun onDone(utteranceId: String?) {
+            emit("voice", JSONObject().put("state", "spoke").put("eng", "system"))
+            emit("tts", JSONObject().put("id", utteranceId ?: "").put("state", "done"))
+        }
         @Deprecated("Deprecated in Java")
         override fun onError(utteranceId: String?) { emit("tts", JSONObject().put("id", utteranceId ?: "").put("state", "error")) }
     }
@@ -158,13 +161,17 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface
     fun speak(text: String, lang: String, rate: Float, id: String) {
         val v = voiceSel
-        if (v != null && lang.lowercase().startsWith(v.lang) && neural.installed(v.pack)) {
-            main.post { try { tts?.stop() } catch (_: Exception) {} }
-            neural.speak(v.pack, v.sid, text, rate, id) { err ->
-                emit("voice", JSONObject().put("state", "fallback").put("error", err))
-                systemSpeak(text, lang, rate, id)
+        if (v != null && lang.lowercase().startsWith(v.lang)) {
+            if (neural.installed(v.pack)) {
+                main.post { try { tts?.stop() } catch (_: Exception) {} }
+                neural.speak(v.pack, v.sid, text, rate, id) { err ->
+                    emit("voice", JSONObject().put("state", "fallback").put("error", err))
+                    systemSpeak(text, lang, rate, id)
+                }
+                return
             }
-            return
+            // якісний голос вибрано, а пакета в телефоні немає — кажемо голосом телефону й не мовчимо про причину
+            emit("voice", JSONObject().put("state", "fallback").put("error", "nopack"))
         }
         neural.stop()
         systemSpeak(text, lang, rate, id)

@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 33, name: '1.1.6' };
+export const VERSION = { web: 34, name: '1.1.7' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -28,15 +28,18 @@ window.addEventListener('error', e => log('err', (e.message || 'error') + ' @' +
 window.addEventListener('unhandledrejection', e => log('err', 'promise: ' + (e.reason && (e.reason.stack || e.reason.message) || e.reason)));
 
 /* ---------- налаштування ---------- */
+// Базові шари карти (1.1.7, як погодили): на карті лише АЗС і камери. Інше — їжа, стоянки, мотелі, душ, перевірені місця,
+// події, проблемні місця, заміри покриття — водій вмикає сам кнопкою «Шари».
+const BASE_STOPS = { food: false, fuel: true, park: false, motel: false, cam: true, shower: false };
 const DEFAULTS = {
   lang: 'uk', theme: 'auto', view3d: true, autoCenter: true,
   voice: true, popups: true, lookahead: true,
   tg: true, air: true, cams: true, stops: true, drive: true,
   aiFilter: false, spoof: true, offline: true, rec: false,
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
-  mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true, shower: true },
+  mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { ...BASE_STOPS },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 40, axle: 11.5, hazmat: false, vmax: 90 },
-  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: true, mapHazards: true, passed: 'hide', rough: true, roughMap: false,
+  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
@@ -48,6 +51,11 @@ let settings = structuredClone(DEFAULTS);
 try {
   const raw = JSON.parse(localStorage.getItem('reis.settings') || '{}');
   settings = { ...settings, ...raw, truck: { ...DEFAULTS.truck, ...(raw.truck || {}) } };
+  // Телефон, на якому «Рейс» уже стояв: один раз ставимо базові галочки шарів, далі вибір водія не чіпаємо
+  if ((raw.layersDefV || 0) < 1 && Object.keys(raw).length) {
+    Object.assign(settings, { mapStops: true, mapStopTypes: { ...BASE_STOPS }, mapVerified: false, mapEvents: false, mapHazards: false, roughMap: false, layersDefV: 1 });
+    localStorage.setItem('reis.settings', JSON.stringify(settings));
+  }
 } catch (_) {}
 export const S = new Proxy(settings, {
   set(o, k, v) {

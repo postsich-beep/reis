@@ -37,8 +37,6 @@
 <div id="quick" role="dialog" hidden></div>
 <!-- «Моє місце» зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->
 <div id="zoom">
-  <!-- GPS: зелений — сигнал є, червоний — немає; торкнутись — подробиці (1.1.6: помінявся місцями з трикутником) -->
-  <button class="rb" id="bGps"></button>
   <button class="rb" id="bCenter" hidden></button>
 </div>
 
@@ -63,14 +61,16 @@
     <button class="chip none" id="gpsChip"><i></i><span id="gpsText">GPS</span></button>
     <div class="nudge" id="nudge" hidden><button id="bFwd100"></button><button id="bBack100"></button></div>
   </div>
-  <!-- «Маршрут» — головна кнопка посередині; чат і мікрофон прибрано з панелі (поки незрозуміло, як ними користуватись у дорозі) -->
+  <!-- 1.1.7: GPS · Події · Рейс · Місця · Мітки. «Рейс» — головна кнопка посередині.
+       «Параметри» на головному екрані більше немає — вони в швидких налаштуваннях (кнопка вгорі праворуч). -->
   <div id="tabs">
+    <!-- GPS: зелений — сигнал є, червоний — немає; торкнутись — подробиці -->
+    <button data-panel="gps" id="tabGps"></button>
     <button data-panel="feed"></button>
-    <button data-panel="places"></button>
     <button data-panel="trip" class="main"></button>
+    <button data-panel="places"></button>
     <!-- позначити подію на дорозі: ДТП, поліція, транспортна служба (бачать усі водії 2 години) -->
     <button id="tabRep"></button>
-    <button data-panel="settings"></button>
   </div>
 </footer>
 

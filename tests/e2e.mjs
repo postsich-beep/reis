@@ -153,6 +153,11 @@ async function newPage(native, opts = {}) {
     { type: 'node', id: 1, lat: camPt[0], lon: camPt[1], tags: { highway: 'speed_camera', maxspeed: '50' } },
     { type: 'node', id: 2, lat: stopPt[0], lon: stopPt[1], tags: { amenity: 'fuel', brand: 'OKKO', hgv: 'yes', shower: 'yes', toilets: 'yes', opening_hours: '24/7' } },
     { type: 'node', id: 3, lat: coords[turnIdx[3] + 60][0], lon: coords[turnIdx[3] + 60][1], tags: { amenity: 'fuel', name: 'АЗС' } }] }));
+  // Базові шари з 1.1.7 — лише АЗС і камери. Старі перевірки написані під «усе увімкнено», тож для них так і ставимо
+  // (лише коли налаштувань ще немає — перезавантаження сторінки вибору водія не скидає). opts.baseLayers — справжній перший запуск.
+  if (!opts.baseLayers) await page.addInitScript(() => { try { if (!localStorage.getItem('reis.settings')) localStorage.setItem('reis.settings', JSON.stringify({ layersDefV: 1, mapStops: true,
+    mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true, shower: true }, mapVerified: true, mapEvents: true, mapHazards: true })); } catch (_) {} });
+  if (opts.oldSettings) await page.addInitScript(o => { try { if (!localStorage.getItem('reis.settings')) localStorage.setItem('reis.settings', JSON.stringify(o)); } catch (_) {} }, opts.oldSettings);
   if (opts.motion) await page.addInitScript(m => { try { localStorage.setItem('reis.motion', JSON.stringify(m)); } catch (_) {} }, opts.motion);
   if (native) await page.addInitScript(({ tg, air, offline }) => {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
@@ -273,7 +278,7 @@ if (run('1')) try {
   ok('Ліма відкинута: позиція лишилась в Україні, чип «Підміна GPS»', sp0.lat > 49 && sp0.mode === 'approx' && sp0.chip === 'Підміна GPS', JSON.stringify(sp0));
   ok('без справжнього GPS спідометр не бреше нулем', (await page.textContent('#spdVal')) === '—', await page.textContent('#spdVal'));
   ok('коло похибки без заливки', await app(page, () => !window.__app.map.map.getLayer('acc-fill') && !!window.__app.map.map.getLayer('acc-line')));
-  await page.click('#bGps'); await page.waitForSelector('#panelBody .item');
+  await page.click('#tabs button[data-panel="gps"]'); await page.waitForSelector('#panelBody .item');
   ok('панель GPS: стан і супутники', /Приблизно/.test(await page.textContent('#panelBody')) && /Супутники/.test(await page.textContent('#panelBody')));
   await page.click('#panelClose');
   // підміна «в Бєлгород»: усередині старого прямокутника, але за кордоном — тепер ловиться за контуром України
@@ -284,7 +289,7 @@ if (run('1')) try {
     const u = window.__app.core.inUkraine;
     return u({ lat: 44.95, lon: 34.1 }) && u({ lat: 50.91, lon: 34.8 }) && u({ lat: 48.43, lon: 22.2 }) && u({ lat: 45.35, lon: 28.84 }) && !u({ lat: 50.6, lon: 36.59 }) && !u({ lat: 52.44, lon: 30.99 }) && !u({ lat: 47.01, lon: 28.86 });
   }));
-  await page.click('#bGps'); await page.waitForSelector('[data-act="journal"]');
+  await page.click('#tabs button[data-panel="gps"]'); await page.waitForSelector('[data-act="journal"]');
   await page.click('[data-act="journal"]'); await sleep(200);
   const jr = await app(page, () => { const n = window.__nativeCalls.find(x => /^saveFile:reis-gps-\d{8}-\d{4}\.json$/.test(x)); let j = null; try { j = JSON.parse(window.__savedText); } catch (_) {} return { n, cnt: j ? j.entries.length : 0, rej: j ? j.entries.filter(e => /^rej:/.test(e.v)).map(e => e.v) : [] }; });
   ok('журнал GPS зберігається файлом і показує, що відкинуто й чому', !!jr.n && jr.cnt >= 4 && jr.rej.includes('rej:bounds'), JSON.stringify(jr));
@@ -462,7 +467,7 @@ if (run('1')) try {
   { const q = routeReqs.find(x => x.costing === 'truck') || {}, tk = (q.costing_options || {}).truck || {};
     ok('запит маршруту: профіль фури з габаритами, мова підказок українська', q.costing === 'truck' && tk.height === 4 && tk.weight === 40 && q.language === 'uk-UA' && q.locations.length === 2 && q.locations[0].type === 'break', JSON.stringify({ c: q.costing, tk, l: q.language })); }
   // черга голосу могла бути зайнята (тривога, подія) — даємо їй договорити; на CI це бувало повільніше
-  ok('сказано «маршрут побудовано»', await page.waitForFunction(() => window.__spoken.some(s => /Маршрут побудовано/.test(s)), null, { timeout: 8000 }).then(() => true, () => false), JSON.stringify(await app(page, () => window.__spoken.slice(-5))));
+  ok('сказано «маршрут побудовано»', await page.waitForFunction(() => window.__spoken.some(s => /Рейс прокладено/.test(s)), null, { timeout: 8000 }).then(() => true, () => false), JSON.stringify(await app(page, () => window.__spoken.slice(-5))));
 
   // імітація руху
   await app(page, () => { window.__app.sim.setSpeed(60); window.__app.sim.start(); });
@@ -474,7 +479,7 @@ if (run('1')) try {
   // «Місця» в дорозі: лише попереду по маршруту, до 50 км від траси
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-scope');
   const pl = await app(page, () => ({ ids: [...document.querySelectorAll('.vp-row')].map(x => x.dataset.vpid).join(), scope: document.querySelector('.vp-scope').textContent, w: [...document.querySelectorAll('.vp-w')].map(x => x.textContent).join(' | ') }));
-  ok('«Місця» в дорозі: лише по маршруту попереду (до 50 км від траси), Львів — ні', /^test-bistro/.test(pl.ids) && !/test-far/.test(pl.ids) && /По маршруту попереду/.test(pl.scope) && /через 15 км/.test(pl.w), JSON.stringify(pl));
+  ok('«Місця» в дорозі: лише по маршруту попереду (до 50 км від траси), Львів — ні', /^test-bistro/.test(pl.ids) && !/test-far/.test(pl.ids) && /У рейсі попереду/.test(pl.scope) && /через 15 км/.test(pl.w), JSON.stringify(pl));
   await page.click('#panelClose');
   await shot(page, '03-drive');
   // пройдене: за замовчуванням ховаємо — на карті лише шлях попереду; за налаштуванням — блідо
@@ -559,7 +564,7 @@ if (run('1')) try {
   const rd0 = await app(page, () => { window.__app.sim.setLost(true); return window.__app.nav.pos.rd; });
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 12000 });
   await sleep(3200);
-  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, noLine: !document.getElementById('lostLine') && !/GPS ✕/.test(document.getElementById('tripbar').innerText), nudge: !document.getElementById('nudge').hidden, chip: document.getElementById('bGps').getAttribute('aria-label'), gbad: document.getElementById('bGps').classList.contains('g-bad') }));
+  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, noLine: !document.getElementById('lostLine') && !/GPS ✕/.test(document.getElementById('tripbar').innerText), nudge: !document.getElementById('nudge').hidden, chip: document.getElementById('tabGps').getAttribute('aria-label'), gbad: document.getElementById('tabGps').classList.contains('g-bad') }));
   ok('GPS зник → режим розрахунку, компактні кнопки ±100, кружечок GPS червоний', dr.mode === 'dr' && dr.reason === 'timeout' && dr.nudge && dr.chip.startsWith('GPS ✕') && dr.gbad, JSON.stringify(dr));
   ok('1.1.6: червоного рядка про GPS під часом прибуття немає (подробиці — у підписі кружечка GPS)', dr.noLine, JSON.stringify(dr));
   ok('без GPS позиція рухається маршрутом і надолужує паузу', dr.rd > rd0 + 110, `rd ${Math.round(rd0)} → ${Math.round(dr.rd)}`);
@@ -572,12 +577,12 @@ if (run('1')) try {
   ok('↓100 двічі зсуває назад (200 м мінус рух за час натискань)', up - dn > 110 && up - dn <= 201, `${Math.round(up - dn)} м`);
   await app(page, () => window.__app.sim.setLost(false));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
-  ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано, кружечок GPS зелений', await app(page, () => document.getElementById('nudge').hidden && document.getElementById('bGps').classList.contains('g-ok')));
+  ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано, кружечок GPS зелений', await app(page, () => document.getElementById('nudge').hidden && document.getElementById('tabGps').classList.contains('g-ok')));
 
   // підміна GPS («Ліма»)
   await app(page, () => window.__app.sim.setSpoof(true));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
-  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('bGps').getAttribute('aria-label') }));
+  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('tabGps').getAttribute('aria-label') }));
   ok('підміну GPS відкинуто, позиція лишилась в Україні', sp.reason === 'spoof' && sp.lat > 49 && /підмін/.test(sp.why), JSON.stringify(sp));
   await sleep(4500);
   ok('під час підміни координати Ліми не прийнято', await app(page, () => window.__app.nav.pos.mode === 'dr' && window.__app.nav.pos.lat > 49));
@@ -606,16 +611,16 @@ if (run('1')) try {
   ok('прибуття оголошено', fin.spoken.some(s => /Ви прибули/.test(s)) && /прибули/i.test(fin.man), fin.man);
   await shot(page, '07-arrived');
 
-  // нижня панель: «Маршрут» посередині, чату й мікрофона немає
-  ok('нижня панель: Події · Місця · Маршрут · трикутник «Мітка» · Параметри; чату й мікрофона немає', await app(page, () => [...document.querySelectorAll('#tabs button')].map(b => b.dataset.panel || b.id).join() === 'feed,places,trip,tabRep,settings' && /Мітка/.test(document.getElementById('tabRep').textContent) && !document.getElementById('bMic') && !document.querySelector('[data-panel="chat"]')));
-  // 1.1.6: GPS і трикутник помінялись місцями
-  { const sw = await app(page, () => { const g = document.getElementById('bGps').getBoundingClientRect(), r = document.getElementById('tabRep').getBoundingClientRect(), tb = document.getElementById('tabs').getBoundingClientRect(), st = document.querySelector('#tabs [data-panel="settings"]').getBoundingClientRect(), tr = document.querySelector('#tabs [data-panel="trip"]').getBoundingClientRect();
-      return { gpsRight: innerWidth - g.right < 24, gpsAboveBar: g.bottom < document.getElementById('bottom').getBoundingClientRect().top, gpsW: Math.round(g.width), repInBar: r.top >= tb.top - 1 && r.bottom <= tb.bottom + 1, repBetween: r.left >= tr.right - 1 && r.right <= st.left + 1, oldGone: !document.getElementById('tabGps') && !document.getElementById('bReport') }; });
-    ok('кружечок GPS — справа над картою (де був трикутник), трикутник — у нижній панелі між «Маршрут» і «Параметри»', sw.gpsRight && sw.gpsAboveBar && sw.gpsW >= 50 && sw.repInBar && sw.repBetween && sw.oldGone, JSON.stringify(sw)); }
-  ok('кружечок GPS: є сигнал — зелений', await app(page, () => document.getElementById('bGps').classList.contains('g-ok')), await app(page, () => document.getElementById('bGps').className + ' ' + window.__app.nav.pos.mode));
+  // 1.1.7: нижня панель зліва направо — GPS · Події · Рейс · Місця · Мітки; «Параметри» на головному екрані немає
+  { const bb = await app(page, () => { const bs = [...document.querySelectorAll('#tabs > button')], r = bs.map(b => b.getBoundingClientRect());
+      return { order: bs.map(b => b.dataset.panel || b.id).join(), labels: bs.map(b => b.textContent.trim()).join('|'), ltr: r.every((x, i) => !i || x.left >= r[i - 1].right - 1),
+        noSettings: !document.querySelector('#tabs [data-panel="settings"]'), oldGone: !document.getElementById('bGps') && !document.getElementById('bReport'), mic: !!document.getElementById('bMic') || !!document.querySelector('[data-panel="chat"]') }; });
+    ok('нижня панель зліва направо: GPS · Події · Рейс · Місця · Мітки; «Параметри» прибрано; чату й мікрофона немає', bb.order === 'gps,feed,trip,places,tabRep' && bb.ltr && bb.noSettings && bb.oldGone && !bb.mic && /^(±|GPS|Без GPS).*\|Події\d*\|Рейс\|Місця\|Мітки$/.test(bb.labels), JSON.stringify(bb)); }
+  ok('кружечок GPS: є сигнал — зелений', await app(page, () => document.getElementById('tabGps').classList.contains('g-ok')), await app(page, () => document.getElementById('tabGps').className + ' ' + window.__app.nav.pos.mode));
+  ok('«Параметри» відкриваються зі швидких налаштувань (кнопка вгорі праворуч)', await (async () => { await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); const ok1 = await app(page, () => /Налаштування/.test(document.getElementById('panelTitle').textContent)); await page.click('#panelClose'); return ok1; })());
 
   // лабораторія (тепер у Параметрах), ніч
-  await page.click('#tabs button[data-panel="settings"]'); await page.click('[data-act="labOpen"]'); await page.waitForSelector('[data-tg="tg"]');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.click('[data-act="labOpen"]'); await page.waitForSelector('[data-tg="tg"]');
   await shot(page, '09-lab');
   await page.click('[data-tg="tg"]');
   ok('перемикач у Лабораторії змінює налаштування', await app(page, () => window.__app.S.tg === false));
@@ -769,7 +774,7 @@ if (run('2г')) try {
   for (let i = 0; i < 3; i++) { await emitN('loc', { prov: 'gps', lat: 50.6, lon: 36.59, acc: 4, spd: 0, t: Date.now() }); await sleep(200); }
   await sleep(1200);
   const r2 = await app(page, () => ({ mode: window.__app.nav.pos.mode, on: window.__app.nav.pos.onRoute, rd: window.__app.nav.pos.rd, man: document.getElementById('manDist').textContent }));
-  ok('підміна посеред рейсу: розрахунок по маршруту, без «поза маршрутом»', r2.mode === 'dr' && r2.on && r2.rd > 15900 && !/поза маршрутом/i.test(r2.man), JSON.stringify(r2));
+  ok('підміна посеред рейсу: розрахунок по маршруту, без «поза маршрутом»', r2.mode === 'dr' && r2.on && r2.rd > 15900 && !/зійшли з рейсу/i.test(r2.man), JSON.stringify(r2));
   // 3) швидкість від водія: 80 км/год
   await page.click('#speed'); await shot(page, '15-speed-pick'); await page.click('#spdPop [data-v="80"]');
   const rdA = await app(page, () => window.__app.nav.pos.rd); await sleep(3100);
@@ -876,7 +881,7 @@ if (run('2ґ')) try {
   await shot(page, '14-no-gps-snap');
   await page.click('#manSnap'); await sleep(300);
   const wp = await app(page, () => ({ open: !document.getElementById('wherePop').hidden, rows: [...document.querySelectorAll('#wherePop [data-d]')].map(b => b.textContent.trim().slice(0, 40)) }));
-  ok('«На маршрут» → «Де ви зараз?»: початок маршруту й місця вздовж нього', wp.open && wp.rows.length >= 1 && /Початок маршруту/.test(wp.rows.join('|')), JSON.stringify(wp));
+  ok('«На маршрут» → «Де ви зараз?»: початок маршруту й місця вздовж нього', wp.open && wp.rows.length >= 1 && /Початок рейсу/.test(wp.rows.join('|')), JSON.stringify(wp));
   await shot(page, '14b-where');
   await page.click('#wherePop [data-d]');
   await sleep(300);
@@ -886,7 +891,7 @@ if (run('2ґ')) try {
   { const pt = await app(page, () => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(9000); return { lat: p.lat + 0.00045, lon: p.lon }; });
     await app(page, p => window.__app.bus.emit('mapPick', p), pt); await sleep(250);
     const s3 = await app(page, () => ({ rd: Math.round(window.__app.nav.pos.rd), pick: !document.getElementById('pick').hidden, toast: document.getElementById('toasts').textContent }));
-    ok('довге натискання поруч із маршрутом ставить позначку на маршрут (без меню)', Math.abs(s3.rd - 9000) < 150 && !s3.pick && /на маршруті/.test(s3.toast), JSON.stringify({ ...s3, toast: s3.toast.slice(-60) })); }
+    ok('довге натискання поруч із маршрутом ставить позначку на маршрут (без меню)', Math.abs(s3.rd - 9000) < 150 && !s3.pick && /на лінії рейсу/.test(s3.toast), JSON.stringify({ ...s3, toast: s3.toast.slice(-60) })); }
   ok('прохід «На маршрут» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід «На маршрут» дійшов до кінця', false, String(e.message).split('\n')[0]); }
@@ -909,7 +914,7 @@ if (run('6')) try {
   await sleep(1500);
   const rq = routeReqs.slice(n0).pop() || { locations: [] };
   ok('з’їхали: маршрут повертає на вибраний — точки вздовж нього (through) з напрямком руху', rq.locations.length >= 3 && rq.locations.slice(1, -1).every(l => l.type === 'through' && l.heading != null) && !rq.alternates, JSON.stringify(rq.locations.map(l => l.type + (l.heading != null ? '@' + l.heading : ''))));
-  ok('сказано «Повертаю на вибраний маршрут»', await app(page, () => window.__spoken.some(s => /Повертаю на вибраний маршрут/.test(s))));
+  ok('сказано «Повертаю на вибраний маршрут»', await app(page, () => window.__spoken.some(s => /Повертаю на вибраний рейс/.test(s))));
   // «Новий шлях від мене» — без прив'язки до старого
   await page.click('#tabs button[data-panel="trip"]'); await page.click('#routePick [data-ts="details"]'); await page.click('[data-act="rerouteFresh"]'); await sleep(1500);
   const rq2 = routeReqs[routeReqs.length - 1];
@@ -1020,14 +1025,14 @@ const layoutCheck = () => {
   const R = el => el.getBoundingClientRect();
   const nm = el => el.id ? '#' + el.id : (el.getAttribute('data-panel') ? 'tab:' + el.getAttribute('data-panel') : el.className ? '.' + String(el.className).split(' ')[0] : el.tagName);
   const inter = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
-  const top = ['#top', '#rail', '#bCenter', '#bGps', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
+  const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
   for (const el of top) { const r = R(el); if (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1) out.push('за межами екрана: ' + nm(el) + ' [' + [r.left, r.top, r.right, r.bottom].map(Math.round) + ']'); }
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (inter(R(top[i]), R(top[j]))) out.push('накладаються: ' + nm(top[i]) + ' і ' + nm(top[j]));
   for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button', '#bottom > *', '#updBar > *']) {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bLayers,#bCenter,#bGps,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bLayers,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -1147,24 +1152,23 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await page.click('#bQuick'); await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває шторку`, await app(page, () => document.getElementById('quick').hidden));
     await page.click('#bQuick'); ok(`${T}: системна «Назад» закриває шторку`, await app(page, () => window.__reisBack() && document.getElementById('quick').hidden));
     // вкладки внизу: кожна відкриває свою панель і закривається
-    for (const [tab, re] of [['trip', /Маршрут/], ['feed', /Події/], ['places', /Місця/], ['gps', /GPS/], ['settings', /Налаштування/]]) {
-      await page.click(tab === 'gps' ? '#bGps' : `#tabs button[data-panel="${tab}"]`);      // GPS тепер кружечок справа над картою
-      if (tab === 'trip') {     // у дорозі «Маршрут» — шторка з усім залишком маршруту, закривається «Залишитись на маршруті»
-        ok(`${T}: вкладка «Маршрут» у дорозі — шторка з маршрутом`, await app(page, () => document.getElementById('routePick').dataset.mode === 'trip' && !document.getElementById('routePick').hidden));
+    for (const [tab, re] of [['gps', /GPS/], ['feed', /Події/], ['trip', /Рейс/], ['places', /Місця/]]) {
+      await page.click(`#tabs button[data-panel="${tab}"]`);
+      if (tab === 'trip') {     // у дорозі «Рейс» — шторка з усім залишком рейсу, закривається «Залишитись у рейсі»
+        ok(`${T}: вкладка «Рейс» у дорозі — шторка з рейсом`, await app(page, () => document.getElementById('routePick').dataset.mode === 'trip' && !document.getElementById('routePick').hidden && /Залишитись у рейсі/.test(document.getElementById('routePick').textContent)));
         await page.click('#routePick [data-ts="stay"]');
-        ok(`${T}: «Залишитись на маршруті» закриває шторку`, await app(page, () => document.getElementById('routePick').hidden));
+        ok(`${T}: «Залишитись у рейсі» закриває шторку`, await app(page, () => document.getElementById('routePick').hidden));
         continue;
       }
       const ttl = await app(page, () => document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent);
       ok(`${T}: вкладка «${tab}» відкриває панель`, re.test(ttl), ttl);
       if (tab === 'feed') await page.click('#panelBody .pb-back button');          // «Події» на весь екран — закриває «Назад» унизу
-      else if (tab === 'gps') await page.click('#panelClose');
       else await page.click(`#tabs button[data-panel="${tab}"]`);
-      ok(`${T}: ${tab === 'feed' ? '«Назад»' : tab === 'gps' ? '✕' : 'повторний дотик'} закриває «${tab}»`, await app(page, () => document.getElementById('panel').hidden));
+      ok(`${T}: ${tab === 'feed' ? '«Назад»' : 'повторний дотик'} закриває «${tab}»`, await app(page, () => document.getElementById('panel').hidden));
     }
     // трикутник у нижній панелі відкриває «Що на дорозі?»
     await page.click('#tabRep');
-    ok(`${T}: трикутник «Мітка» в нижній панелі — шторка з трьома кнопками, у межах екрана`, await app(page, () => { const b = document.getElementById('repSheet'), r = b.getBoundingClientRect(); return !b.hidden && b.querySelectorAll('.rep-grid button').length === 3 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }));
+    ok(`${T}: трикутник «Мітки» в нижній панелі — шторка з трьома кнопками, у межах екрана`, await app(page, () => { const b = document.getElementById('repSheet'), r = b.getBoundingClientRect(); return !b.hidden && b.querySelectorAll('.rep-grid button').length === 3 && r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight; }));
     await page.click('#repSheet [data-rep="x"]');
     ok(`${T}: ✕ закриває «Що на дорозі?»`, await app(page, () => document.getElementById('repSheet').hidden));
     // ±100 і спідометр без GPS
@@ -1183,7 +1187,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
       await app(page, () => { window.__app.map.setFollow(true); document.getElementById('toasts').innerHTML = ''; }); await sleep(600);
       const [px, py] = await app(page, () => { const m = window.__app.map.map, P = window.__app.nav.pos, s = m.project([P.lon, P.lat]), r = m.getContainer().getBoundingClientRect(); return [Math.round(r.left + s.x + 25), Math.round(r.top + s.y)]; });
       await longPress(px, py);
-      ok(`${T}: без GPS довге натискання біля маршруту — «ви тут, на маршруті», без меню`, await app(page, () => document.getElementById('pick').hidden && /на маршруті/.test(document.getElementById('toasts').textContent)));
+      ok(`${T}: без GPS довге натискання біля маршруту — «ви тут, на маршруті», без меню`, await app(page, () => document.getElementById('pick').hidden && /на лінії рейсу/.test(document.getElementById('toasts').textContent)));
       await app(page, p => { window.__app.map.flyTo({ lat: p[0] + 0.05, lon: p[1] }, 14); }, coords[60]); await sleep(900);
       const [lx, ly] = await app(page, () => { const tp = document.getElementById('top').getBoundingClientRect(), b = document.getElementById('bottom').getBoundingClientRect(); return [Math.round(innerWidth / 2), Math.round((tp.bottom + b.top) / 2)]; });
       await longPress(lx, ly);
@@ -1344,7 +1348,7 @@ if (run('9')) try {
   const vs = () => app(page, () => ({ rows: [...document.querySelectorAll('#voiceSec .vrow')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), on: (document.querySelector('#voiceSec .vrow.on') || {}).dataset?.voice, text: document.getElementById('voiceSec').textContent.replace(/\s+/g, ' ') }));
   await sleep(300);
   ok('голос: за замовчуванням — голос телефону (оболонці сказано «системний»)', (await calls()).includes('setVoice::0:'));
-  await page.click('#tabs button[data-panel="settings"]'); await page.waitForSelector('#voiceSec .vrow');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow');
   let v = await vs();
   ok('Налаштування → Голос: телефону, Тетяна (жіночий), Микита (чоловічий), Лада', v.rows.length === 4 && /Голос телефону/.test(v.rows[0]) && /Тетяна — жіночий/.test(v.rows[1]) && /Микита — чоловічий/.test(v.rows[2]) && v.on === 'system', JSON.stringify(v.rows));
   ok('якісних голосів ще немає — «потрібен пакет», кнопка «Завантажити пакет»', /потрібен пакет/.test(v.rows[1]) && /Завантажити пакет/.test(v.text));
@@ -1377,9 +1381,10 @@ if (run('9')) try {
   await emitN('voice', { state: 'loadErr', pack: 'uk', error: 'engine: Invalid OfflineTtsConfig: failed to create native OfflineTts' });
   await emitN('voice', { state: 'loadErr', pack: 'uk', error: 'engine: Invalid OfflineTtsConfig: failed to create native OfflineTts' }); await sleep(300);
   { const tt = await app(page, () => [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent)); v = await vs();
-    ok('голос не запустився — одна плашка людською мовою (без «OfflineTtsConfig»), подробиці в налаштуваннях', tt.length === 1 && /не запустився — підказки звучать голосом телефону/.test(tt[0]) && !/OfflineTts/.test(tt[0]) && /Спробуйте видалити пакет/.test(v.text), JSON.stringify(tt)); }
+    ok('голос не запустився — одна плашка людською мовою (без «OfflineTtsConfig»), подробиці в налаштуваннях', tt.length === 1 && /(не запустився|не спрацював) — (підказки звучать|фразу сказав) голос/.test(tt[0]) && !/OfflineTts/.test(tt[0]) && /якісний голос не спрацював \(engine: Invalid OfflineTtsConfig/.test(v.text), JSON.stringify(tt) + ' | ' + v.text.slice(0, 200)); }
   await emitN('voice', { state: 'loaded', pack: 'uk', ms: 900 }); await sleep(150);
-  ok('голос запустився — червоний рядок про помилку зник', !/не запустився/.test((await vs()).text));
+  await emitN('voice', { state: 'spoke', eng: 'neural', ms: 700 }); await sleep(150);
+  ok('голос запустився й сказав фразу — пояснення про помилку зникло', !/не спрацював/.test((await vs()).text) && /Говорить якісний голос/.test((await vs()).text), (await vs()).text.slice(0, 200));
   // перемикання голосів: кожен — свій диктор
   for (const [id, sid] of [['uk:0', 0], ['uk:1', 1], ['uk:2', 2]]) { await page.click(`#voiceSec .vrow[data-voice="${id}"]`); await sleep(120); }
   c = await calls();
@@ -1396,8 +1401,8 @@ if (run('9')) try {
   ok('назад на голос телефону', (await calls()).slice(-3).includes('setVoice::0:') && (await vs()).on === 'system');
   await page.click('#voiceSec [data-act="vDel"]'); await page.click('#voiceSec [data-act="vDel"]'); await sleep(200);
   ok('«Видалити пакет» — з підтвердженням', (await calls()).includes('voiceDelete:uk') && /Завантажити пакет/.test((await vs()).text));
-  await app(page, () => { window.__app.S.lang = 'ru'; }); await page.click('#panelClose'); await page.click('#tabs button[data-panel="settings"]'); await page.waitForSelector('#voiceSec .vrow');
-  ok('російський інтерфейс: пояснення, що якісний голос — український', /говорит по-украински/.test((await vs()).text));
+  await app(page, () => { window.__app.S.lang = 'ru'; }); await page.click('#panelClose'); await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow');
+  ok('російський інтерфейс, вибрано голос телефону: так і написано', /Говорит голос телефона — так выбрано/.test((await vs()).text), (await vs()).text.slice(0, 120));
   await app(page, () => { window.__app.S.lang = 'uk'; });
   ok('прохід «голос» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
@@ -1557,8 +1562,8 @@ if (run('14')) for (const [sc, th] of SCREENS.filter(x => ['S10', 'tiny', 'land'
   await shot(page, `r-${sc.n}-feed`);
   await page.click('#panelBody .pb-back button');
   await page.click('#tabs button[data-panel="places"]'); await R('«Місця»', '#panel', '#panelBody'); await page.click('#panelClose');
-  await page.click('#tabs button[data-panel="settings"]'); await R('«Параметри» (з прокруткою)', '#panel', '#panelBody'); await page.click('#panelClose');
-  await page.click('#bGps'); await R('GPS', '#panel', '#panelBody'); await page.click('#panelClose');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await R('«Параметри» (з прокруткою)', '#panel', '#panelBody'); await page.click('#panelClose');
+  await page.click('#tabs button[data-panel="gps"]'); await R('GPS', '#panel', '#panelBody'); await page.click('#panelClose');
   await page.click('#tabRep'); await R('«Що на дорозі?»', '#repSheet'); await page.click('#repSheet [data-rep="x"]');
   await page.click('#bQuick'); await R('швидкі налаштування', '#quick'); await page.click('#quick [data-q="close"]');
   await emitN('update', { apk: { code: 250, name: '1.1.9.50' } }); await sleep(200); await R('плашка оновлення', '#bottom', null);
@@ -1676,6 +1681,76 @@ if (run('16')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tal
   ok(`${T}: без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 16 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 17 (1.1.7): чому звучить голос телефону — видно на екрані; базові шари ============ */
+if (run('17')) try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const calls = () => app(page, () => window.__nativeCalls.slice());
+  const why = () => app(page, () => { const w = document.getElementById('vWhy'), f = document.querySelector('#voiceSec .vfix'), lg = document.querySelector('#voiceSec .vlog');
+    return { code: w ? w.dataset.code : f ? 'oldapp' : '', text: (w || f || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim(), btn: ((w || f) && (w || f).querySelector('[data-act]') || {}).dataset?.act || '', log: lg ? lg.textContent.replace(/\s+/g, ' ') : '' }; });
+  const toasts = () => app(page, () => [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent));
+  await app(page, () => { window.__voice = { packs: { uk: { ver: 2, size: 87e6 } }, loaded: 'uk' }; window.__app.S.ttsVoice = 'uk:1'; });
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow'); await sleep(200);
+  let w = await why();
+  ok('голос: зверху написано, хто говорить зараз — «Говорить якісний голос: Микита»', w.code === 'neural' && /Говорить якісний голос: Микита/.test(w.text), JSON.stringify(w));
+  await emitN('voice', { state: 'spoke', eng: 'neural', ms: 840, sid: 1 }); await sleep(150); w = await why();
+  ok('після підказки видно, що її сказав саме якісний голос, і скільки тривав синтез', /сказав якісний голос \(синтез 0,8 с\)/.test(w.text), w.text);
+  // як на Xiaomi: зранку працювало, потім підказку сказав голос телефону — причина на екрані, а не здогадки
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  await emitN('voice', { state: 'fallback', error: 'audio init' }); await sleep(250); w = await why();
+  ok('якісний голос не спрацював — на екрані час, причина й «Перевірити зараз»', w.code === 'err' && /не спрацював \(audio init\)/.test(w.text) && /О \d\d:\d\d/.test(w.text) && w.btn === 'vTest', JSON.stringify(w));
+  ok('…і одна плашка зрозумілою мовою', (await toasts()).filter(x => /не запустився/.test(x)).length === 1, JSON.stringify(await toasts()));
+  ok('у «Щоденнику голосу» є запис про збій', /фразу сказав голос телефону: audio init/.test(w.log), w.log.slice(0, 200));
+  await app(page, () => { window.__nativeCalls.length = 0; window.__spoken.length = 0; document.getElementById('toasts').innerHTML = ''; });
+  await page.click('#voiceSec [data-act="vTest"]'); await sleep(300);
+  ok('«Перевірити зараз» — фраза пішла, якісний голос знову вибрано в оболонці', await app(page, () => window.__spoken.length > 0) && (await calls()).includes('setVoice:uk:1:uk'), JSON.stringify(await calls()));
+  await emitN('voice', { state: 'spoke', eng: 'neural', ms: 1200 }); await sleep(250); w = await why();
+  ok('перевірка вдалася — «Сказав якісний голос», помилку прибрано', w.code === 'neural' && (await toasts()).some(x => /Сказав якісний голос\. Синтез — 1,2 с/.test(x)), JSON.stringify([w, await toasts()]));
+  // збій переживає перезапуск сторінки (оновлення інтерфейсу) — причину видно й після нього
+  await emitN('voice', { state: 'loadErr', pack: 'uk', error: 'engine: OutOfMemoryError' }); await sleep(150);
+  // справжня оболонка після перезапуску сторінки й далі знає про пакет — у тесті так само (до запуску інтерфейсу)
+  await page.addInitScript(() => { window.__voice = { packs: { uk: { ver: 2, size: 87e6 } }, loaded: '' }; });
+  await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow'); await sleep(200); w = await why();
+  ok('після перезапуску причина лишилась на екрані (OutOfMemoryError), щоденник зберігся', w.code === 'err' && /OutOfMemoryError/.test(w.text) && /модель не запустилась/.test(w.log), JSON.stringify(w).slice(0, 300));
+  ok('після перезапуску вибір Микити не загубився — оболонці знову сказано про якісний голос', (await calls()).includes('setVoice:uk:1:uk'), JSON.stringify(await calls()));
+  // російський інтерфейс: якісні голоси — лише українською; пояснення й кнопка
+  await app(page, () => { window.__app.S.lang = 'ru'; }); await sleep(200); w = await why();
+  ok('інтерфейс російською — пояснено, чому голос телефону, є «Переключить на украинский»', w.code === 'lang' && /только по-украински/.test(w.text) && w.btn === 'vLangUk', JSON.stringify(w));
+  await page.click('#voiceSec [data-act="vLangUk"]'); await sleep(400);
+  ok('кнопка перемкнула інтерфейс на українську — якісний голос знову працює', await app(page, () => window.__app.S.lang === 'uk') && (await calls()).includes('setVoice:uk:1:uk'));
+  await page.click('#bQuick').catch(() => {}); await app(page, () => window.__app.ui && 0).catch(() => {});
+  // стара оболонка (S10 без оновленого APK)
+  await app(page, () => { window.__nativeRev = 3; window.__app.S.ttsVoice = 'uk:1'; }); await page.click('#panelClose').catch(() => {});
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow'); await sleep(200); w = await why();
+  ok('стара оболонка — прямо сказано, яка версія стоїть і що оновити', w.code === 'oldapp' && /застосунок 1\.0\.0-test/.test(w.text) && w.btn === 'vApk', JSON.stringify(w));
+  await app(page, () => { window.__nativeRev = 4; window.__voice = { packs: {} }; window.__app.S.ttsVoice = 'uk:2'; }); await page.click('#panelClose');
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#voiceSec .vrow'); await sleep(200); w = await why();
+  ok('пакета в телефоні немає — так і написано, кнопка «Завантажити пакет»', w.code === 'nopack' && w.btn === 'vDl', JSON.stringify(w));
+  ok('прохід 17 (голос) без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+  // базові шари: перший запуск — лише АЗС і камери
+  { const { page, ctx, errors } = await newPage(true, { baseLayers: true });
+    const lay = () => app(page, () => ({ types: window.__app.S.mapStopTypes, v: window.__app.S.mapVerified, e: window.__app.S.mapEvents, h: window.__app.S.mapHazards, r: window.__app.S.roughMap,
+      rows: [...document.querySelectorAll('#quick .ly-row')].map(r => (r.classList.contains('on') ? '✓' : '·') + r.textContent.trim()) }));
+    await page.click('#bLayers'); await sleep(200);
+    let L = await lay();
+    ok('перший запуск: у «Шарах» стоять лише АЗС і Камери — як на погодженому знімку', L.rows.filter(x => x[0] === '✓').map(x => x.slice(1)).join() === 'АЗС,Камери' && L.rows.length === 10, JSON.stringify(L.rows));
+    await page.click('#quick [data-ly="food"]'); await sleep(150); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
+    ok('водій додав «Де поїсти» — після перезапуску вибір водія лишився', await app(page, () => window.__app.S.mapStopTypes.food === true && window.__app.S.mapStopTypes.fuel === true));
+    ok('перший запуск без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+  // телефон, де «Рейс» уже стояв з усіма шарами: один раз ставимо базові, далі не чіпаємо
+  { const { page, ctx, errors } = await newPage(true, { baseLayers: true, oldSettings: { lang: 'uk', voice: true, ttsVoice: 'uk:1', mapStops: true, mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true, shower: true }, mapEvents: true, mapHazards: true } });
+    const L = await app(page, () => ({ t: window.__app.S.mapStopTypes, e: window.__app.S.mapEvents, h: window.__app.S.mapHazards, v: window.__app.S.mapVerified, voice: window.__app.S.ttsVoice, d: window.__app.S.layersDefV }));
+    ok('оновлення з попередньої версії: шари стали базовими (АЗС і камери), голос водія лишився', L.t.fuel && L.t.cam && !L.t.food && !L.t.park && !L.t.motel && !L.t.shower && !L.e && !L.h && !L.v && L.voice === 'uk:1' && L.d === 1, JSON.stringify(L));
+    await app(page, () => { window.__app.S.mapStopTypes = { ...window.__app.S.mapStopTypes, park: true }; });
+    await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
+    ok('…і лише один раз: далі вибір водія (стоянки) не скидається', await app(page, () => window.__app.S.mapStopTypes.park === true));
+    ok('оновлення шарів без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+} catch (e) { ok('прохід 17 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });

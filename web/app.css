@@ -605,11 +605,6 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 /* ---- 1.1.6 ---- */
 /* GPS і трикутник помінялись місцями: кружечок GPS — справа над картою (зелений — сигнал є, червоний — немає),
    трикутник «позначити подію» — у нижній панелі */
-#bGps{width:56px;height:56px;border-radius:50%;border:3px solid currentColor;box-shadow:var(--shadow)}
-#bGps svg{width:30px;height:30px}
-#bGps.g-ok{color:#2f9e62}
-#bGps.g-bad{background:var(--red);border-color:var(--red);color:#fff;text-shadow:none}
-#bGps.g-bad svg{filter:none}
 #tabs #tabRep svg{width:30px;height:30px;filter:none}
 #tabRep span:last-child{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 /* екрани маршруту: карта без допоміжних позначок; кнопка над «+» їх повертає */
@@ -630,3 +625,22 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 }
 /* «Контрольна точка» не обрізається на вузькій шторці — переноситься на два рядки */
 .ts-btns .btn{white-space:normal;line-height:1.15;text-align:center;padding:4px 8px}
+/* ---- 1.1.7: голос — що говорить зараз і чому; щоденник голосу ---- */
+.vwhy{margin-bottom:10px;border-left:6px solid var(--green)}
+.vwhy.bad{border-left-color:var(--yellow)}
+.vwhy b{display:block;font-weight:600;line-height:1.3}
+.vwhy .vw-last{display:block;margin-top:4px;color:var(--ink-2);font-size:13px}
+.vwhy .btns{margin-top:8px}
+.vlog{margin-top:10px;font-size:13px;color:var(--ink-2)}
+.vlog summary{cursor:pointer;padding:6px 0;font-weight:600;color:var(--ink)}
+.vlog div{padding:2px 0;line-height:1.35}
+.vlog i{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink)}
+/* ---- 1.1.7: нижня панель GPS · Події · Рейс · Місця · Мітки ---- */
+#tabs .gc{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:2.5px solid currentColor}
+#tabs .gc svg{width:20px;height:20px}
+#tabGps.g-ok{color:#2f9e62}
+#tabGps.g-bad{color:var(--red)}
+#tabGps.g-ok .gc{background:rgba(47,158,98,.16)}
+#tabGps.g-bad .gc{background:var(--red);border-color:var(--red);color:#fff}
+#tabGps.g-bad .gc svg{filter:none}
+#tabGps span:last-child{font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}

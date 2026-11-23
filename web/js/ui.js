@@ -38,12 +38,11 @@ function staticLabels() {
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
-  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', settings: 'qSettings' };
-  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, settings: ICON.gear };
-  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
-  // трикутник «позначити подію» — у нижній панелі, кружечок GPS — справа над картою (1.1.6: помінялись місцями)
+  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', gps: 'tabGps' };
+  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, gps: ICON.gpsSig };
+  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : p === 'gps' ? `<span class="gc">${icons[p]}</span>` : icons[p]) + `<span${p === 'gps' ? ' id="tabGpsL"' : ''}>` + t(names[p]) + '</span>'; });
+  // 1.1.7: GPS — крайній ліворуч у нижній панелі, трикутник «Мітки» — крайній праворуч
   $('tabRep').innerHTML = ICON.warnTab + '<span>' + t('tabRep') + '</span>'; $('tabRep').setAttribute('aria-label', t('repBtn'));
-  $('bGps').innerHTML = ICON.gpsSig;
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
@@ -186,10 +185,12 @@ function hud() {
   else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
   else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
   else { chip.className = 'chip none'; $('gpsText').textContent = t('gpsWait'); }
-  // кружечок GPS справа над картою: є справжній GPS — зелений, немає — червоний; подробиці — за дотиком (і в підписі для читання з екрана)
-  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('bGps');
+  // кружечок GPS у нижній панелі (крайній ліворуч): є справжній GPS — зелений, немає — червоний; під ним — коротко, що з сигналом
+  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('tabGps');
   tg.classList.toggle('g-ok', gOk); tg.classList.toggle('g-bad', !gOk);
-  let gLbl = gOk ? 'GPS' + (pos.acc != null ? ' ±' + accText(pos.acc) : '') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps');
+  const gShort = gOk ? (pos.acc != null ? '±' + accText(pos.acc) : 'GPS') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps');
+  { const l = $('tabGpsL'); if (l && l.textContent !== gShort) l.textContent = gShort; }
+  let gLbl = gOk ? 'GPS' + (pos.acc != null ? ' ±' + accText(pos.acc) : '') : gShort;
   // GPS шукає вже хвилину, а геолокація ввімкнена — швидше за все, телефон у приміщенні
   if (pos.mode === 'gps' || pos.mode === 'dr' || pos.sim) searchSince = Date.now();
   else if (!indoorHinted && !off && Date.now() - searchSince > 60000) { indoorHinted = true; toast(t('gpsIndoor'), 'yellow', 12000, () => openPanel('gps')); }
@@ -1099,7 +1100,7 @@ export function initUI() {
   $('bCenter').onclick = () => setFollow(true);
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
   $('tabRep').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); repOpen($('repSheet').hidden); };
-  $('bGps').onclick = e => { e.stopPropagation(); currentPanel() === 'gps' ? closePanel() : openPanel('gps'); };
+
   $('repSheet').onclick = repClick;
   // екран маршруту відкрили чи закрили (будь-яким шляхом) — карта чиста або знову з позначками
   new MutationObserver(rpSync).observe($('routePick'), { attributes: true, attributeFilter: ['hidden'] });

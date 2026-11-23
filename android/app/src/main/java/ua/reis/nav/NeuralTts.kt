@@ -111,17 +111,37 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
         stopTrack()
         exec.execute {
             if (my != gen.get()) { emit("tts", JSONObject().put("id", id).put("state", "done")); return@execute }
-            try {
-                val t = ensure(pack)
-                val sp = rate.coerceIn(0.6f, 1.7f)
-                val a = t.generate(text, sid.coerceIn(0, maxOf(0, t.numSpeakers() - 1)), sp)
-                if (my != gen.get()) { emit("tts", JSONObject().put("id", id).put("state", "done")); return@execute }
-                play(a.samples, a.sampleRate, my)
-                emit("tts", JSONObject().put("id", id).put("state", "done"))
-            } catch (e: Throwable) {
-                if (my == gen.get()) onFail(e.message ?: e.javaClass.simpleName)
-                else emit("tts", JSONObject().put("id", id).put("state", "done"))
+            val done = { emit("tts", JSONObject().put("id", id).put("state", "done")) }
+            // 1) Синтез. Не вийшло (бракувало пам'яті, рушій збився) — будуємо рушій наново й пробуємо ще раз.
+            var audio: com.k2fsa.sherpa.onnx.GeneratedAudio? = null
+            var ms = 0L
+            var err: Throwable? = null
+            for (attempt in 0..1) {
+                try {
+                    val t = ensure(pack)
+                    val t0 = SystemClock.elapsedRealtime()
+                    val a = t.generate(text, sid.coerceIn(0, maxOf(0, t.numSpeakers() - 1)), rate.coerceIn(0.6f, 1.7f))
+                    ms = SystemClock.elapsedRealtime() - t0
+                    if (a.samples.isEmpty() && text.isNotBlank()) throw IOException("empty audio")
+                    audio = a; break
+                } catch (e: Throwable) { err = e; if (my != gen.get()) break; if (attempt == 0) release() }
             }
+            if (my != gen.get()) { done(); return@execute }
+            val a = audio
+            if (a == null) { onFail("synth: " + (err?.message ?: err?.javaClass?.simpleName ?: "?")); return@execute }
+            // 2) Відтворення. Звуковий вихід міг на мить зникнути (Bluetooth машини, дзвінок) — ще одна спроба через 0,3 с.
+            for (attempt in 0..1) {
+                try {
+                    play(a.samples, a.sampleRate, my)
+                    if (my == gen.get()) emit("voice", JSONObject().put("state", "spoke").put("eng", "neural").put("ms", ms).put("sid", sid))
+                    done(); return@execute
+                } catch (e: Throwable) {
+                    err = e
+                    if (my != gen.get()) { done(); return@execute }
+                    if (attempt == 0) try { Thread.sleep(300) } catch (_: InterruptedException) {}
+                }
+            }
+            onFail("audio: " + (err?.message ?: err?.javaClass?.simpleName ?: "?"))
         }
     }
 
@@ -148,17 +168,19 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
             .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
         val focus = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT_MAY_DUCK).setAudioAttributes(attrs).build()
         try { am.requestAudioFocus(focus) } catch (_: Exception) {}
-        val fmt = AudioFormat.Builder().setEncoding(AudioFormat.ENCODING_PCM_FLOAT).setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
-        val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, AudioFormat.ENCODING_PCM_FLOAT)
-        val tr = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(fmt)
-            .setBufferSizeInBytes(maxOf(minBuf, sr * 4 / 4)).setTransferMode(AudioTrack.MODE_STREAM).build()
+        // Звук — 16-бітний: його приймає будь-який телефон і будь-який вихід (динамік, Bluetooth машини, AUX).
+        // До 1.1.6 був звук із плаваючою комою — на частині телефонів і виходів він не відкривався, і фразу мовчки казав голос телефону.
+        val p16 = ShortArray(s.size) { (s[it] * 32767f).toInt().toShort() }
+        val tr = newTrack(attrs, sr, AudioFormat.ENCODING_PCM_16BIT)
         track = tr
         try {
             tr.play()
             var off = 0
             val chunk = sr / 10
             while (off < s.size && my == gen.get()) {
-                val n = tr.write(s, off, min(chunk, s.size - off), AudioTrack.WRITE_BLOCKING)
+                val len = min(chunk, s.size - off)
+                val n = tr.write(p16, off, len, AudioTrack.WRITE_BLOCKING)
+                if (n < 0 && my == gen.get()) throw IOException("audio write $n")      // вихід зник посеред фрази — не мовчимо, а кажемо ще раз
                 if (n <= 0) break
                 off += n
             }
@@ -174,6 +196,19 @@ class NeuralTts(private val ctx: Context, private val emit: (String, JSONObject)
             if (track === tr) track = null
             try { am.abandonAudioFocusRequest(focus) } catch (_: Exception) {}
         }
+    }
+
+    private fun newTrack(attrs: AudioAttributes, sr: Int, enc: Int): AudioTrack {
+        val fmt = AudioFormat.Builder().setEncoding(enc).setSampleRate(sr).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).build()
+        val minBuf = AudioTrack.getMinBufferSize(sr, AudioFormat.CHANNEL_OUT_MONO, enc)
+        val quarter = if (enc == AudioFormat.ENCODING_PCM_FLOAT) sr else sr / 2            // чверть секунди звуку в байтах
+        val tr = AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(fmt)
+            .setBufferSizeInBytes(maxOf(minBuf, quarter)).setTransferMode(AudioTrack.MODE_STREAM).build()
+        if (tr.state != AudioTrack.STATE_INITIALIZED) {
+            try { tr.release() } catch (_: Exception) {}
+            throw IOException("audio init")
+        }
+        return tr
     }
 
     /* ---------- пакети голосів: завантажити, розпакувати, видалити ---------- */
