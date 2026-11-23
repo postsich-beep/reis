@@ -61,6 +61,7 @@ jobs:
           done
           mkdir -p web/vendor/sprites
           cp /tmp/bma/sprites/v4/light.json /tmp/bma/sprites/v4/light.png /tmp/bma/sprites/v4/light@2x.json /tmp/bma/sprites/v4/light@2x.png web/vendor/sprites/ || echo "значків немає"
+          cp /tmp/bma/sprites/v4/dark.json /tmp/bma/sprites/v4/dark.png /tmp/bma/sprites/v4/dark@2x.json /tmp/bma/sprites/v4/dark@2x.png web/vendor/sprites/ || echo "нічних значків немає"
           du -sh web/vendor/glyphs web/vendor/sprites || true
 
       - name: Рушій якісного голосу (sherpa-onnx v1.13.6, лише arm64-v8a і armeabi-v7a)

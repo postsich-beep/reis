@@ -33,6 +33,7 @@ svg{display:block}
 
 #map{position:absolute;inset:0}
 body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) brightness(.86) contrast(.9) saturate(.75)}
+body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлайн-карта вночі має власні темні кольори */
 #attr{position:absolute;right:8px;bottom:calc(var(--bh,150px) + 4px);font-size:12px;line-height:18px;min-width:18px;text-align:center;color:var(--ink-2);background:color-mix(in srgb,var(--panel) 72%,transparent);padding:0 4px;border-radius:9px;white-space:nowrap;opacity:.65;z-index:3;cursor:pointer}
 #attr.open{opacity:1;font-size:11px;padding:2px 8px}
 

@@ -101,6 +101,7 @@ function offlineHtml() {
       <div class="btns"><button class="btn sm wide" data-act="offCancel">${t('offCancel')}</button></div>`;
   } else {
     if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
+    if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
     const newer = r && off.installed && String(r.date) > String(off.date);
     const btns = [];
     if (!off.installed && r) btns.push(`<button class="btn pri" data-act="offDl">${t('offDownload', GB(r.size || 0))}</button>`);

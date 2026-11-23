@@ -1373,6 +1373,7 @@ export function initUI() {
   bus.on('repTap', id => { if (aim) return; const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repStamp(r) + ' (' + repAgo(r) + ')') + (r.conf ? t('repConf', r.conf) : ''), REP_TYPES[r.t].level, 6000); });
   bus.on('repAsk', onRepAsk);
   bus.on('pos', () => { if (askRep && pos.lat != null && hav(pos, askRep) > 800) { askRep = null; mapM.askHide(); } });
+  bus.on('offlineBad', () => toast(t('offBadToast'), 'red', 15000, () => openPanel('settings')));
   $('aim').onclick = aimClick;
   $('pts').onclick = ptsClick;
   window.addEventListener('resize', () => { if (aim) aimPlaceCross(); if (pm) ptsCross(); });

@@ -2313,7 +2313,30 @@ if (run('3')) try {
   ok('офлайн-карта: шари маршруту на місці', await app(page, () => !!window.__app.map.map.getLayer('route-line') && !!window.__app.map.map.getLayer('route-done')));
   ok('офлайн-карта: лінія рейсу під назвами вулиць, номери будинків — від 17', await app(page, () => { const m = window.__app.map.map, ids = m.getStyle().layers.map(l => l.id), a = m.getLayer('address_label');
     return ids.indexOf('route-line') < ids.indexOf('roads_labels_major') && ids.indexOf('route-line') < ids.indexOf('roads_labels_minor') && a && a.minzoom === 17 && m.getPaintProperty('roads_labels_minor', 'text-halo-width') === 2.4; }));
+  // 1.1.12: «сіра карта без доріг» уночі. Офлайн-карта має власні кольори: день — траси помаранчеві, головні жовті; ніч — окрема темна карта без фільтра
+  const look = () => app(page, () => { const m = window.__app.map.map, st = m.getStyle(), cv = document.querySelector('.maplibregl-canvas'), col = id => { try { return JSON.stringify(m.getPaintProperty(id, 'line-color')); } catch (_) { return ''; } };
+    const bg = st.layers.find(l => l.type === 'background'), earth = st.layers.find(l => l.id === 'earth');
+    return { night: !!(st.metadata && st.metadata.reisNight), mapdark: document.body.classList.contains('mapdark'), theme: document.body.dataset.theme, filter: getComputedStyle(cv).filter, sprite: st.sprite, hw: col('roads_highway'), major: col('roads_major'), minor: col('roads_minor'),
+      earth: earth && JSON.stringify(earth.paint['fill-color']), bg: bg && bg.paint['background-color'], label: m.getPaintProperty('roads_labels_major', 'text-color'), halo: m.getPaintProperty('roads_labels_major', 'text-halo-color'), route: !!m.getLayer('route-line') }; });
+  const lum = c => { const m = /#([0-9a-f]{6})/i.exec(c || ''); if (!m) return -1; const n = parseInt(m[1], 16); return 0.2126 * (n >> 16) + 0.7152 * ((n >> 8) & 255) + 0.0722 * (n & 255); };
+  await app(page, () => { window.__app.S.theme = 'night'; window.__app.map.applyTheme(); }); await sleep(1500);
+  const nt = await look();
+  ok('офлайн-карта вночі: власна темна карта, фільтр «перевертання» вимкнено', nt.night && nt.mapdark && nt.theme === 'night' && nt.filter === 'none' && /sprites\/dark$/.test(nt.sprite) && nt.route, JSON.stringify(nt));
+  ok('…дороги світліші за землю (а не чорні на сірому): траса помаранчева, головні жовтуваті, вулиці сірі; підписи світлі', lum(nt.hw) > lum(nt.earth) + 80 && lum(nt.major) > lum(nt.earth) + 70 && lum(nt.minor) > lum(nt.earth) + 50 && lum(nt.earth) < 40 && lum(nt.label) > 200 && lum(nt.halo) < 40,
+    JSON.stringify({ hw: nt.hw, major: nt.major, minor: nt.minor, earth: nt.earth, label: nt.label, halo: nt.halo }));
+  await app(page, () => { window.__app.S.theme = 'day'; window.__app.map.applyTheme(); }); await sleep(1500);
+  const dy = await look();
+  ok('офлайн-карта вдень: світла, траси помаранчеві з обвідкою, головні дороги жовті — видно на світлому тлі', !dy.night && !dy.mapdark && /sprites\/light$/.test(dy.sprite) && /#f5b041/i.test(dy.hw) && /#fbe391/i.test(dy.major) && lum(dy.earth) > 200 && lum(dy.label) < 60 && dy.route, JSON.stringify(dy));
+  // самоперевірка файлу карти: ціла — мовчить; завантажена не повністю — каже прямо й показує онлайн-карту
+  const v0 = await app(page, async () => ({ ok: await window.__app.offline.verify(), bad: window.__app.offline.off.bad }));
+  ok('самоперевірка: цілий файл карти — усе гаразд', v0.ok === true && v0.bad === '', JSON.stringify(v0));
+  const v1 = await app(page, async () => { const O = window.__app.offline; document.getElementById('toasts').innerHTML = ''; O.off.size = 300; const r = await O.verify(); await new Promise(r => setTimeout(r, 900));
+    return { ok: r, bad: O.off.bad, active: O.offlineActive(), src: !!window.__app.map.map.getSource('protomaps'), toast: document.getElementById('toasts').textContent, mapdark: document.body.classList.contains('mapdark') }; });
+  ok('самоперевірка: файл обірвано — повідомлення і онлайн-карта замість «сірої»', v1.ok === false && /^short:/.test(v1.bad) && !v1.active && !v1.src && /Офлайн-карта не читається/.test(v1.toast) && !v1.mapdark, JSON.stringify(v1));
   await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
+  ok('у «Налаштуваннях» прямо сказано: файл карти завантажено не повністю — видалити й завантажити знову', /завантажено не повністю/.test(await page.textContent('#offSec')) && await app(page, () => !!document.querySelector('#offSec [data-act="offDel"]')));
+  const v2 = await app(page, async () => { const O = window.__app.offline; O.off.size = 505; const r = await O.verify(); await new Promise(r => setTimeout(r, 900)); return { ok: r, bad: O.off.bad, src: !!window.__app.map.map.getSource('protomaps') }; });
+  ok('файл знову цілий — офлайн-карта повертається', v2.ok && !v2.bad && v2.src, JSON.stringify(v2));
   const offTxt = await page.textContent('#offSec');
   ok('налаштування: розділ офлайн-карти показує стан і вибір карти', /У телефоні/.test(offTxt) && /Онлайн/.test(offTxt), offTxt.slice(0, 120));
   await shot(page, '12-offline');
@@ -2323,7 +2346,7 @@ if (run('3')) try {
   ok('після зміни карти шари маршруту й пит-стопів на місці', await app(page, () => { const m = window.__app.map.map; return !!m.getLayer('route-line') && !!m.getLayer('route-done') && !!m.getSource('route'); }));
   await page.click('[data-seg="mapMode:offline"]'); await sleep(1500);
   ok('і назад на офлайн — шари маршруту на місці', await app(page, () => { const m = window.__app.map.map; return !!m.getSource('protomaps') && !!m.getLayer('route-line'); }));
-  ok('прохід офлайн-карти без помилок JS', errors.length === 0, errors.join(' | '));
+  { const er = errors.filter(e => !/офлайн-карта не читається \(short/.test(e)); ok('прохід офлайн-карти без помилок JS (крім очікуваного запису про обірваний файл)', er.length === 0, er.join(' | ')); }
   await ctx.close();
 } catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 

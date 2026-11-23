@@ -32,6 +32,7 @@ async function boot() {
   offline.init();
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
+  bus.on('offlineBad', () => { if (mapM.map) mapM.applyMapSource(); });
   nav.start(); guide.init(); poi.init(); track.init(); weather.init(); roads.init(); rough.init();
   initUI(); initLab(); lab.initLabApp();
   await route.loadTrips();

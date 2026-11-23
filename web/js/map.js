@@ -411,7 +411,7 @@ export const HOUSE_Z = 17;
 function tuneLabels() {
   let style; try { style = map.getStyle(); } catch (_) { return; }
   const ls = style.layers || [], size = ['interpolate', ['linear'], ['zoom'], 12, 12.5, 15, 14.5, 17, 17, 19, 19];
-  let omt = null, firstRoad = null, house = false;
+  let omt = null, firstRoad = null, house = false; const dark = !!(style.metadata && style.metadata.reisNight);
   for (const l of ls) {
     if (l.type !== 'symbol') continue;
     const sl = l['source-layer'];
@@ -422,8 +422,8 @@ function tuneLabels() {
     firstRoad = firstRoad || l.id;
     try {
       map.setLayoutProperty(l.id, 'text-size', size);
-      map.setPaintProperty(l.id, 'text-color', '#1d2330');
-      map.setPaintProperty(l.id, 'text-halo-color', '#ffffff');
+      map.setPaintProperty(l.id, 'text-color', dark ? '#eef1f4' : '#1d2330');
+      map.setPaintProperty(l.id, 'text-halo-color', dark ? '#0f1317' : '#ffffff');
       map.setPaintProperty(l.id, 'text-halo-width', 2.4);
       map.setPaintProperty(l.id, 'text-halo-blur', 0.2);
     } catch (_) {}
@@ -456,7 +456,9 @@ function drawCps() {
 export function applyTheme() {
   const night = S.theme === 'night' || (S.theme === 'auto' && isNight(pos.lat ?? 49.0, pos.lon ?? 31.3));
   if (night === view.night && document.body.dataset.theme) return;
+  const was = view.night;
   view.night = night; document.body.dataset.theme = night ? 'night' : 'day';
+  if (map && offlineActive() && was !== night) setMapStyle(currentStyle());      // офлайн-карта: день і ніч — два окремі набори кольорів
   bus.emit('view', view);
 }
 
@@ -778,11 +780,14 @@ export function previewRoute(coords, route = null) {
   if (coords) showRoute(coords);
 }
 // Офлайн-карта України, якщо завантажена; інакше онлайн-стиль, вибраний у налаштуваннях.
-export function currentStyle() { try { if (offlineActive()) return offlineStyle(); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
+// Офлайн-карта має власну темну раскладку кольорів — «перевертати» її фільтром уночі не треба (body.mapdark вимикає фільтр).
+export const nativeDark = () => offlineActive() && view.night;
+export function currentStyle() { try { if (offlineActive()) return offlineStyle(view.night); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
 export function applyMapSource() { setMapStyle(currentStyle()); bus.emit('mapSource', offlineActive()); }
 export function setMapStyle(url) {
   if (!map || !url) return;
   view.blank = false; doneD = -1;
+  document.body.classList.toggle('mapdark', typeof url === 'object' && !!(url.metadata && url.metadata.reisNight));
   // diff: false — повне перезавантаження стилю, інакше бібліотека «порівнює» стилі й мовчки викидає наші шари маршруту
   try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
