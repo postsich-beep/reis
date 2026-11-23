@@ -21,6 +21,7 @@ import * as reports from './reports.js';
 import * as limits from './limits.js';
 import { initUI } from './ui.js';
 import { initLab } from './ui_lab.js';
+import * as lab from './lab.js';
 import { resumeTrip } from './ui.js';
 import * as sfx from './sfx.js';
 import * as sensors from './sensors.js';
@@ -32,7 +33,7 @@ async function boot() {
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   nav.start(); guide.init(); poi.init(); track.init(); weather.init(); roads.init(); rough.init();
-  initUI(); initLab();
+  initUI(); initLab(); lab.initLabApp();
   await route.loadTrips();
   await feed.init();
   stopsdb.load(); vplaces.init(); reports.init(); limits.init();
@@ -42,5 +43,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb, vplaces, reports, limits, sfx, sensors };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb, vplaces, reports, limits, sfx, sensors, lab };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

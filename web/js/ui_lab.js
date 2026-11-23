@@ -15,6 +15,7 @@ import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
+import { logoHtml } from './lab.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
@@ -127,7 +128,7 @@ function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1', max = '') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}"${max ? ` max="${max}"` : ''} value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
   const styleOn = STYLES.find(x => x[1] === S.styleUrl);
-  return `<div class="btns" style="margin-top:0"><button class="btn wide" data-act="labOpen">${ICON.lab}${t('labOpen')}</button></div>
+  return `${logoHtml()}
   <div class="sec">${t('secScreen')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
@@ -227,7 +228,6 @@ definePanel('settings', {
       else if (a === 'appset') P.openAppSettings();
       else if (a === 'locset') P.openLocationSettings();
       else if (a === 'about') openPanel('about');
-      else if (a === 'labOpen') openPanel('lab');
       else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }

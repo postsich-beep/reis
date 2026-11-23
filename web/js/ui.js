@@ -22,6 +22,7 @@ import { exportGpx, track, trackKm } from './track.js';
 import { vp, byId as byIdVp, listed as vpListed, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
 import { t } from './i18n.js';
+import { labOpen, closeLab } from './lab.js';
 import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp } from './reports.js';
 import { limitNow, overLimit } from './limits.js';
 
@@ -1264,6 +1265,7 @@ export function initUI() {
   });
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
+    if (labOpen()) { closeLab(); return true; }
     if (!$('quick').hidden) { quickOpen(false); return true; }
     if (!$('repSheet').hidden) { repOpen(false); return true; }
     if (aim) { aimEnd(); return true; }

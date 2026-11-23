@@ -17,7 +17,7 @@ export const pos = {
 let route = null, routeInUA = true;
 let lastFixT = 0, lastTick = Date.now(), vCruise = 0, net = null, compass = null;
 let yawNow = null, yawRef = null, hdgRef = null;
-let moving = true, stillT = 0, varStop = null, varMove = null;
+let moving = true, stillT = 0, varStop = null, varMove = null, lastVar = null;
 let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0, approxT = 0;
 let netHist = [], apSpd = null, apSpdT = 0, apSpdErr = null;   // швидкість за зсувом вишок/Wi-Fi, коли GPS немає або підмінено
 let vCruiseT = 0, motionT = 0;                  // коли востаннє бачили чесну швидкість GPS; коли її зберегли
@@ -665,6 +665,7 @@ function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
   if (s.yaw != null) { yawNow = s.yaw; onYaw(s.yaw); }
   if (s.var == null) return;
+  lastVar = s.var;
   // Самокалібрування: запам'ятовуємо рівень вібрації на стоянці й у русі, поки GPS живий.
   if (pos.mode === 'gps' && Date.now() - lastFixT < 2500) {
     if (pos.spd < 0.5) varStop = ema(varStop, s.var); else if (pos.spd > 5) varMove = ema(varMove, s.var);
@@ -720,7 +721,7 @@ export const routeTurns = () => turns.slice();
 // Стенд перевірки ведення без GPS (tests/bench): ті самі обробники, але час і такт задає стенд
 export function benchStart() { bus.on('gps', onGps); bus.on('sens', onSens); lastTick = Date.now(); }
 export const benchTick = () => tick();
-export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
+export const debugState = () => ({ yawHist: yawHist.slice(-12), lastVar, lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
   pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, cpi: trk.cpi, gate: trk.o.gate ? { ...cpView(), align: trk.align, off: trk.off == null ? null : Math.round(trk.off) } : null, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {

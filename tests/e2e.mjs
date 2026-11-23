@@ -622,7 +622,7 @@ if (run('1')) try {
   ok('«Параметри» відкриваються зі швидких налаштувань (кнопка вгорі праворуч)', await (async () => { await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); const ok1 = await app(page, () => /Налаштування/.test(document.getElementById('panelTitle').textContent)); await page.click('#panelClose'); return ok1; })());
 
   // лабораторія (тепер у Параметрах), ніч
-  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.click('[data-act="labOpen"]'); await page.waitForSelector('[data-tg="tg"]');
+  await app(page, () => window.__app.lab.tools()); await page.waitForSelector('[data-tg="tg"]');
   await shot(page, '09-lab');
   await page.click('[data-tg="tg"]');
   ok('перемикач у Лабораторії змінює налаштування', await app(page, () => window.__app.S.tg === false));
@@ -2048,6 +2048,129 @@ if (run('22')) try {
   ok('прохід 22 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 22 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+// ---------- Прохід 23: Лабораторія — прихований вхід на логотипі, схема рейсу, телефон у 3D, дані ----------
+async function fingerTap(page, x, y, holdMs = 60) {
+  const c = await page.context().newCDPSession(page);
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
+  await sleep(holdMs);
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+  await c.detach();
+}
+if (run('23')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land', 'tablet'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n)))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+  const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length, idx0 = turnIdx[1] - 6;
+  const trip = { id: 't-lab', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 5600 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 5600 } };
+  const labVis = () => app(page, () => !document.getElementById('labApp').hidden);
+  const logoXY = async () => { const r = await app(page, () => { const b = document.querySelector('#panelBody .app-logo .al-ico').getBoundingClientRect(); return { x: b.left + b.width / 2, y: b.top + b.height / 2 }; }); return r; };
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .app-logo');
+  const lg = await app(page, () => { const el = document.querySelector('#panelBody .app-logo'), ic = el.querySelector('.al-ico'), r = ic.getBoundingClientRect(), b = document.getElementById('panelBody').getBoundingClientRect();
+    return { bg: getComputedStyle(ic).backgroundImage, w: r.width, h: r.height, mid: Math.abs((r.left + r.right) / 2 - (b.left + b.right) / 2), first: el === document.getElementById('panelBody').firstElementChild, txt: el.textContent.replace(/\s+/g, ' ').trim(),
+      oldBtn: !!document.querySelector('[data-act="labOpen"]'), anyLabWord: /Лаборатор/.test(document.getElementById('panelBody').textContent) }; });
+  ok(`[${T}] у «Налаштуваннях» угорі — кольоровий значок Рейсу з версією, по центру`, lg.first && /icons\/icon\.svg/.test(lg.bg) && lg.w >= 72 && lg.h >= 72 && lg.mid < 3 && /РЕЙС/.test(lg.txt) && /інтерфейс №\d+/.test(lg.txt), JSON.stringify(lg));
+  ok(`[${T}] кнопки «Лабораторія» в «Налаштуваннях» більше немає — вхід прихований`, !lg.oldBtn && !lg.anyLabWord);
+  if (sc.n === 'xiaomi') await shot(page, '25-settings-logo');
+  let p = await logoXY();
+  await fingerTap(page, p.x, p.y); await sleep(1200);
+  ok(`[${T}] один дотик до значка — нічого не відкриває`, !(await labVis()));
+  await fingerTap(page, p.x, p.y); await sleep(250); await fingerTap(page, p.x, p.y); await sleep(600);
+  ok(`[${T}] два швидкі дотики — теж ні`, !(await labVis()));
+  await sleep(900);
+  await fingerTap(page, p.x, p.y, 3400); await sleep(300);
+  ok(`[${T}] довге натискання без першого дотику — теж ні`, !(await labVis()));
+  await sleep(900);
+  // два дотики й на другому тримати: спершу відпускаємо зарано (2 с), потім як треба (3 с)
+  await fingerTap(page, p.x, p.y); await sleep(250); await fingerTap(page, p.x, p.y, 2000); await sleep(1300);
+  ok(`[${T}] два дотики, але тримали лише 2 с — не відкрилась`, !(await labVis()));
+  p = await logoXY();
+  await fingerTap(page, p.x, p.y); await sleep(250);
+  const c = await page.context().newCDPSession(page);
+  await c.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: p.x, y: p.y, id: 1, radiusX: 4, radiusY: 4, force: 1 }] });
+  await sleep(1500);
+  const arm = await app(page, () => { const el = document.querySelector('.app-logo'); return { cls: el.className, ring: getComputedStyle(el.querySelector('.al-ring'), '::before').opacity }; });
+  await sleep(1750);
+  const opened = await labVis();
+  await c.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] }); await c.detach();
+  ok(`[${T}] два дотики й на другому тримати 3 с — Лабораторія відкрилась; поки тримаємо — навколо значка біжить кільце`, opened && /arming/.test(arm.cls) && arm.ring === '1', JSON.stringify(arm));
+  await sleep(400);
+  const L0 = await app(page, () => { const R = s => { const e = document.querySelector(s); if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
+    return { vw: innerWidth, vh: innerHeight, app: R('#labApp'), top: R('.lab-top'), bot: R('.lab-bot'), ph: R('.lab-ph'), scene: R('.lab-scene'), data: R('.lab-data'), head: R('.lab-h'), panel: document.getElementById('panel').hidden,
+      title: document.querySelector('.lab-h b').textContent, capNo: document.getElementById('labCap').textContent, zoomHid: document.getElementById('labZoom').hidden, sx: document.documentElement.scrollWidth }; });
+  const land = sc.w > sc.h;
+  ok(`[${T}] Лабораторія — на весь екран; «Налаштування» закрились`, L0.app.w === L0.vw && L0.app.h === L0.vh && L0.panel && L0.title === 'Лабораторія' && L0.sx <= L0.vw, JSON.stringify(L0.app));
+  ok(`[${T}] екран поділено на дві частини: ${land ? 'ліворуч схема рейсу, праворуч телефон і дані' : 'угорі схема рейсу, внизу телефон і дані'}`,
+    land ? (L0.top.r <= L0.bot.l + 1 && L0.top.w >= L0.vw * 0.35 && L0.bot.w >= L0.vw * 0.45 && Math.abs(L0.top.t - L0.bot.t) <= 1)
+      : (L0.top.b <= L0.bot.t + 1 && L0.top.h >= L0.vh * 0.3 && L0.bot.h >= L0.vh * 0.4 && L0.top.w === L0.vw), JSON.stringify({ top: L0.top, bot: L0.bot }));
+  ok(`[${T}] телефон і дані поруч, нічого не вилазить за екран`, L0.ph.r <= L0.data.l + 1 && L0.data.r <= L0.vw + 1 && L0.bot.b <= L0.vh + 1 && L0.scene.h >= 110 && L0.data.w >= 150, JSON.stringify({ ph: L0.ph, data: L0.data, scene: L0.scene }));
+  // без рейсу — підказка замість схеми
+  const noTrip = await app(page, () => { const cv = document.getElementById('labMap'); return { w: cv.width, h: cv.height, zoomHid: document.getElementById('labZoom').hidden }; });
+  ok(`[${T}] рейсу немає — замість схеми підказка, кнопки масштабу немає`, noTrip.w > 100 && noTrip.zoomHid, JSON.stringify(noTrip));
+  // рейс іде, GPS зник: схема, позначка, контрольні повороти, дані «замка на повороті»
+  await emitN('loc', { prov: 'gps', lat: coords[idx0][0], lon: coords[idx0][1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  for (let k = 0; k < 14; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); if (k > 6 && await app(page, () => window.__app.nav.pos.mode === 'dr' && !!window.__app.nav.pos.cp)) break; }
+  await app(page, () => window.__app.lab.openLab()); await sleep(700);
+  const L1 = await app(page, () => { const cv = document.getElementById('labMap'), x = cv.getContext('2d'), d = x.getImageData(0, 0, cv.width, cv.height).data; let purple = 0, red = 0, amber = 0;
+    for (let i = 0; i < d.length; i += 4) { const r = d[i], g = d[i + 1], b = d[i + 2], a = d[i + 3]; if (a < 200) continue; if (r > 110 && r < 140 && g > 80 && g < 105 && b > 240) purple++; else if (r > 215 && g > 60 && g < 85 && b > 65 && b < 90) red++; else if (r > 235 && g > 150 && g < 180 && b < 60) amber++; }
+    return { cap: document.getElementById('labCap').textContent, zoom: document.getElementById('labZoom').textContent, zoomHid: document.getElementById('labZoom').hidden, purple, red, amber,
+      rows: [...document.querySelectorAll('#labData .lab-r')].map(r => r.firstElementChild.textContent + '=' + r.lastElementChild.textContent), secs: [...document.querySelectorAll('#labData .lab-sec')].map(e => e.textContent) }; });
+  const rowOf = (L, k) => (L.rows.find(r => r.startsWith(k + '=')) || '').slice(k.length + 1);
+  ok(`[${T}] схема рейсу: пройдене фіолетовим, контрольні повороти червоними кружками, позначка без GPS — помаранчева`, (L1.purple > 20 || sc.n === 'tiny') && L1.red > 20 && L1.amber > 20 && !L1.zoomHid && L1.zoom === 'Ближче', JSON.stringify({ purple: L1.purple, red: L1.red, amber: L1.amber, zoom: L1.zoom }));
+  ok(`[${T}] підпис схеми: довжина рейсу, пройдено, лишилось, GPS ✕, до повороту, скільки контрольних`, /Рейс 2\d([.,]\d)? км/.test(L1.cap) && /пройдено/.test(L1.cap) && /лишилось/.test(L1.cap) && /GPS ✕/.test(L1.cap) && /поворот через/.test(L1.cap) && /контрольних поворотів: \d+/.test(L1.cap), L1.cap);
+  ok(`[${T}] дані: розділи «Датчики телефона», «Служба навігації», GPS, «Розрахунок без GPS»`, L1.secs.length >= 4 && /Датчики телефона/.test(L1.secs[0]) && /Служба навігації/.test(L1.secs[1]) && L1.secs[2] === 'GPS' && /Розрахунок без GPS/.test(L1.secs[3]), L1.secs.join(' | '));
+  ok(`[${T}] дані без GPS: режим, позначка зі швидкістю й похибкою, наступний поворот (ліворуч, червоний), його стан`, /розрахунок без GPS/.test(rowOf(L1, 'Режим')) && /км\/год · ±\d+ м/.test(rowOf(L1, 'Позначка')) && /↰ -?\d+° · червоний · \d+ м/.test(rowOf(L1, 'Поворот')) && /їде до нього · 0° із \d+°/.test(rowOf(L1, 'Стан')),
+    JSON.stringify({ mode: rowOf(L1, 'Режим'), mark: rowOf(L1, 'Позначка'), cp: rowOf(L1, 'Поворот'), st: rowOf(L1, 'Стан') }));
+  ok(`[${T}] дані служби: гіроскоп, трясіння з порогом, «їдемо»`, /°$/.test(rowOf(L1, 'Гіроскоп')) && /0[.,]05\d* · поріг/.test(rowOf(L1, 'Трясіння')) && /^їдемо/.test(rowOf(L1, 'Рух')), JSON.stringify({ g: rowOf(L1, 'Гіроскоп'), s: rowOf(L1, 'Трясіння'), m: rowOf(L1, 'Рух') }));
+  await page.click('#labZoom'); await sleep(350);
+  ok(`[${T}] «Ближче» — схема навколо позначки; кнопка стала «Увесь рейс»`, await app(page, () => document.getElementById('labZoom').textContent === 'Увесь рейс'));
+  if (sc.n !== 'tiny') await shot(page, '26-lab-' + sc.n);
+  // телефон у 3D: датчики WebView — стоїть у тримачі, потім повертаємо праворуч на 30°, далі ліворуч на 75°
+  const feed = (rate, secs, up = [0, 9.2, 3.3]) => app(page, ([rate, secs, up]) => { const Tt = window.__app.sensors._test, t0 = performance.now() + (window.__mt || 0); const N = Math.round(secs * 60);
+    for (let i = 0; i <= N; i++) Tt.onMotion({ timeStamp: t0 + i * 1000 / 60, rotationRate: { alpha: i ? -rate * up[2] / 9.8 : 0, beta: 0, gamma: i ? -rate * up[1] / 9.8 : 0 }, accelerationIncludingGravity: { x: up[0], y: up[1], z: up[2] }, acceleration: { x: 0, y: 0, z: 0 } });
+    window.__mt = (window.__mt || 0) + secs * 1000 + 50; Tt.flush((t0 + secs * 1000) / 1000); }, [rate, secs, up]);
+  const ph = () => app(page, () => ({ st: window.__app.lab.phoneState(), tr: document.getElementById('labPhone').style.transform, yaw: document.getElementById('labYaw').textContent, dial: document.getElementById('labDial').style.transform, hand: document.getElementById('labPhone').classList.contains('hand') }));
+  await feed(0, 1.2); await sleep(250); await page.click('[data-lab="zero"]'); await sleep(250);
+  const p0 = await ph();
+  ok(`[${T}] телефон стоїть у тримачі — модель нахилена так само, напис «рівно»`, /^matrix3d\(1, 0, 0, 0, 0, 0\.9\d+, 0\.3\d+/.test(p0.tr) && /рівно/.test(p0.yaw), JSON.stringify(p0));
+  await feed(30, 1); await sleep(250);
+  const p1 = await ph();
+  ok(`[${T}] повернули телефон праворуч на 30° — модель повернулась, напис «праворуч на 30°»`, Math.abs(p1.st.web - 30) < 1.5 && /праворуч на (29|30|31)°/.test(p1.yaw) && /rotate\((29|30|31)/.test(p1.dial) && /^matrix3d\(0\.8[5-8]\d*, 0, 0\.[45]\d+/.test(p1.tr), JSON.stringify(p1));
+  await feed(-52.5, 2); await sleep(250);
+  const p2 = await ph();
+  ok(`[${T}] назад і ліворуч — «ліворуч на 75°»`, Math.abs(p2.st.web + 75) < 2 && /ліворуч на 7[3-7]°/.test(p2.yaw), JSON.stringify(p2));
+  const d1 = await app(page, () => [...document.querySelectorAll('#labData .lab-r')].map(r => r.firstElementChild.textContent + '=' + r.lastElementChild.textContent));
+  const rw = k => (d1.find(r => r.startsWith(k + '=')) || '').slice(k.length + 1);
+  ok(`[${T}] дані датчиків: працюють, частота, обертання, «у руках — ні»`, /працюють · \d+\/с/.test(rw('Датчики руху')) && /↻ -?\d+[.,]\d · усього \d+[.,]\d °\/с/.test(rw('Обертання')) && rw('У руках') === 'ні', JSON.stringify({ a: rw('Датчики руху'), b: rw('Обертання'), c: rw('У руках') }));
+  await page.click('[data-lab="zero"]'); await sleep(250);
+  const p3 = await ph();
+  ok(`[${T}] «Нуль тут» — відлік повороту з цього положення; плашки застосунку схему не закривають`, /рівно/.test(p3.yaw) && /нуль виставлено/.test(p3.yaw) && Math.abs(p3.st.web) < 0.6 && await app(page, () => getComputedStyle(document.getElementById('toasts')).display === 'none'), JSON.stringify(p3));
+  const fit = await app(page, () => { const sc = document.querySelector('.lab-scene').getBoundingClientRect(), g = document.querySelector('.lab-ground').getBoundingClientRect(), ph = document.getElementById('labPhone').getBoundingClientRect(), cap = document.getElementById('labCap').getBoundingClientRect(), z = document.getElementById('labZoom').getBoundingClientRect(), top = document.querySelector('.lab-top').getBoundingClientRect();
+    return { sc: [sc.left, sc.right, sc.top, sc.bottom].map(Math.round), g: [g.left, g.right, g.top, g.bottom].map(Math.round), ph: [ph.left, ph.right, ph.top, ph.bottom].map(Math.round), capH: Math.round(cap.height), capIn: cap.bottom <= top.bottom - 60, zIn: z.right <= top.right && z.bottom <= top.bottom,
+      wraps: [...document.querySelectorAll('#labData .lab-r span')].filter(e => e.getBoundingClientRect().height > 40).map(e => e.textContent) }; });
+  ok(`[${T}] модель телефона з колом повороту вміщається у свою колонку, підписи рядків не ламаються на три рядки`, fit.g[0] >= fit.sc[0] - 2 && fit.g[1] <= fit.sc[1] + 2 && fit.ph[2] >= fit.sc[2] - 4 && fit.ph[3] <= fit.sc[3] + 4 && fit.capIn && fit.zIn && fit.wraps.length === 0, JSON.stringify(fit));
+  // телефон узяли в руки: модель червоніє, у даних — «так»
+  await app(page, () => { const Tt = window.__app.sensors._test, t0 = performance.now() + (window.__mt || 0); for (let i = 0; i < 70; i++) Tt.onMotion({ timeStamp: t0 + i * 16, rotationRate: { alpha: 5, beta: 60, gamma: 10 }, accelerationIncludingGravity: { x: 0.3, y: 6, z: 7.5 }, acceleration: { x: 0, y: 0, z: 0 } }); Tt.flush((t0 + 1200) / 1000); window.__mt += 1300; });
+  await sleep(450);
+  const p4 = await ph(), handRow = await app(page, () => { const r = [...document.querySelectorAll('#labData .lab-r')].find(r => r.firstElementChild.textContent === 'У руках'); return r ? r.lastElementChild.textContent + '|' + r.className : ''; });
+  ok(`[${T}] телефон узяли в руки — модель із червоною рамкою, у даних «так — цю секунду не рахую»`, p4.hand && /так/.test(handRow) && /bad/.test(handRow), handRow);
+  if (sc.n === 'xiaomi') await shot(page, '27-lab-phone');
+  // поворот відпрацьовано — у Лабораторії з'являється запис у «Подіях»
+  await app(page, () => window.__app.nav.passTurn()); await sleep(1300);
+  const evs = await app(page, () => ({ secs: [...document.querySelectorAll('#labData .lab-sec')].map(e => e.textContent), ev: [...document.querySelectorAll('#labData .lab-ev')].map(e => e.textContent) }));
+  ok(`[${T}] у «Подіях» — запис про пройдений поворот (кнопка) і про втрату GPS`, evs.secs.includes('Події') && evs.ev.some(e => /поворот -?\d+° — кнопка/.test(e)) && evs.ev.some(e => /GPS ✕/.test(e)), evs.ev.join(' | '));
+  // вихід: системна «Назад»; «Перемикачі» відкривають старі налаштування Лабораторії
+  const back = await app(page, () => window.__reisBack());
+  ok(`[${T}] системна «Назад» закриває Лабораторію`, back === true && !(await labVis()));
+  await app(page, () => window.__app.lab.openLab()); await page.click('[data-lab="tools"]'); await page.waitForSelector('[data-tg="tg"]');
+  ok(`[${T}] «Перемикачі» — колишня Лабораторія (перемикачі, імітація руху)`, !(await labVis()) && await app(page, () => !!document.querySelector('#panelBody [data-sim="toggle"]') && document.getElementById('panelTitle').textContent === 'Лабораторія'));
+  await page.click('#panelClose');
+  await app(page, () => window.__app.lab.openLab()); await page.click('[data-lab="x"]');
+  ok(`[${T}] хрестик закриває Лабораторію; карта й рейс на місці`, !(await labVis()) && await app(page, () => window.__app.guide.g.active));
+  ok(`[${T}] прохід 23 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`прохід 23 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
