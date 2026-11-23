@@ -49,6 +49,8 @@
 <section id="repSheet" role="dialog" hidden></section>
 <!-- 1.1.9: приціл для позначки — дотик до карти ставить позначку туди, де водій бачив -->
 <div id="aim" hidden></div>
+<!-- 1.1.12: точки рейсу просто на карті — старт, через, фініш; пряма між ними й відстань -->
+<div id="pts" hidden></div>
 <div id="cam" hidden><div class="sign" id="camMax"></div><div><span id="camDist"></span><small id="camLbl"></small></div></div>
 <div id="pick" hidden></div>
 
@@ -61,7 +63,7 @@
       <div class="tb-row"><b id="eta"></b><span id="remain"></span></div>
     </div>
     <button class="chip none" id="gpsChip"><i></i><span id="gpsText">GPS</span></button>
-    <div class="nudge" id="nudge" hidden><button id="bFwd100"></button><button id="bBack100"></button></div>
+    <div class="nudge" id="nudge" hidden><button id="bTurn" class="turn-btn" hidden></button><button id="bFwd100"></button><button id="bBack100"></button></div>
   </div>
   <!-- 1.1.7: GPS · Події · Рейс · Місця · Мітки. «Рейс» — головна кнопка посередині.
        «Параметри» на головному екрані більше немає — вони в швидких налаштуваннях (кнопка вгорі праворуч). -->
@@ -80,6 +82,9 @@
   <header><button id="panelBack" hidden></button><h2 id="panelTitle"></h2><button id="panelClose"></button></header>
   <div id="panelBody"></div>
 </section>
+
+<!-- Лабораторія (1.1.12): окремий екран; вхід — у «Налаштуваннях» на логотипі: два дотики й тримати 3 с -->
+<div id="labApp" hidden></div>
 
 <div id="boot"><b>РЕЙС</b><span>навігатор для фур</span></div>
 

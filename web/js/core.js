@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 38, name: '1.1.11' };
+export const VERSION = { web: 39, name: '1.1.12' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -33,13 +33,13 @@ window.addEventListener('unhandledrejection', e => log('err', 'promise: ' + (e.r
 const BASE_STOPS = { food: false, fuel: true, park: false, motel: false, cam: true, shower: false };
 const DEFAULTS = {
   lang: 'uk', theme: 'auto', view3d: true, autoCenter: true,
-  voice: true, popups: true, lookahead: true,
+  voice: true, popups: true, lookahead: true, cpSound: true,
   tg: true, air: true, cams: true, stops: true, drive: true,
   aiFilter: false, spoof: true, offline: true, rec: false,
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { ...BASE_STOPS },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 20, axle: 11.5, hazmat: false, vmax: 90 }, truckV: 1,
-  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
+  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', keepChosen: true, ttsRate: 1, ttsVoice: 'system', hgvBan: 'ask', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
@@ -55,6 +55,8 @@ try {
   // 1.1.10: у нас фури не важчі за 20 т — збережені 40 т (старе значення за замовчуванням) стають 20 т
   settings.truck.weight = Math.min(+settings.truck.weight || TRUCK_MAX_T, TRUCK_MAX_T);
   if ((raw.truckV || 0) < 1 && raw.truck) { settings.truckV = 1; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
+  // 1.1.12: голос «Лада» прибрано (писклявий) — у кого він був вибраний, тепер говорить Тетяна
+  if (settings.ttsVoice === 'uk:0') { settings.ttsVoice = 'uk:2'; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
   // Телефон, на якому «Рейс» уже стояв: один раз ставимо базові галочки шарів, далі вибір водія не чіпаємо
   if ((raw.layersDefV || 0) < 1 && Object.keys(raw).length) {
     Object.assign(settings, { mapStops: true, mapStopTypes: { ...BASE_STOPS }, mapVerified: false, mapEvents: false, mapHazards: false, roughMap: false, layersDefV: 1 });
@@ -106,6 +108,8 @@ export const db = {
 
 /* ---------- геометрія ---------- */
 const R = 6371008.8, D2R = Math.PI / 180;
+/** Бічна розкладка: телефон набік (карта ліворуч, усе решта праворуч). Планшет і вертикальний телефон — ні. Те саме правило — в app.css. */
+export const sideLayout = (w = window.innerWidth, h = window.innerHeight) => w > h && h <= 520;
 export function hav(a, b) {
   const dLat = (b.lat - a.lat) * D2R, dLon = (b.lon - a.lon) * D2R;
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.sin(dLon / 2) ** 2;

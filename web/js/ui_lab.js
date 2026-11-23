@@ -15,6 +15,7 @@ import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
+import { logoHtml } from './lab.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
@@ -100,6 +101,7 @@ function offlineHtml() {
       <div class="btns"><button class="btn sm wide" data-act="offCancel">${t('offCancel')}</button></div>`;
   } else {
     if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
+    if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
     const newer = r && off.installed && String(r.date) > String(off.date);
     const btns = [];
     if (!off.installed && r) btns.push(`<button class="btn pri" data-act="offDl">${t('offDownload', GB(r.size || 0))}</button>`);
@@ -127,7 +129,7 @@ function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1', max = '') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}"${max ? ` max="${max}"` : ''} value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
   const styleOn = STYLES.find(x => x[1] === S.styleUrl);
-  return `<div class="btns" style="margin-top:0"><button class="btn wide" data-act="labOpen">${ICON.lab}${t('labOpen')}</button></div>
+  return `${logoHtml()}
   <div class="sec">${t('secScreen')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
@@ -148,7 +150,7 @@ function settingsHtml() {
   <div id="offSec">${offlineHtml()}</div>
 
   <div class="sec">${t('secSound')}</div>
-  <div class="list">${tog('voice')}${tog('vibrate')}</div>
+  <div class="list">${tog('voice')}${tog('vibrate')}${tog('cpSound')}</div>
   <div class="sec">${t('secVoice')}</div>
   <div id="voiceSec">${voiceHtml()}</div>
   <div class="muted" style="margin:10px 2px 6px">${t('setRate')}</div>
@@ -165,6 +167,9 @@ function settingsHtml() {
     ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5', TRUCK_MAX_T)}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
   <div class="muted" style="margin-top:6px">${t('setTruckHint')}</div>
+  <div class="muted" style="margin:12px 2px 6px">${t('setHgvBan')}</div>
+  ${seg('hgvBan', [['avoid', t('hgv_avoid'), S.hgvBan === 'avoid'], ['ask', t('hgv_ask'), (S.hgvBan || 'ask') === 'ask'], ['go', t('hgv_go'), S.hgvBan === 'go']])}
+  <div class="muted" id="hgvHint" style="margin:-4px 2px 10px">${t('hgvHint_' + (S.hgvBan || 'ask'))}</div>
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
 
   <div class="sec">${t('setAhead')}</div><div class="form">
@@ -214,6 +219,7 @@ definePanel('settings', {
         else if (k === 'lang') S.lang = v;
         else if (k === 'glass') S.glass = v;
         else if (k === 'passed') S.passed = v;
+        else if (k === 'hgvBan') S.hgvBan = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }
@@ -227,7 +233,6 @@ definePanel('settings', {
       else if (a === 'appset') P.openAppSettings();
       else if (a === 'locset') P.openLocationSettings();
       else if (a === 'about') openPanel('about');
-      else if (a === 'labOpen') openPanel('lab');
       else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
@@ -369,7 +374,8 @@ definePanel('diag', {
 
 /* =====================  ГОЛОС: телефону або якісний із пакета  ===================== */
 // Пакет «uk» (Piper ukrainian_tts) має трьох дикторів: 0 — Лада, 1 — Микита, 2 — Тетяна.
-const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta'], ['uk:0', 'uk', 0, 'vLada']];
+// З 1.1.12 Ладу не пропонуємо (голос надто писклявий): лишились голос телефону, Тетяна й Микита.
+const VOICES = [['system', '', 0, 'vSystem', 'vSystemD'], ['uk:2', 'uk', 2, 'vTetiana'], ['uk:1', 'uk', 1, 'vMykyta']];
 const vst = { dl: null, err: '', errShown: false, last: null, testing: 0, why: '' };
 // Щоденник голосу (1.1.7): що й коли сталося з якісним голосом — останні записи видно в «Параметри → Голос»,
 // тож причину «чому знову голос телефону» видно на самому телефоні, а не доводиться вгадувати.
@@ -407,6 +413,8 @@ function voiceWhy() {
   if (!st.packs || !st.packs[v[1]]) return { ok: false, code: 'nopack', text: t('vwNoPack'), act: 'vDl', btn: t('vDl') };
   if (!packOk(st)) return { ok: false, code: 'oldpack', text: t('vwOldPack'), act: 'vDl', btn: t('vPackUpd') };
   const e = verrGet();
+  // 1.1.6–1.1.11: оболонка відкривала звук із розміром буфера, який Android не приймає («Invalid audio buffer size») — лікує лише новий APK (оболонка №6)
+  if (e && /buffer size/i.test(e.e || '') && (+P.appInfo().nativeRev || 0) < 6) return { ok: false, code: 'oldaudio', text: t('vwOldAudio'), act: 'vApk', btn: t('vFixBtn') };
   if (e) return { ok: false, code: 'err', text: t('vwErr', vTime(e.t), e.e), act: 'vTest', btn: t('vwTest') };
   return { ok: true, code: 'neural', text: t('vwOk', name) + (st.loaded === v[1] ? '' : ' ' + t('vwLoading')) };
 }

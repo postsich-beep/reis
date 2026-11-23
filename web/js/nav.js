@@ -1,6 +1,7 @@
 // Двигун позиції: довіра до GPS, детектор підміни, розрахунок шляху без сигналу, ручна поправка ±100 м.
 import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.js';
 import { RouteTracker } from './drpf.js';
+import { motionHint, startMotion } from './sensors.js';
 
 export const pos = {
   mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
@@ -16,7 +17,7 @@ export const pos = {
 let route = null, routeInUA = true;
 let lastFixT = 0, lastTick = Date.now(), vCruise = 0, net = null, compass = null;
 let yawNow = null, yawRef = null, hdgRef = null;
-let moving = true, stillT = 0, varStop = null, varMove = null;
+let moving = true, stillT = 0, varStop = null, varMove = null, lastVar = null;
 let badRun = 0, cand = [], hadUA = false, simOn = false, timer = null, carry = 0, approxT = 0;
 let netHist = [], apSpd = null, apSpdT = 0, apSpdErr = null;   // швидкість за зсувом вишок/Wi-Fi, коли GPS немає або підмінено
 let vCruiseT = 0, motionT = 0;                  // коли востаннє бачили чесну швидкість GPS; коли її зберегли
@@ -312,7 +313,7 @@ export function detectTurn(hist, now) {
 }
 function onYaw(yaw) {
   const now = Date.now();
-  if (trk) trk.addYaw(now / 1000, yaw, !moving);
+  if (trk) trk.addYaw(now / 1000, yaw, !moving, motionHint());
   yawHist.push({ t: now, yaw }); while (yawHist.length && now - yawHist[0].t > 45000) yawHist.shift();
   const n = yawHist.length;
   if (n >= 4 && Math.abs(yaw - yawHist[n - 4].yaw) > 6) { moving = true; stillT = 0; }     // машина крутиться — отже, їде
@@ -451,7 +452,7 @@ function enterDR(reason) {
 
 function exitDR(f) {
   const info = { err: Math.round(hav(pos, f)), dur: Math.round((Date.now() - pos.lostSince) / 1000), drDist: Math.round(pos.drDist), reason: pos.reason };
-  pos.mode = 'gps'; pos.pending = null; cand = []; badRun = 0; pos.raw = null; pos.reason = ''; manualSpd = null; holdSince = 0; kf.on = false;
+  pos.mode = 'gps'; pos.pending = null; cand = []; badRun = 0; pos.raw = null; pos.reason = ''; manualSpd = null; holdSince = 0; kf.on = false; pos.cp = null;
   log('info', 'GPS відновлено: похибка розрахунку ' + info.err + ' м за ' + info.dur + ' с');
   accept(f);
   bus.emit('gpsBack', info);
@@ -566,7 +567,7 @@ function tick() {
     trk.step(now / 1000, Math.max(T, 0.2), { moving, manualV: manualSpd, proven: now - gyroSeen < 40 * 60000 });
     const e = trk.est;
     kf.d = e.d; kf.v = manualSpd != null ? manualSpd : (moving ? e.v : 0);
-    calibrationCheck(now, before, e);
+    if (trk.o.gate) gateEvents(now); else calibrationCheck(now, before, e);
     const step = Math.max(0, e.d - pos.rd);
     pos.rd = e.d; const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
     pos.drDist += step; pos.spd = kf.v; pos.acc = Math.round(clamp(e.sig, 15, 9999));
@@ -615,6 +616,37 @@ function tick() {
   bus.emit('pos', pos);
 }
 
+// Замок на повороті: що сталося на контрольних точках за цей крок — на екран і в журнал
+const CP_BY = { gyro: 'телефон відчув поворот', button: 'водій натиснув «Поворот»', skip: 'відчули вже наступний поворот', auto: 'без гіроскопа, за швидкістю', net: 'за вишками' };
+function cpView() {
+  const G = trk && trk.on && trk.o.gate ? trk.g : null, c = G && G.cp;
+  return c ? { state: G.state, since: Math.round(G.since * 1000), dist: Math.round(Math.max(0, c.d0 - trk.est.d)), d: c.d, ang: c.ang, cls: c.cls, sgn: c.sgn, prog: G.prog, handled: !!G.handled, alive: !!G.alive } : null;
+}
+function gateEvents(now) {
+  for (const ev of trk.takeEvents()) {
+    const nx = trk.cps[trk.cpi] || null;
+    log('info', `контрольний поворот ${ev.cp.ang}° (${ev.cp.cls === 'red' ? 'різкий' : 'дуга'}) пройдено: ${CP_BY[ev.by] || ev.by}` + (ev.jump ? `, позначку підтягнуто на ${ev.jump} м` : '') + (ev.waited ? `, чекала ${ev.waited} с` : '') + (ev.tempo != null ? `, темп ×${ev.tempo.toFixed(2)}` : ''));
+    if (ev.by === 'gyro') gyroSeen = now;
+    bus.emit('cpPass', { ...ev, next: nx ? { d: nx.d, cls: nx.cls, ang: nx.ang, sgn: nx.sgn, dist: Math.round(Math.max(0, nx.d0 - trk.est.d)) } : null, sig: Math.round(trk.est.sig) });
+  }
+  pos.cp = cpView();
+}
+// Кнопка «Поворот»: водій каже, що він на наступному контрольному повороті (телефон його не відчув або позначка відстала)
+export function passTurn() {
+  if (!drTracker() || !route || !trk.o.gate) return null;
+  const c = trk.passNext(Date.now() / 1000); if (!c) return null;
+  syncFromTracker(); gateEvents(Date.now()); bus.emit('pos', pos);
+  return c;
+}
+export function undoTurn() {
+  if (!drTracker() || !trk.undoPass(Date.now() / 1000)) return false;
+  syncFromTracker(); pos.cp = cpView(); bus.emit('pos', pos);
+  return true;
+}
+function syncFromTracker() {
+  const e = trk.est; kf.d = e.d; pos.rd = e.d; const a = route.at(pos.rd); pos.lat = a.lat; pos.lon = a.lon; pos.hdg = a.brg;
+  pos.acc = Math.round(clamp(e.sig, 15, 9999)); pos.accBase = pos.acc; pos.accRef = pos.manRef = pos.drDist;
+}
 // Звірка відбулась: хмара була розмита (>120 м) і зібралась (<70 м) біля контрольного повороту — кажемо водієві
 function calibrationCheck(now, before, e) {
   if (!trkCal) trkCal = { sig: e.sig, t: now, peak: e.sig };
@@ -633,6 +665,7 @@ function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
   if (s.yaw != null) { yawNow = s.yaw; onYaw(s.yaw); }
   if (s.var == null) return;
+  lastVar = s.var;
   // Самокалібрування: запам'ятовуємо рівень вібрації на стоянці й у русі, поки GPS живий.
   if (pos.mode === 'gps' && Date.now() - lastFixT < 2500) {
     if (pos.spd < 0.5) varStop = ema(varStop, s.var); else if (pos.spd > 5) varMove = ema(varMove, s.var);
@@ -640,8 +673,8 @@ function onSens(s) {
   // поріг «їдемо» — ближче до рівня стоянки (чутливіше удвічі, ніж середнє геометричне); «стоїмо» — лише після 6 с спокою
   const thr = (varStop != null && varMove != null && varMove > 2.5 * varStop) ? varStop * Math.pow(varMove / varStop, 0.3) : 0.002;
   if (s.var > thr) { moving = true; stillT = 0; } else if (++stillT >= 6) moving = false;
-  // телефон узяли в руки (трясе набагато сильніше за дорогу) — кілька секунд гіроскоп не про фуру
-  if (trk && varMove != null && s.var > 40 * varMove) trk.handled(Date.now() / 1000);
+  // (до 1.1.12 сильну тряску вважали «телефон у руках» і на хвилину глушили гіроскоп — але фуру на бруківці трясе так само.
+  //  Тепер «у руках» визначаємо за нахилом телефона — див. sensors.js.)
 }
 
 // AGC і C/N0: поки GPS справжній — вчимо еталон телефона; далі порівнюємо. Глушіння: обидва падають.
@@ -665,6 +698,7 @@ export function start() {
   if (timer) return;
   bus.on('gps', onGps);
   bus.on('sens', onSens);
+  startMotion();
   bus.on('gnss', g => { pos.sats = g; });
   bus.on('gnssq', onGq);
   lastTick = Date.now();
@@ -687,8 +721,8 @@ export const routeTurns = () => turns.slice();
 // Стенд перевірки ведення без GPS (tests/bench): ті самі обробники, але час і такт задає стенд
 export function benchStart() { bus.on('gps', onGps); bus.on('sens', onSens); lastTick = Date.now(); }
 export const benchTick = () => tick();
-export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
-  pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
+export const debugState = () => ({ yawHist: yawHist.slice(-12), lastVar, lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
+  pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, cpi: trk.cpi, gate: trk.o.gate ? { ...cpView(), align: trk.align, off: trk.off == null ? null : Math.round(trk.off) } : null, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
   return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };

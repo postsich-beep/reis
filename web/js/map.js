@@ -1,5 +1,6 @@
 // Карта: MapLibre + кеш тайлів у пам'яті телефону (офлайн), маршрут, позначка машини, камери, зупинки.
-import { bus, log, S, db, isNight, clamp, sleep } from './core.js';
+import { PT_SVG } from './pticons.js';
+import { bus, log, S, db, isNight, clamp, sleep, sideLayout } from './core.js';
 import { pos, routeCps } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
@@ -93,7 +94,7 @@ export function drawReports() {
     if (repMarks.has(r.id)) { const m = repMarks.get(r.id), tt = m.getElement().querySelector('.rpm-t'); if (tt && tt.textContent !== lbl) tt.textContent = lbl; continue; }
     const el = document.createElement('button'); el.className = 'rpm rpm-' + r.t; el.innerHTML = (REP_SVG[r.t] || '') + '<span class="rpm-t"></span>'; el.dataset.rep = r.id;
     el.querySelector('.rpm-t').textContent = lbl;
-    el.addEventListener('click', e => { e.stopPropagation(); bus.emit('repTap', r.id); });
+    el.addEventListener('click', e => { if (tapHook) return; e.stopPropagation(); bus.emit('repTap', r.id); });
     repMarks.set(r.id, new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([r.lon, r.lat]).addTo(map));
   }
   for (const [id, m] of repMarks) if (!keep.has(id)) { m.remove(); repMarks.delete(id); }
@@ -129,7 +130,7 @@ export function drawVerified() {
     if (vpMarks.has(p.id)) { vpMarks.get(p.id).setLngLat([p.lon, p.lat]); continue; }
     const el = document.createElement('button');
     el.className = 'vpm'; el.innerHTML = (VP_ICON[p.kind] || VP_ICON.food) + VP_STAR; el.setAttribute('aria-label', p.name);
-    el.addEventListener('click', e => { e.stopPropagation(); bus.emit('vpTap', p.id); });
+    el.addEventListener('click', e => { if (tapHook) return; e.stopPropagation(); bus.emit('vpTap', p.id); });
     vpMarks.set(p.id, new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([p.lon, p.lat]).addTo(map));
   }
   for (const [id, m] of vpMarks) if (!keep.has(id)) { m.remove(); vpMarks.delete(id); }
@@ -325,6 +326,7 @@ function addLayers() {
   map.addSource('rough', { type: 'geojson', data: EMPTY });
   map.addSource('marks', { type: 'geojson', data: EMPTY });
   map.addSource('cps', { type: 'geojson', data: EMPTY });
+  map.addSource('plan-line', { type: 'geojson', data: EMPTY });
   // Лінії рейсу кладемо під підписи карти: назви вулиць і міст читаються поверх синьої лінії, як у звичних навігаторах.
   // Наші значки (АЗС, стоянки, позначки) лишаються згори.
   const under = firstSymbolId();
@@ -335,7 +337,7 @@ function addLayers() {
   // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
   map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } }, under);
   map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } }, under);
-  map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f) bus.emit('altTap', f.properties.k); });
+  map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('altTap', f.properties.k); });
   const casePaint = { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) }, linePaint = { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) };
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: casePaint }, under);
   map.addLayer({ id: 'route-near-case', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: casePaint }, under);
@@ -371,7 +373,7 @@ function addLayers() {
   map.addLayer({ id: 'fuel-label', type: 'symbol', source: 'stops', minzoom: 10, filter: ['==', ['get', 't'], 'f'],
     layout: { 'icon-image': ['concat', 'fuel:', ['get', 'nm']], 'icon-anchor': 'bottom', 'icon-offset': [0, 1], 'icon-allow-overlap': false, 'icon-padding': 2,
       'icon-size': ['interpolate', ['linear'], ['zoom'], 10, 0.85, 14, 1.05], 'symbol-sort-key': ['-', 0, ['get', 'r']] } });
-  map.on('click', 'fuel-label', e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
+  map.on('click', 'fuel-label', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
   map.addLayer({ id: 'poi-cam', type: 'symbol', source: 'poi', minzoom: 7.5, filter: ['==', ['get', 'k'], 'cam'],
     layout: { 'icon-image': 'cam-ico', 'icon-size': camSize, 'icon-allow-overlap': true, 'icon-padding': 0 } });
   map.addLayer({
@@ -385,17 +387,20 @@ function addLayers() {
   map.addLayer({ id: 'marks-dot', type: 'circle', source: 'marks', minzoom: 5, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 12], 'circle-color': SHOWER_COLOR,
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
-  map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f) bus.emit('markTap', f.properties.id); });
+  map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('markTap', f.properties.id); });
   // контрольні повороти рейсу (без GPS): червоні — перехрестя й різкі повороти, жовті — довгі дуги трас
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
-    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 13, 6, 17, 10], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'n'], 1], 5, 3.5], 13, ['case', ['==', ['get', 'n'], 1], 9, 6], 17, ['case', ['==', ['get', 'n'], 1], 14, 10]], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 14, 2.5], 'circle-opacity': 0.95 } });
   for (const id of ['stops-major', 'stops-all', 'cams-ico']) {
-    map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
+    map.on('click', id, e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
     map.on('mouseleave', id, () => { map.getCanvas().style.cursor = ''; });
   }
-  doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps();
+  // пряма між точками, поставленими на карті: чорний пунктир на білій підкладці — видно і вдень, і вночі
+  map.addLayer({ id: 'plan-line-bg', type: 'line', source: 'plan-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.85 } });
+  map.addLayer({ id: 'plan-line', type: 'line', source: 'plan-line', paint: { 'line-color': '#13171c', 'line-width': 3, 'line-dasharray': [1.6, 1.4] } });
+  doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps(); if (planPts) planPoints(planPts);
   tuneLabels();
   if (clean) setClean(true);
 }
@@ -406,7 +411,7 @@ export const HOUSE_Z = 17;
 function tuneLabels() {
   let style; try { style = map.getStyle(); } catch (_) { return; }
   const ls = style.layers || [], size = ['interpolate', ['linear'], ['zoom'], 12, 12.5, 15, 14.5, 17, 17, 19, 19];
-  let omt = null, firstRoad = null, house = false;
+  let omt = null, firstRoad = null, house = false; const dark = !!(style.metadata && style.metadata.reisNight);
   for (const l of ls) {
     if (l.type !== 'symbol') continue;
     const sl = l['source-layer'];
@@ -417,8 +422,8 @@ function tuneLabels() {
     firstRoad = firstRoad || l.id;
     try {
       map.setLayoutProperty(l.id, 'text-size', size);
-      map.setPaintProperty(l.id, 'text-color', '#1d2330');
-      map.setPaintProperty(l.id, 'text-halo-color', '#ffffff');
+      map.setPaintProperty(l.id, 'text-color', dark ? '#eef1f4' : '#1d2330');
+      map.setPaintProperty(l.id, 'text-halo-color', dark ? '#0f1317' : '#ffffff');
       map.setPaintProperty(l.id, 'text-halo-width', 2.4);
       map.setPaintProperty(l.id, 'text-halo-blur', 0.2);
     } catch (_) {}
@@ -439,8 +444,9 @@ function drawCps() {
   let key = 'off', feats = [];
   if (g.active && g.idx && pos.rd != null && pos.onRoute && (pos.mode === 'dr' || S.cpsShow)) {
     const d = pos.rd, ahead = routeCps().filter(c => c.d1 > d - 20 && c.d < d + 25000).slice(0, 12);
-    key = ahead.map(c => c.d).join(',');
-    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
+    const nx = pos.cp ? pos.cp.d : (ahead[0] && ahead[0].d);                   // наступний контрольний поворот — більший кружечок
+    key = ahead.map(c => c.d).join(',') + '|' + nx;
+    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0 }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
   }
   if (key === cpKey) return;
   cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });
@@ -450,7 +456,9 @@ function drawCps() {
 export function applyTheme() {
   const night = S.theme === 'night' || (S.theme === 'auto' && isNight(pos.lat ?? 49.0, pos.lon ?? 31.3));
   if (night === view.night && document.body.dataset.theme) return;
+  const was = view.night;
   view.night = night; document.body.dataset.theme = night ? 'night' : 'day';
+  if (map && offlineActive() && was !== night) setMapStyle(currentStyle());      // офлайн-карта: день і ніч — два окремі набори кольорів
   bus.emit('view', view);
 }
 
@@ -608,14 +616,26 @@ function onPos() {
 }
 
 /* ---------- маршрут ---------- */
-function wpEl(cls, txt) { const d = document.createElement('div'); d.className = 'wp ' + cls; d.textContent = txt; return d; }
-// Мітки точок: А — звідки, Б — через, С — куди (і в дорозі, і поки вибираємо варіант)
+function wpEl(cls, k) { const d = document.createElement('div'); d.className = 'wp ' + cls; if (k && PT_SVG[k]) d.innerHTML = PT_SVG[k]; return d; }
+// Мітки точок: старт (зелений прапорець), через (кільце), фініш (картатий прапор) — і в дорозі, і поки вибираємо варіант
 let previewTrip = null;
 export function previewPoints(tr) { previewTrip = tr || null; drawRoute(); }
 function drawPins(tr) {
   const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
-  add(tr.a, 'wp-a', 'А'); add(tr.v, 'wp-v', 'Б'); add(tr.b, 'wp-b', 'С');
+  add(tr.a, 'wp-a', 'a'); add(tr.v, 'wp-v', 'v'); add(tr.b, 'wp-b', 'b');
 }
+/* ---------- точки рейсу, поставлені просто на карті (1.1.12): значки й пряма між ними ---------- */
+let planMarks = [], planPts = null;
+export function planPoints(pts) {
+  planPts = pts || null;
+  for (const m of planMarks) m.remove(); planMarks = [];
+  const src = map && map.getSource && map.getSource('plan-line');
+  if (!map || !pts) { if (src) src.setData(EMPTY); return; }
+  for (const k of ['a', 'v', 'b']) if (pts[k]) planMarks.push(new maplibregl.Marker({ element: wpEl('wp-' + k + ' wp-plan', k), anchor: 'bottom' }).setLngLat([pts[k].lon, pts[k].lat]).addTo(map));
+  const line = [pts.a || pts.me, pts.v, pts.b].filter(Boolean);
+  if (src) src.setData(line.length >= 2 ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line.map(p => [p.lon, p.lat]) } } : EMPTY);
+}
+export const planPointsShown = () => planMarks.length;
 function drawRoute() {
   for (const m of wps) m.remove(); wps = [];
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
@@ -687,7 +707,7 @@ function evMarker(id, p, cls, icon, title) {
   if (m) { m.seen = true; return; }
   const el = document.createElement('button');
   el.className = 'evm ' + cls; el.innerHTML = icon; el.setAttribute('aria-label', title || '');
-  el.addEventListener('click', e => { e.stopPropagation(); bus.emit('evTap', id); });
+  el.addEventListener('click', e => { if (tapHook) return; e.stopPropagation(); bus.emit('evTap', id); });
   m = new maplibregl.Marker({ element: el }).setLngLat([p.lon, p.lat]).addTo(map);
   m.seen = true; evMarks.set(id, m);
 }
@@ -717,11 +737,12 @@ export function showRoute(coords) {
   b.extend([coords[coords.length - 1][1], coords[coords.length - 1][0]]);
   view.follow = false; view.lastTouch = Date.now() + 20000; bus.emit('view', view);
   const h = map.getContainer().clientHeight;
+  noPad();
   map.fitBounds(b, { padding: { top: Math.round(h * 0.22), bottom: Math.round(h * 0.42), left: 40, right: 40 }, bearing: 0, pitch: 0, duration: 700, maxZoom: 15 });
 }
 // Вибір варіанта: обидва маршрути цілком у верхній частині екрана (над шторкою вибору), як у BlindDriver.
 // Поки вибираємо, карта сама не повертається до машини.
-export function fitRoutes(list, padTop, padBottom) {
+export function fitRoutes(list, padTop, padBottom, padRight = 70) {
   if (!map || !list || !list.length) return;
   const b = new maplibregl.LngLatBounds();
   for (const coords of list) {
@@ -731,9 +752,16 @@ export function fitRoutes(list, padTop, padBottom) {
   }
   view.follow = false; view.lastTouch = Date.now() + 3600e3; bus.emit('view', view);
   const h = map.getContainer().clientHeight, w = map.getContainer().clientWidth;
-  const land = w > h, side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: 70 };   // справа — кнопки масштабу
-  map.fitBounds(b, { padding: { top: Math.round(padTop), bottom: Math.round(land ? 30 : padBottom), ...side }, bearing: 0, pitch: 0, duration: 600, maxZoom: 14 });
+  const land = sideLayout(w, h), side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: Math.max(70, Math.round(padRight)) };   // справа — кнопки масштабу (на планшеті шторка вужча за екран, і кнопки не біля краю)
+  // вільного місця по висоті має лишитись хоча б 90 px — інакше карта «не вміщає» рейс і не рухається зовсім
+  let pt = Math.round(padTop), pb = Math.round(land ? 30 : padBottom); const free = h - pt - pb;
+  if (free < 90) { const k = Math.max(0, (h - 90)) / Math.max(1, pt + pb); pt = Math.floor(pt * k); pb = Math.floor(pb * k); }
+  noPad();
+  map.fitBounds(b, { padding: { top: pt, bottom: pb, ...side }, bearing: 0, pitch: 0, duration: 600, maxZoom: 14 });
 }
+// Камера «за машиною» тримає відступ згори (машина нижче центру). fitBounds додає свої відступи ДО нього —
+// на невисокому екрані сума перевищувала висоту карти, і рейс не показувався зовсім. Перед оглядом рейсу відступ знімаємо.
+function noPad() { try { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); } catch (_) {} }
 export function freeView() { view.lastTouch = Date.now(); }
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
 export function previewAlts(list) {
@@ -752,11 +780,14 @@ export function previewRoute(coords, route = null) {
   if (coords) showRoute(coords);
 }
 // Офлайн-карта України, якщо завантажена; інакше онлайн-стиль, вибраний у налаштуваннях.
-export function currentStyle() { try { if (offlineActive()) return offlineStyle(); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
+// Офлайн-карта має власну темну раскладку кольорів — «перевертати» її фільтром уночі не треба (body.mapdark вимикає фільтр).
+export const nativeDark = () => offlineActive() && view.night;
+export function currentStyle() { try { if (offlineActive()) return offlineStyle(view.night); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
 export function applyMapSource() { setMapStyle(currentStyle()); bus.emit('mapSource', offlineActive()); }
 export function setMapStyle(url) {
   if (!map || !url) return;
   view.blank = false; doneD = -1;
+  document.body.classList.toggle('mapdark', typeof url === 'object' && !!(url.metadata && url.metadata.reisNight));
   // diff: false — повне перезавантаження стилю, інакше бібліотека «порівнює» стилі й мовчки викидає наші шари маршруту
   try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
