@@ -110,6 +110,7 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ntfy.sh для тестів: одне сховище на всі «телефони» в тесті
 const NTFY = { msgs: [], posts: 0, fail: false };
+const ROUTE = { fn: null };                                        // підміна відповіді сервера маршрутів у окремих перевірках
 // Сторінки, що лишились відкритими після збою попередньої перевірки, гальмують усі наступні (карта малює й далі) — закриваємо.
 const liveCtx = new Set();
 async function newPage(native, opts = {}) {
@@ -125,7 +126,7 @@ async function newPage(native, opts = {}) {
   await page.route('**/data/places.json', r => json(r, PLACES_JSON));
   await page.route('**/data/hazards.json', r => json(r, HAZ_JSON));
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
-  await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
+  await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
   await page.route('**/data/verified.json', r => json(r, VP_JSON));
   await page.route('https://ntfy.sh/**', r => {
     const rq = r.request(), u = new URL(rq.url());
@@ -1925,6 +1926,46 @@ if (run('19')) try {
   ok('прохід 19 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 19 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 20 (1.1.10): сервер «для фури шляху немає» — програма сама обходить ============ */
+if (run('20')) try {
+  const { page, ctx, errors } = await newPage(true);
+  await app(page, d => window.__reis('loc', d), { prov: 'gps', lat: 49.99, lon: 36.23, acc: 5, spd: 0, t: Date.now() }); await sleep(300);
+  const NP = { status: 400, body: { error_code: 442, error: 'No path could be found for input', status_code: 400, status: 'Bad Request' } };
+  const cls = q => (q.locations[0].search_filter || {}).min_road_class || '';
+  const build = async () => {
+    await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#in_b');
+    await page.fill('#in_b', 'Полтава'); await page.waitForSelector('#sg_b button', { timeout: 5000 }); await page.click('#sg_b button');
+    await page.click('[data-act="build"]');
+  };
+  // 1) біля точки проїзду немає — програма сама «чіпляє» точки за основні дороги
+  let n0 = routeReqs.length;
+  ROUTE.fn = q => q.costing === 'truck' && cls(q) !== 'tertiary' ? NP : null;
+  await build();
+  await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 15000 });
+  const r1 = routeReqs.slice(n0).map(q => q.costing + ':' + cls(q));
+  const w1 = await app(page, () => (document.querySelector('#routePick .rp-warn') || { textContent: '' }).textContent);
+  ok('сервер «шляху для фури немає» — програма сама пробує від основних доріг і знаходить рейс для фури', r1.join() === 'truck:,truck:unclassified,truck:tertiary' && /перенесено на найближчу основну дорогу/.test(w1) && await app(page, () => window.__app.ui ? true : true), JSON.stringify({ r1, w1 }));
+  await page.click('#routePick [data-rp="x"]'); await sleep(300);
+  // 2) для фури проїзду немає зовсім — звичайний маршрут із червоним попередженням, водій вирішує
+  n0 = routeReqs.length;
+  ROUTE.fn = q => q.costing === 'truck' ? NP : null;
+  await build();
+  await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 15000 });
+  const r2 = routeReqs.slice(n0).map(q => q.costing + ':' + cls(q));
+  const w2 = await app(page, () => { const w = document.querySelector('#routePick .rp-warn.red'); return w ? w.textContent : ''; });
+  ok('для фури зовсім немає — показано звичайний маршрут з червоним «Для фури проїзду не знайшлося… їдьте за знаками»', r2.join() === 'truck:,truck:unclassified,truck:tertiary,auto:' && /Для фури проїзду не знайшлося/.test(w2) && /їдьте за знаками/.test(w2), JSON.stringify({ r2, w2 }));
+  await shot(page, '22-truck-nopath');
+  await page.click('#routePick [data-rp="x"]'); await sleep(300);
+  // 3) і звичайного немає — помилка людською мовою, без англійської
+  ROUTE.fn = () => NP;
+  await build(); await sleep(5000);
+  const err = await app(page, () => document.getElementById('panelBody').textContent);
+  ok('шляху немає взагалі — «Рейс для фури не прокладено: проїзду між цими точками не знайшлося», без англійської', /проїзду між цими точками не знайшлося/.test(err) && !/No path/.test(err), err.replace(/\s+/g, ' ').slice(0, 300));
+  ROUTE.fn = null;
+  ok('прохід 20 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ROUTE.fn = null; ok('прохід 20 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
