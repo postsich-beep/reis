@@ -1919,8 +1919,16 @@ if (run('19')) try {
   let q = { lat: 49.99, lon: 36.23 }, tq = Date.now();
   for (let i = 0; i < 4; i++) { q = { lat: q.lat + 11 / 111320, lon: q.lon }; tq += 1000; await app(P2.page, d => window.__reis('loc', d), { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 11, brg: 0, t: tq }); await sleep(250); }
   await sleep(1200);
-  const sg = await app(P2.page, () => { const l = document.getElementById('spdLim'), s = document.getElementById('speed'), r = l.getBoundingClientRect(), rs = s.getBoundingClientRect(); return { on: !l.hidden, txt: l.textContent, w: Math.round(r.width), over: s.classList.contains('over'), v: document.getElementById('spdVal').textContent, cover: r.left < rs.left + rs.width * 0.5 }; });
-  ok('у місті 40 км/год (без перевищення) — знак «50» видно весь час, великий, цифр швидкості не закриває', sg.on && sg.txt === '50' && sg.w >= 44 && !sg.over && !sg.cover, JSON.stringify(sg));
+  const sg = await app(P2.page, () => {
+    const l = document.getElementById('spdLim'), s = document.getElementById('speed'), v = document.getElementById('spdVal'), r = l.getBoundingClientRect();
+    // перетин знака з самими цифрами (за обрисом тексту), для «40», «57» і тризначної «100»
+    const hit = txt => { const old = v.textContent; v.textContent = txt; const rg = document.createRange(); rg.selectNodeContents(v); const g = rg.getBoundingClientRect(), q = l.getBoundingClientRect(); v.textContent = old;
+      const cx = Math.max(q.left, Math.min(q.right, (g.left + g.right) / 2)), cy = Math.max(q.top, Math.min(q.bottom, (g.top + g.bottom) / 2));
+      const R = q.width / 2, ox = q.left + R, oy = q.top + R, nx = Math.max(g.left, Math.min(ox, g.right)), ny = Math.max(g.top + g.height * 0.12, Math.min(oy, g.bottom));   // найближча до центру знака точка цифр
+      return Math.hypot(nx - ox, ny - oy) < R; };
+    return { on: !l.hidden, txt: l.textContent, w: Math.round(r.width), over: s.classList.contains('over'), v: v.textContent, cover: ['40', '57', '100'].filter(hit) };
+  });
+  ok('у місті 40 км/год (без перевищення) — знак «50» видно весь час, великий, цифр швидкості не закриває (і «57», і «100»)', sg.on && sg.txt === '50' && sg.w >= 44 && !sg.over && sg.cover.length === 0, JSON.stringify(sg));
   await shot(P2.page, '21-speed-sign');
   await P2.ctx.close();
   ok('прохід 19 без помилок JS', errors.length === 0, errors.join(' | '));
@@ -1976,6 +1984,22 @@ if (run('20')) try {
   ok('прохід 20 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ROUTE.fn = null; ok('прохід 20 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 21 (1.1.11): камери на карті — значком камери (пропозиція Діми) ============ */
+if (run('21')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  await page.waitForFunction(() => { const m = window.__app.map.map; return window.__app.stopsdb.sdb.ready && m && m.getLayer('cams-ico'); }, null, { timeout: 10000 });
+  await app(page, ([la, lo]) => { window.__app.map.setFollow(false); window.__app.map.map.jumpTo({ center: [lo, la], zoom: 14.5, bearing: 0 }); }, camPt);
+  await sleep(1200);
+  const cm = await app(page, ([la, lo]) => { const m = window.__app.map.map, p = m.project([lo, la]), box = [[p.x - 20, p.y - 20], [p.x + 20, p.y + 20]];
+    return { img: m.hasImage('cam-ico'), ico: m.queryRenderedFeatures(box, { layers: ['cams-ico'] }).length, dot: m.queryRenderedFeatures(box, { layers: ['stops-all'] }).filter(f => f.properties.t === 'c').length }; }, camPt);
+  ok('камера на карті — значком камери (білий круг, червоний обідок, фотоапарат), а не червоним кружечком', cm.img && cm.ico === 1 && cm.dot === 0, JSON.stringify(cm));
+  await shot(page, '23-camera-icon');
+  await page.click('#bLayers'); await sleep(300);
+  ok('у «Що показувати на карті» біля «Камери» — той самий значок', await app(page, () => !!document.querySelector('#quick .ly-row .sdot.cam svg')));
+  ok('прохід 21 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 21 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });

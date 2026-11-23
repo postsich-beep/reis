@@ -675,7 +675,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .aim-cross::after{top:50%;left:-16px;right:-16px;height:3px;margin-top:-1.5px}
 @media (orientation:landscape){ .aim-bar{left:auto;width:calc(46% - 16px)} }
 /* знак обмеження в населеному пункті — завжди, коли воно діє (а не лише при перевищенні): більший, як справжній знак */
-#spdLim{top:-12px;right:-14px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}
+#spdLim{top:-24px;right:-30px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}   /* над кругом, правіше — цифр швидкості не закриває навіть «100» */
 #spdLim.pop{animation:limpop .6s ease-out}
 @keyframes limpop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}
 
@@ -703,3 +703,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .rp-warn{margin:6px 0 2px;padding:8px 10px;border-radius:12px;font:500 14px/1.3 var(--f-ui);background:rgba(var(--glass2-rgb),.7);color:var(--ink)}
 .rp-warn.red{border:2px solid var(--red);background:rgba(var(--glass-rgb),.92)}
 .rp-warn.red b{color:var(--red)}
+
+/* 1.1.11: камера в списку шарів — тим самим значком, що й на карті */
+.sdot.cam{width:22px;height:22px;border:0;background:none;box-shadow:none;padding:0}
+.sdot.cam svg{width:22px;height:22px;display:block}
