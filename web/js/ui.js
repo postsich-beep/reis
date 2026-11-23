@@ -1,7 +1,8 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps } from './nav.js';
+import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
+import { chime, initSfx } from './sfx.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
@@ -35,6 +36,7 @@ function staticLabels() {
   $('spdUnit').textContent = t('kmh');
   $('bBack100').innerHTML = ICON.down + '100'; $('bBack100').setAttribute('aria-label', t('back100'));
   $('bFwd100').innerHTML = ICON.up + '100'; $('bFwd100').setAttribute('aria-label', t('fwd100'));
+  $('bTurn').setAttribute('aria-label', t('turnBtnAria'));
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
@@ -159,6 +161,31 @@ function railState() {
 const WHY = { timeout: 'whyTimeout', spoof: 'whySpoof', weak: 'whyWeak', manual: 'whyManual' };
 let lostShown = null;
 export const lostReason = () => t(WHY[pos.reason] || 'whyTimeout') + ' ' + (pos.onRoute ? t('drRoute') : t('drFree'));
+// Кнопка «Поворот» (без GPS): куди повертати, скільки до повороту і що зараз — їдемо до нього, чекаємо на ньому чи вже повертаємо.
+// Натиснути — «я на цьому повороті»: позначка стає одразу за ним (якщо телефон поворот не відчув або позначка відстала).
+const TURN_IC = {
+  r: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 20v-7a4 4 0 0 1 4-4h8"/><path d="M14 5l4 4-4 4"/></svg>',
+  l: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M18 20v-7a4 4 0 0 0-4-4H6"/><path d="M10 5L6 9l4 4"/></svg>',
+  o: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 12a8 8 0 1 1-3-6.2"/><path d="M20 4v5h-5"/></svg>',
+};
+let turnKey = '', waitHintFor = null, waitVoiced = false;
+function turnBtnSync(lost) {
+  const b = $('bTurn'), c = lost ? pos.cp : null;
+  if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
+  const label = c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
+  const key = [c.sgn, c.cls, c.state, label, c.handled].join('|');
+  if (key !== turnKey) {
+    turnKey = key;
+    b.className = 'turn-btn ' + c.cls + ' st-' + c.state + (c.handled ? ' hand' : '');
+    b.innerHTML = TURN_IC[c.sgn > 0 ? 'r' : c.sgn < 0 ? 'l' : 'o'] + `<span>${esc(label)}</span>`;
+  }
+  if (b.hidden) { b.hidden = false; requestAnimationFrame(layoutVars); }
+  // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
+  if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
+    waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
+    if (!waitVoiced) { waitVoiced = true; say(t('voiceTurnWait')); }
+  }
+}
 // найближчий контрольний поворот попереду на рейсі (там без GPS місце звіряється за гіроскопом)
 export function nextCp(min = 150) { if (!g.active || pos.rd == null || !pos.onRoute) return null; const d = pos.rd; return routeCps().find(c => c.d > d + min) || null; }
 export const cpWhat = c => t(c.cls === 'red' ? 'cpRed' : 'cpYellow', t(c.ang > 0 ? 'cpRight' : 'cpLeft'));
@@ -213,6 +240,7 @@ function hud() {
     if (!lost) $('bAcceptGps').hidden = true;
     requestAnimationFrame(layoutVars);
   }
+  turnBtnSync(lost);
   if (lost) {
     const ms = manualSpeed();
     // червоного рядка під часом прибуття більше немає (1.1.6) — подробиці лишились у підписі кружечка GPS і на екрані «GPS»
@@ -1188,6 +1216,21 @@ export function initUI() {
     else if (g.active && pos.onRoute) { say(t('voiceLostRoute'), { urgent: true }); toast(t('lostRouteToast'), 'yellow', 10000, () => openPanel('gps')); }
     else say(t('voiceLost'), { urgent: true });
   });
+  // Контрольний поворот пройдено: тихий «дзинь» завжди; плашка — коли позначку довелось підтягнути чи вона довго чекала
+  let cpToastT = 0;
+  bus.on('cpPass', ev => {
+    if (pos.mode !== 'dr') return;
+    if (ev.by === 'gyro' || ev.by === 'button') chime('pass');
+    if (ev.by !== 'gyro' || (ev.jump < 60 && ev.waited < 10)) return;
+    const now = Date.now(); if (now - cpToastT < 20000) return; cpToastT = now;
+    toast(t(ev.jump >= 60 ? 'turnPassJump' : 'turnPassWait', ev.jump >= 60 ? fmtDist(ev.jump) : fmtMS(ev.waited)) + (ev.next ? ' ' + t('turnMatchNext', fmtDist(ev.next.dist)) : ''), 'green', 6000);
+  });
+  $('bTurn').onclick = () => {
+    const c = passTurn(); if (!c) return;
+    P.vibrate(40);
+    toast(t('turnPassBtn', cpWhat(c)), 'green', 8000, () => { if (undoTurn()) toast(t('turnUndone'), '', 4000); });
+  };
+  initSfx();
   let tmToastT = 0, tmVoiceT = 0;
   bus.on('turnMatch', m => {
     if (!m || pos.mode !== 'dr') return;

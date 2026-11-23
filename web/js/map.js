@@ -388,7 +388,7 @@ function addLayers() {
   map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f) bus.emit('markTap', f.properties.id); });
   // контрольні повороти рейсу (без GPS): червоні — перехрестя й різкі повороти, жовті — довгі дуги трас
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
-    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 13, 6, 17, 10], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'n'], 1], 5, 3.5], 13, ['case', ['==', ['get', 'n'], 1], 9, 6], 17, ['case', ['==', ['get', 'n'], 1], 14, 10]], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 14, 2.5], 'circle-opacity': 0.95 } });
   for (const id of ['stops-major', 'stops-all', 'cams-ico']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
@@ -439,8 +439,9 @@ function drawCps() {
   let key = 'off', feats = [];
   if (g.active && g.idx && pos.rd != null && pos.onRoute && (pos.mode === 'dr' || S.cpsShow)) {
     const d = pos.rd, ahead = routeCps().filter(c => c.d1 > d - 20 && c.d < d + 25000).slice(0, 12);
-    key = ahead.map(c => c.d).join(',');
-    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
+    const nx = pos.cp ? pos.cp.d : (ahead[0] && ahead[0].d);                   // наступний контрольний поворот — більший кружечок
+    key = ahead.map(c => c.d).join(',') + '|' + nx;
+    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0 }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
   }
   if (key === cpKey) return;
   cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });

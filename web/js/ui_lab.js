@@ -148,7 +148,7 @@ function settingsHtml() {
   <div id="offSec">${offlineHtml()}</div>
 
   <div class="sec">${t('secSound')}</div>
-  <div class="list">${tog('voice')}${tog('vibrate')}</div>
+  <div class="list">${tog('voice')}${tog('vibrate')}${tog('cpSound')}</div>
   <div class="sec">${t('secVoice')}</div>
   <div id="voiceSec">${voiceHtml()}</div>
   <div class="muted" style="margin:10px 2px 6px">${t('setRate')}</div>

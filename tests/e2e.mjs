@@ -792,6 +792,7 @@ if (run('2г')) try {
     for (let k = 0; k < 12; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
     const held = await app(page, () => window.__app.nav.pos.rd);
     ok('перед поворотом позначка чекає на гіроскоп (стоїть біля перехрестя ±25 м, не проскакує)', held <= tr0.d + 25 && held > tr0.d - 60, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
+    ok('поки чекає — кнопка «Поворот» жовта з написом «чекаю»', await app(page, () => { const b = document.getElementById('bTurn'); return !b.hidden && /st-wait/.test(b.className) && /чекаю/.test(b.textContent); }), await app(page, () => document.getElementById('bTurn').className + '|' + document.getElementById('bTurn').textContent));
     // поворот: 6 с повертаємо, далі рівно — позначка за поворотом, похибка мала, далі розгін
     for (let k = 1; k <= 14; k++) { await emitN('sens', { var: 0.05, yaw: tr0.ang * Math.min(1, k / 6) }); await sleep(1000); }
     const after = await app(page, () => window.__app.nav.pos.rd);
@@ -2000,6 +2001,53 @@ if (run('21')) try {
   ok('прохід 21 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 21 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 22 (1.1.12): замок на повороті — як на справжній дорозі (Львів: 17 за планом, 42 насправді) ============ */
+if (run('22')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length, idx0 = turnIdx[1] - 6;                                    // стоїмо за 300 м до перехрестя «90° ліворуч» (точки рейсу — кожні 50 м)
+  const trip = { id: 't-gate', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 5600 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 5600, aD: null, viaD: null } };
+  await emitN('loc', { prov: 'gps', lat: coords[idx0][0], lon: coords[idx0][1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await app(page, () => { window.__cp = []; window.__app.bus.on('cpPass', e => window.__cp.push(e)); });
+  for (let k = 0; k < 7; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }           // GPS зник; телефон їде рівно
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
+  for (let k = 0; k < 7; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
+  const b0 = await app(page, () => { const b = document.getElementById('bTurn'), P = window.__app.nav.pos; return { rd: P.rd, kmh: Math.round(P.spd * 3.6), vis: !b.hidden, cls: b.className, txt: b.textContent, cp: P.cp, cps: window.__app.nav.routeCps().slice(0, 2).map(c => c.d) }; });
+  ok('без GPS — кнопка «Поворот»: стрілка ліворуч, червона, скільки до повороту', b0.vis && /red/.test(b0.cls) && /st-go/.test(b0.cls) && /\d+ м/.test(b0.txt) && b0.cp && b0.cp.sgn === -1, JSON.stringify(b0));
+  ok('позначка їде «за планом» повільно й до повороту ще далеко (як на знімку зі Львова)', b0.kmh <= 22 && b0.cps[0] - b0.rd > 150, JSON.stringify({ kmh: b0.kmh, toCp: Math.round(b0.cps[0] - b0.rd) }));
+  await shot(page, '24-turn-button');
+  // фура насправді вже на перехресті: телефон повертає ліворуч на 90° за 5 с
+  for (let k = 1; k <= 5; k++) { await emitN('sens', { var: 0.05, yaw: -18 * k }); await sleep(1000); }
+  for (let k = 0; k < 2; k++) { await emitN('sens', { var: 0.05, yaw: -90 }); await sleep(1000); }
+  const a1 = await app(page, () => ({ rd: window.__app.nav.pos.rd, cp: window.__cp.slice(), sfx: window.__app.sfx.sfxLog.map(x => x.kind), toast: document.getElementById('toasts').textContent, btn: document.getElementById('bTurn').textContent + '|' + document.getElementById('bTurn').className }));
+  const ev = a1.cp[0] || {};
+  ok('телефон відчув поворот — позначку одразу підтягнуто на перехрестя (а не «розійшовся на 384 м»)', a1.rd >= b0.cps[0] - 15 && a1.rd <= b0.cps[0] + 120 && ev.by === 'gyro' && ev.jump >= 100, JSON.stringify({ rd: Math.round(a1.rd), cp: b0.cps[0], ev }));
+  ok('…тихий «дзинь» і плашка «Поворот відпрацьовано… підтягнуто на … Наступна звірка через …»', a1.sfx.includes('pass') && /Поворот відпрацьовано/.test(a1.toast) && /підтягнуто на/.test(a1.toast) && /Наступна звірка через/.test(a1.toast), a1.toast.slice(0, 200) + ' · ' + a1.sfx);
+  ok('кнопка показує вже наступний поворот — праворуч', /st-go/.test(a1.btn) && await app(page, () => window.__app.nav.pos.cp && window.__app.nav.pos.cp.sgn === 1), a1.btn);
+  ok('темп підлаштовано: водій їде швидше за план — позначка теж', await app(page, () => window.__app.nav.debugState().pf.mMed >= 1.25), await app(page, () => String(window.__app.nav.debugState().pf.mMed)));
+  // кнопка «Поворот»: водій каже «я на наступному повороті» — позначка одразу за ним; можна скасувати
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; window.__app.sfx.sfxLog.length = 0; });
+  await page.click('#bTurn'); await sleep(400);
+  const a2 = await app(page, () => ({ rd: window.__app.nav.pos.rd, toast: document.getElementById('toasts').textContent, sfx: window.__app.sfx.sfxLog.map(x => x.kind), by: (window.__cp[window.__cp.length - 1] || {}).by }));
+  ok('кнопка «Поворот» — позначка одразу за наступним поворотом, «дзинь», можна скасувати', a2.rd >= b0.cps[1] && a2.rd <= b0.cps[1] + 60 && a2.by === 'button' && a2.sfx.includes('pass') && /за поворотом/.test(a2.toast) && /скасувати/.test(a2.toast), JSON.stringify({ rd: Math.round(a2.rd), cp2: b0.cps[1], t: a2.toast.slice(0, 120) }));
+  await page.click('#toasts .toast:has-text("скасувати")'); await sleep(400);
+  const a3 = await app(page, () => ({ rd: window.__app.nav.pos.rd, sgn: window.__app.nav.pos.cp && window.__app.nav.pos.cp.sgn }));
+  ok('«Скасувати» — позначка там, де була, наступний поворот знову праворуч', Math.abs(a3.rd - a1.rd) < 120 && a3.sgn === 1, JSON.stringify(a3));
+  // телефон узяли в руки (нахил змінився) — його «поворот» не рахуємо: позначка не стрибає
+  await emitN('sens', { var: 0.05, yaw: -90 }); await sleep(600);
+  await app(page, () => { const T = window.__app.sensors._test, t0 = performance.now();
+    for (let i = 0; i < 70; i++) T.onMotion({ timeStamp: t0 + i * 16, rotationRate: { alpha: 5, beta: 60, gamma: 10 }, accelerationIncludingGravity: { x: 0.3, y: 6, z: 7.5 }, acceleration: { x: 0, y: 0, z: 0 } }); T.flush((t0 + 1200) / 1000); });
+  const hint = await app(page, () => window.__app.sensors.motionHint());
+  for (let k = 1; k <= 3; k++) { await emitN('sens', { var: 0.05, yaw: -90 + 30 * k }); await app(page, () => { const T = window.__app.sensors._test, t0 = performance.now(); for (let i = 0; i < 70; i++) T.onMotion({ timeStamp: t0 + i * 16, rotationRate: { alpha: 5, beta: 60, gamma: 10 }, accelerationIncludingGravity: { x: 0.3, y: 6, z: 7.5 }, acceleration: { x: 0, y: 0, z: 0 } }); T.flush((t0 + 1200) / 1000); }); await sleep(1000); }
+  for (let k = 0; k < 3; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
+  const a4 = await app(page, () => ({ rd: window.__app.nav.pos.rd, n: window.__cp.length, sgn: window.__app.nav.pos.cp && window.__app.nav.pos.cp.sgn }));
+  ok('телефон крутили в руках на 90° (датчик нахилу це бачить) — поворот не зараховано, позначка не стрибнула', hint && hint.handled === true && a4.rd < b0.cps[1] - 200 && a4.sgn === 1, JSON.stringify({ hint, a4, cp2: b0.cps[1] }));
+  ok('прохід 22 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 22 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });

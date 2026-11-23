@@ -117,8 +117,8 @@ export class RouteTracker {
     this.pushHist(t); this.estimate();
     // замок: які повороти вже позаду; курс гіроскопа прив'язуємо до курсу рейсу. Якщо GPS зник на ходу — фура точно їде вздовж рейсу;
     // якщо на стоянці (могла стояти як завгодно) — прив'язку уточнимо, щойно поїде рівно.
-    this.regate(d); this.off = null; this.align = known && v > 2 ? 'ok' : 'weak'; this.eng = null; this.netAhead = 0; this.undo = null;
-    this.anchor = { d, t, sure: !!known && sig <= 60, sig };
+    this.regate(d); this.off = null; this.align = known && v > 2 ? 'ok' : 'weak'; this.eng = null; this.netAhead = 0; this.undo = null; this.conf = new Set();
+    this.anchor = { d, t, sure: sig <= 60, sig };                 // місце відоме (GPS чи водій) — від нього міряємо, наскільки позначка відстає
     this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
   }
   regate(d) { let i = 0; while (i < this.cps.length && this.cps[i].d <= d - 10) i++; this.cpi = i; this.eng = null; this.base = null; this.legStop = 0; }
@@ -146,10 +146,11 @@ export class RouteTracker {
     // приїхати до повороту зарано й почекати — не біда, а відстати й потім стрибати — гірше.
     if ((by === 'gyro' || by === 'button') && a && a.sure && c.d0 - a.d >= 200) {
       const used = this.mMed != null ? this.mMed : 1, from = info.from != null ? info.from : c.d0; let f = 1;
-      if (from < c.d0 - 30) f = clamp((c.d0 - a.d) / Math.max(from - a.d, 40), 1, 2.5);
+      let w = 0.8;
+      if (from < c.d0 - 30) { f = clamp((c.d0 - a.d) / Math.max(from - a.d, 40), 1, 2.5); w = clamp((from - a.d) / 300, 0.25, 0.8); }   // коротка ділянка — обережніше
       else if (info.tArr != null) { const pred = info.tArr - a.t, real = (t - a.t) - (this.legStop || 0); if (pred > 10 && real > pred) f = clamp(pred / real, 0.85, 1); }
       if (f !== 1) {
-        this.mMed = clamp(used * (f > 1 ? 1 + 0.8 * (f - 1) : f), o.gTempoLo, o.gTempoHi);
+        this.mMed = clamp(used * (f > 1 ? 1 + w * (f - 1) : f), o.gTempoLo, o.gTempoHi);
         for (let i = 0; i < o.N; i++) if (this.m[i] >= 0.75 || this.rnd() < 0.7) this.m[i] = clamp(this.mMed + this.gauss() * 0.06, 0.3, o.gTempoHi);
       }
     }
@@ -162,6 +163,7 @@ export class RouteTracker {
     }
     this.legStop = 0;
     this.ev.push({ type: 'pass', by, t, cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn }, jump: Math.round(info.jump || 0), waited: Math.round(info.waited || 0), tempo: this.mMed });
+    if (by === 'gyro' || by === 'button') (this.conf || (this.conf = new Set())).add(this.cps.indexOf(c));
     if (this.cps[this.cpi] === c) this.cpi++; else this.cpi = Math.max(this.cpi, this.cps.indexOf(c) + 1);
     this.anchor = { d: c.d1, t, sure: by === 'gyro' || by === 'button', sig: 20 }; this.eng = null; this.netAhead = 0;
   }
@@ -265,8 +267,8 @@ export class RouteTracker {
     return ok;
   }
   gateStep(t, moving, dt = 1) {
-    const o = this.o, y = this.lastYaw(), e = this.est.d, G = this.g;
-    let lo = -Infinity, hi = Infinity, done = null;
+    const o = this.o, y = this.lastYaw(), G = this.g;
+    let e = this.est.d, lo = -Infinity, hi = Infinity, done = null;
     const alive = !!y && t - y.t < 3.5;
     G.alive = alive; G.handled = alive && t <= this.handledUntil;
     if (moving === false) this.legStop = (this.legStop || 0) + dt;                             // скільки стояли на цій ділянці (світлофор)
@@ -291,6 +293,12 @@ export class RouteTracker {
     const c6 = back(6);
     if (this.base == null || (c6 != null && c6 <= 2.5 && !this.eng)) this.base = y.c;
     const rot = y.c - this.base;
+    // Позначка щойно проскочила поворот без підтвердження (GPS зник перед самим перехрестям, фура ще стояла на світлофорі),
+    // а телефон повертає саме зараз і саме туди — фура ще на ньому: повертаємо позначку на цей поворот.
+    { const pv = this.cps[this.cpi - 1], pi = this.cpi - 1;
+      if (!this.eng && !G.handled && pv && pv.sgn && !(this.conf && this.conf.has(pi)) && e >= pv.d && e - pv.d1 <= 150 && pv.sgn * rot >= gThr(pv)) {
+        this.cpi = pi; this.off = y.c - pv.H0 - rot; this.place(this.headD(pv, pv.sgn * rot - 5), 6, t); e = this.est.d;
+      } }
     let c = this.cps[this.cpi];
     const prev = this.cps[this.cpi - 1], nearCp = (c && e > c.d0 - 60) || (prev && e < prev.d1 + 30);
     const r = (y.c - this.off) - H(e), c5 = back(5);
@@ -566,7 +574,8 @@ export class RouteTracker {
     if (sup >= o.supportMin) return { sup, seeded: 0 };
     const W = clamp(4 * this.est.sig + 2500, 3000, 15000), e = this.est.d;
     const cands = this.cps.filter(c => Math.sign(c.ang || c.amp) === Math.sign(dy) && Math.abs(Math.abs(c.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy)) && Math.abs(c.d - e) < W)
-      .map(c => ({ c, p: Math.exp(-((c.d - e) ** 2) / (2 * (W / 2) ** 2)) })).sort((a, b) => b.p - a.p).slice(0, 6);
+      .map(c => ({ c, p: Math.exp(-((c.d - e) ** 2) / (2 * (o.gate ? clamp(2 * this.est.sig + 150, 250, W / 2) : W / 2) ** 2)) }))
+      .filter(x => !o.gate || x.p > 0.02).sort((a, b) => b.p - a.p).slice(0, 6);     // із замком — лише найближчі схожі повороти: у місті всі перехрестя «на одне лице»
     if (!cands.length) return { sup, seeded: 0 };
     const ps = cands.reduce((a, x) => a + x.p, 0), share = Math.round(N * o.seedShare);
     let k = 0;

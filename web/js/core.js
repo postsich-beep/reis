@@ -33,7 +33,7 @@ window.addEventListener('unhandledrejection', e => log('err', 'promise: ' + (e.r
 const BASE_STOPS = { food: false, fuel: true, park: false, motel: false, cam: true, shower: false };
 const DEFAULTS = {
   lang: 'uk', theme: 'auto', view3d: true, autoCenter: true,
-  voice: true, popups: true, lookahead: true,
+  voice: true, popups: true, lookahead: true, cpSound: true,
   tg: true, air: true, cams: true, stops: true, drive: true,
   aiFilter: false, spoof: true, offline: true, rec: false,
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,

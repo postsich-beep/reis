@@ -707,3 +707,15 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 /* 1.1.11: камера в списку шарів — тим самим значком, що й на карті */
 .sdot.cam{width:22px;height:22px;border:0;background:none;box-shadow:none;padding:0}
 .sdot.cam svg{width:22px;height:22px;display:block}
+
+/* ---------- 1.1.12: кнопка «Поворот» (без GPS) — над ↑100/↓100 ---------- */
+.nudge .turn-btn{height:48px;border-width:3px;gap:3px;font:800 17px/1 var(--f-num);padding:0 4px}
+.nudge .turn-btn svg{width:22px;height:22px;flex:none}
+.nudge .turn-btn span{white-space:nowrap}
+.nudge .turn-btn.red{border-color:#e5484d}.nudge .turn-btn.yellow{border-color:#f6bd16}
+.nudge .turn-btn.st-wait{background:#f6bd16;color:#1b1b1b;border-color:#b98a00;text-shadow:none;animation:turnwait 1.6s ease-in-out infinite}
+.nudge .turn-btn.st-wait svg{filter:none}
+.nudge .turn-btn.st-turn{background:#2f9e62;color:#fff;border-color:#1f7a49;text-shadow:none}
+.nudge .turn-btn.st-turn svg{filter:none}
+.nudge .turn-btn.hand{border-style:dashed}
+@keyframes turnwait{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
