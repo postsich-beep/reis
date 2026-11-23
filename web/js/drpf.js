@@ -70,7 +70,7 @@ function speedProfile(prof, planFn, vmax, aLat) {
 /* ---------- сама хмара ---------- */
 export const PF_DEFAULTS = {
   N: 1400, hist: 64, windows: [3, 8, 20, 40, 60], slow: 0.1, regime: 0.001, cluster: 400, clusterMass: 0.6, alpha: 0.3, sig0: 10, sigK: 0.06, eps: 0.03, rateGain: 0.25, mWalk: 0.003, supportMin: 0.12, slowEnd: 0.003, seedShare: 0.4,
-  aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, mLo: 0.82, mHi: 1.18, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
+  aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, mLo: 0.82, mHi: 1.18, mWide: 1.7, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
 };
 export class RouteTracker {
   constructor(idx, o = {}) {
@@ -87,7 +87,7 @@ export class RouteTracker {
   pickM(base = null) {
     const o = this.o;
     if (base == null && this.rnd() < o.slow) return 0.1 + 0.7 * this.rnd();
-    return base != null ? clamp(base + this.gauss() * 0.06, o.mLo - 0.1, o.mHi + 0.1) : o.mLo + (o.mHi - o.mLo) * this.rnd();
+    return base != null ? clamp(base + this.gauss() * 0.06, Math.min(o.mLo - 0.1, base), Math.max(o.mHi + 0.1, Math.min(base, o.mWide))) : o.mLo + (o.mHi - o.mLo) * this.rnd();
   }
   rnd() { this.seed = (this.seed * 1103515245 + 12345) % 2147483648; return this.seed / 2147483648; }
   gauss() { let u = 0, v = 0; while (u === 0) u = this.rnd(); v = this.rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -181,18 +181,24 @@ export class RouteTracker {
           }
         }
       }
-      if (manualV != null) v = Math.max(0, manualV + this.gauss() * 0.4);
-      else if (moving === false) v = 0;
+      if (manualV != null) {
+        // водій сказав швидкість — їдемо нею, але перехрестя на 80 не проходять: перед поворотом — гальмуємо,
+        // після — розгін (від повільного до вибраної), як фура насправді
+        const cap = sp.at(sp.cap, this.d[i]), tgt = Math.min(manualV + this.gauss() * 0.4, cap);
+        v = v > tgt ? Math.max(tgt, v - o.accDn * 1.5 * dt) : Math.min(tgt, v + Math.max(o.accUp, 0.8) * dt);
+        if (v < tgt && cap >= manualV && v < manualV * 0.5) v = Math.min(tgt, Math.max(v, manualV * 0.5));   // щойно вибрали швидкість — не повземо з нуля
+        v = Math.max(0, v);
+      } else if (moving === false) v = 0;
       else {
         const d = this.d[i], tgt = Math.min(this.m[i] * sp.at(sp.plan, d), sp.at(sp.cap, d), this.vmax);
         let a = clamp((tgt - v) / o.tau * 2, -o.accDn, o.accUp) + this.gauss() * o.accNoise;
         if (v > sp.at(sp.cap, d)) a = Math.min(a, -o.accDn * 0.8);                              // перед поворотом гальмуємо
         v = clamp(v + a * dt, 0, this.vmax * 1.02);
         // інколи темп змінюється: почався затор (повільно) або скінчився (назад до темпу, якого хмара навчилась)
-        const back = () => this.mMed != null ? clamp(this.mMed + this.gauss() * 0.04, o.mLo - 0.1, o.mHi + 0.1) : this.pickM(1);
+        const back = () => this.mMed != null ? clamp(this.mMed + this.gauss() * 0.04, Math.min(o.mLo - 0.1, this.mMed), Math.max(o.mHi + 0.1, Math.min(this.mMed, o.mWide))) : this.pickM(1);
         if (this.m[i] < 0.75 && this.rnd() < o.slowEnd) this.m[i] = back();                     // «затор» скінчився (у середньому за ~5 хв)
         else if (this.rnd() < o.regime) this.m[i] = this.rnd() < 0.5 ? 0.1 + 0.6 * this.rnd() : back();
-        else this.m[i] = clamp(this.m[i] + this.gauss() * o.mWalk, 0.08, o.mHi + 0.1);
+        else this.m[i] = clamp(this.m[i] + this.gauss() * o.mWalk, 0.08, this.m[i] > o.mHi + 0.1 ? o.mWide : o.mHi + 0.1);
       }
       this.v[i] = v;
       this.d[i] = clamp(this.d[i] + v * dt + this.gauss() * 0.3 * Math.sqrt(dt), 0, total);
@@ -243,20 +249,40 @@ export class RouteTracker {
     this.d = d; this.v = v; this.m = m; this.hd = hd; this.w.fill(1 / N);
   }
   // кілька частинок — у широкому вікні навколо оцінки: якщо хмара помилилась цілком, наступний поворот її знайде
-  injectNear(p, around = null, R = null) {
+  // wide — біля вишки: темп у ширших межах (водій їде на 40% швидше за план чи вдвічі повільніше) — виживуть ті,
+  // що зійдуться з наступними вишками
+  injectNear(p, around = null, R = null, wide = false) {
     const N = this.o.N, Hn = this.o.hist, k = Math.round(N * p); if (!k) return;
     const c = around != null ? around : this.est.d, rad = R != null ? R : clamp(3 * this.est.sig + 400, 500, 4000);
     for (let q = 0; q < k; q++) {
       const i = Math.floor(this.rnd() * N), d0 = clamp(c + (this.rnd() * 2 - 1) * rad, 0, this.idx.total), shift = d0 - this.d[i];
-      this.d[i] = d0; this.v[i] = clamp(this.est.v + this.gauss() * 2, 0, this.vmax); this.m[i] = this.mMed != null && this.rnd() > this.o.slow ? this.pickM(this.mMed) : this.pickM();
+      this.d[i] = d0; this.v[i] = clamp(this.est.v + this.gauss() * 2, 0, this.vmax);
+      this.m[i] = wide && this.rnd() < 0.5 ? 0.5 + (this.o.mWide - 0.5) * this.rnd() : this.mMed != null && this.rnd() > this.o.slow ? this.pickM(this.mMed) : this.pickM();
       for (let h = 0; h < Hn; h++) this.hd[i * Hn + h] = clamp(this.hd[i * Hn + h] + shift, 0, this.idx.total);
     }
   }
   // вишки чи Wi-Fi: точка, спроєктована на рейс (± acc); поодинокі «стрибки» вишок не перевертають хмару
-  measure(z, acc) {
+  measure(z, acc, t = null) {
     const N = this.o.N, R = Math.max(acc * 0.7, 250), eps = 0.08;
     for (let i = 0; i < N; i++) { const r = z - this.d[i]; this.w[i] *= (1 - eps) * Math.exp(-r * r / (2 * R * R)) + eps; }
-    this.normalize(); this.resampleIfNeeded(); this.injectNear(0.02, z, R); this.estimate();
+    this.normalize(); this.resampleIfNeeded(); this.injectNear(0.02, z, R, true); this.estimate();
+    if (t != null) this.towerTempo(t, z);
+  }
+  // Темп за вишками: кожна вишка неточна (±1 км), але за 2–10 хв їхній ряд добре показує середню швидкість.
+  // Медіана нахилів між парами вишок (Тейл — Сен): одна вишка, що «стрибнула» на 20 км, на неї не впливає.
+  towerTempo(t, z) {
+    const q = this.tw = (this.tw || []).filter(x => t - x.t < 600 && t >= x.t); q.push({ t, z });
+    if (q.length < 6 || t - q[0].t < 150 || this.est.v < 3) return;
+    const sl = [];
+    for (let a = 0; a < q.length; a++) for (let b = a + 1; b < q.length; b++) { const dt = q[b].t - q[a].t; if (dt >= 60) sl.push((q[b].z - q[a].z) / dt); }
+    if (sl.length < 8) return;
+    sl.sort((x, y) => x - y);
+    const vT = sl[sl.length >> 1], iq = sl[Math.floor(sl.length * 0.75)] - sl[Math.floor(sl.length * 0.25)];
+    const pl = this.sp.at(this.sp.plan, this.est.d); if (!(pl > 3) || vT < 2 || iq > 0.5 * vT) return;   // розкид великий — не віримо
+    const mt = clamp(vT / pl, 0.3, this.o.mWide);
+    this.mMed = this.mMed == null ? mt : this.mMed * 0.6 + mt * 0.4;
+    // частина хмари переходить на цей темп; хто з ним не зійдеться з наступними вишками — відсіється
+    for (let i = 0; i < this.o.N; i++) if (this.rnd() < 0.25 && this.m[i] >= 0.75) this.m[i] = clamp(this.mMed + this.gauss() * 0.05, 0.3, this.o.mWide);
   }
   // водій: ↑100 / ↓100 — уся хмара зсувається, і довіра до точки висока
   shift(dd, sig = 30) {

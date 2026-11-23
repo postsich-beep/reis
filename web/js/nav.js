@@ -155,7 +155,7 @@ function placeOnRoute(d, accBase, reason) {
   const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
   if (pos.mode !== 'dr') { pos.mode = 'approx'; enterDR(reason); carry = 0; }    // оцінка вже врахувала час
   else pos.reason = reason;
-  pos.accRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
+  pos.accRef = pos.manRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
   kfInit(pos.rd, accBase);
   bus.emit('pos', pos);
 }
@@ -221,10 +221,11 @@ export const manualSpeed = () => manualSpd == null ? null : Math.round(manualSpd
 // Вишки й Wi-Fi під час розрахунку по маршруту: у фільтр (місце і швидкість уздовж маршруту)
 function netCorrect() {
   if (pos.mode !== 'dr' || !route || !pos.onRoute || pos.rd == null || !kf.on) return;
-  if (pos.reason === 'manual' && pos.drDist - pos.accRef < 1500) return;      // водій щойно сам поставив точку — перші 1,5 км вишкам не перебивати
+  // водій щойно сам поставив точку — перші 1,5 км вишкам не перебивати (відлік від його точки, а не від останньої вишки)
+  if (pos.reason === 'manual' && pos.drDist - (pos.manRef ?? pos.accRef) < 1500) return;
   const l = route.locate(net, kf.d); if (!l || l.off > Math.max(6000, 3 * net.acc)) return;
   if (drTracker()) {
-    const was = trk.est.d; trk.measure(l.d, net.acc); kf.d = trk.est.d; kf.measT = Date.now();
+    const was = trk.est.d; trk.measure(l.d, net.acc, Date.now() / 1000); kf.d = trk.est.d; kf.measT = Date.now();
     if (Math.abs(trk.est.d - was) > 300) log('info', `розрахунок виправлено за вишками на ${Math.round(trk.est.d - was)} м`);
     pos.rd = trk.est.d; const p = route.at(pos.rd); pos.lat = p.lat; pos.lon = p.lon; pos.hdg = p.brg;
     pos.acc = Math.round(clamp(trk.est.sig, 15, 9999)); pos.accBase = pos.acc; pos.accRef = pos.drDist;
@@ -439,7 +440,7 @@ function approx(f) {
 function enterDR(reason) {
   if (pos.lat == null || pos.mode === 'dr') return;
   pos.mode = 'dr'; pos.reason = reason; pos.lostSince = Date.now(); kf.on = false;
-  pos.drDist = 0; pos.accRef = 0; pos.accBase = clamp(pos.acc || 15, 15, 60);
+  pos.drDist = 0; pos.accRef = 0; pos.manRef = 0; pos.accBase = clamp(pos.acc || 15, 15, 60);
   pos.pending = null; cand = []; badRun = 0;
   // Машина їхала й ті секунди, поки ми помічали втрату: надолужимо їх на першому ж кроці.
   carry = reason === 'manual' ? 0 : clamp((Date.now() - lastFixT) / 1000, 0, 15);
@@ -523,7 +524,7 @@ export function setManual(p) {
   if (route) { const l = route.locate(p, pos.rd); if (l && l.off < 300) { placeOnRoute(l.d, 50, 'manual'); saveGood(); return; } }
   const was = pos.mode;
   pos.lat = p.lat; pos.lon = p.lon; pos.acc = 50; pos.spd = 0;
-  if (was === 'dr') { pos.reason = 'manual'; pos.accRef = pos.drDist; pos.accBase = 50; pos.pending = null; }
+  if (was === 'dr') { pos.reason = 'manual'; pos.accRef = pos.manRef = pos.drDist; pos.accBase = 50; pos.pending = null; }
   else { pos.mode = 'approx'; enterDR('manual'); pos.accBase = 50; }
   matchRoute(pos, 0);
   saveGood();
@@ -548,7 +549,7 @@ export function nudge(d) {
     const p = destPoint(pos, d >= 0 ? pos.hdg : (pos.hdg + 180) % 360, Math.abs(d));
     pos.lat = p.lat; pos.lon = p.lon;
   }
-  pos.accRef = pos.drDist; pos.accBase = 30; pos.acc = 30;
+  pos.accRef = pos.manRef = pos.drDist; pos.accBase = 30; pos.acc = 30;
   bus.emit('pos', pos);
 }
 
@@ -687,7 +688,7 @@ export const routeTurns = () => turns.slice();
 export function benchStart() { bus.on('gps', onGps); bus.on('sens', onSens); lastTick = Date.now(); }
 export const benchTick = () => tick();
 export const debugState = () => ({ yawHist: yawHist.slice(-8), lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
-  pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length } : null });
+  pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
   return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };

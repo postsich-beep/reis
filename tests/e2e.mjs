@@ -787,19 +787,14 @@ if (run('2г')) try {
   if (tr0) {
     await app(page, d => window.__app.nav.snapToRoute(null) || true, 0);
     await app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(d); window.__app.nav.setManual({ lat: p.lat, lon: p.lon }); }, tr0.d - 120);
-    await emitN('sens', { var: 0.05, yaw: 0 });
-    await sleep(9500);
+    // 1.1.8: гіроскоп — як у телефоні, раз на секунду. 12 с курс рівний: позначка доїжджає до перехрестя й чекає на ньому
+    for (let k = 0; k < 12; k++) { await emitN('sens', { var: 0.05, yaw: 0 }); await sleep(1000); }
     const held = await app(page, () => window.__app.nav.pos.rd);
-    ok('перед поворотом позначка чекає на гіроскоп', held < tr0.d && held > tr0.d - 40, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
-    await emitN('sens', { var: 0.05, yaw: 0 });
-    await app(page, () => { window.__realNow = Date.now; const b = Date.now(); Date.now = () => b + 8000; });
-    await emitN('sens', { var: 0.05, yaw: tr0.ang });
-    await app(page, () => { const b = window.__realNow(); Date.now = () => b + 10500; });   // курс устоявся — поворот завершено
-    await emitN('sens', { var: 0.05, yaw: tr0.ang });
-    await app(page, () => { Date.now = window.__realNow; });
-    await sleep(300);
+    ok('перед поворотом позначка чекає на гіроскоп (стоїть біля перехрестя, не проскакує)', held <= tr0.d + 5 && held > tr0.d - 60, `rd ${Math.round(held)}, поворот ${Math.round(tr0.d)}`);
+    // поворот: 6 с повертаємо, далі рівно — позначка за поворотом, похибка мала, далі розгін
+    for (let k = 1; k <= 14; k++) { await emitN('sens', { var: 0.05, yaw: tr0.ang * Math.min(1, k / 6) }); await sleep(1000); }
     const after = await app(page, () => window.__app.nav.pos.rd);
-    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 450 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}`);
+    ok('гіроскоп відчув поворот — позначка за поворотом, похибка скинута', after > tr0.d && after < tr0.d + 450 && await app(page, () => window.__app.nav.pos.acc <= 60), `rd ${Math.round(after)}, поворот ${Math.round(tr0.d)}, ±${await app(page, () => window.__app.nav.pos.acc)} м`);
   }
   // 5) вишки «стрибають» на 3 км за 30 с — швидкість 360 км/год не показуємо
   await app(page, () => { window.__realNow = Date.now; });
@@ -975,7 +970,7 @@ if (run('5')) for (const sc of FAILS.filter(x => !process.env.SCEN || process.en
       prevRd = last.rd; hist.push(last.rd);
     }
     const r = { ...last, err: Math.round(last.rd - last.truth), maxJump: Math.round(maxJump), moved60: Math.round(Math.abs(hist[hist.length - 1] - hist[Math.max(0, hist.length - 7)])), rd: Math.round(last.rd), truth: Math.round(last.truth) };
-    if (process.env.DEBUG) console.log(sc.n, JSON.stringify(hist.map(Math.round)), await app(page, () => JSON.stringify({ turns: window.__app.nav.routeTurns(), log: window.__app.core.getLog().slice(-12).map(l => l.msg || l.text || JSON.stringify(l)), st: window.__app.nav.debugState().gyroSeen, yh: window.__app.nav.debugState().yawHist, mv: window.__app.nav.debugState().moving })));
+    if (process.env.DEBUG) console.log(sc.n, JSON.stringify(hist.map(Math.round)), await app(page, () => JSON.stringify({ turns: window.__app.nav.routeTurns(), log: window.__app.core.getLog().slice(-12).map(l => l.msg || l.text || JSON.stringify(l)), st: window.__app.nav.debugState().gyroSeen, yh: window.__app.nav.debugState().yawHist, mv: window.__app.nav.debugState().moving, pf: window.__app.nav.debugState().pf })));
     ok(T, sc.check(r), JSON.stringify(r));
     ok(T + ' — без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close();
