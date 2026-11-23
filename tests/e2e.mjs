@@ -1454,11 +1454,11 @@ if (run('12')) try {
   const n = coords.length;
   const trip = { id: 't-rep', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
     route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
-  // телефон А стоїть біля поліції на 8-му кілометрі; телефон Б їде тим самим маршрутом позаду, за 700 м
-  const pA = coords[turnIdx[3] + 40], pB = coords[turnIdx[3] + 26];
+  // телефон А стоїть біля поліції на 8-му кілометрі; телефон Б їде тим самим маршрутом позаду, за 1,5 км
+  const pA = coords[turnIdx[3] + 40], pB = coords[turnIdx[3] + 10];
   await em(A.page, 'loc', { prov: 'gps', lat: pA[0], lon: pA[1], acc: 5, spd: 0, brg: 315, t: Date.now() });
   await app(B.page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
-  let tB = Date.now(); await em(B.page, 'loc', { prov: 'gps', lat: pB[0], lon: pB[1], acc: 5, spd: 20, brg: 315, t: tB });
+  await em(B.page, 'loc', { prov: 'gps', lat: pB[0], lon: pB[1], acc: 5, spd: 0, brg: 315, t: Date.now() });
   await sleep(500);
   await A.page.click('#tabRep'); await A.page.waitForSelector('#repSheet [data-rep="police"]');
   const sh = await app(A.page, () => ({ btns: [...document.querySelectorAll('#repSheet [data-rep]')].map(b => b.dataset.rep + ':' + b.textContent.trim()), r: document.getElementById('repSheet').getBoundingClientRect().bottom <= innerHeight }));
@@ -1503,6 +1503,7 @@ if (run('12')) try {
   ok('у повідомленні — тип, місце, напрямок і час; більше нічого', sent.t === 'police' && Math.abs(sent.lat - pA[0]) < 1e-4 && typeof sent.at === 'number' && !('name' in sent), NTFY.msgs[0].message);
   await app(B.page, () => window.__app.reports.poll()); await sleep(400);
   ok('другий телефон бачить поліцію на карті, з тим самим часом під значком', await app(B.page, () => document.querySelectorAll('.rpm-police').length === 1 && /^\d\d\.\d\d \d\d:\d\d$/.test(document.querySelector('.rpm-police .rpm-t').textContent)));
+  if (process.env.DEBUG) console.log('FEED', await app(B.page, ([la, lo]) => { const P = window.__app.nav.pos, g = window.__app.guide.g, l = g.idx && g.idx.locate({ lat: la, lon: lo }, null); return JSON.stringify({ mode: P.mode, rd: P.rd, on: P.onRoute, act: g.active, ld: l && l.d, off: l && l.off, items: window.__app.feed.feed.items.map(i => i.src + ':' + i.text).slice(0, 5) }); }, pA));
   ok('…і в «Подіях»: поліція попереду на маршруті, позначка водія', await app(B.page, () => window.__app.feed.feed.items.some(i => i.src === 'rep' && /Поліція попереду/.test(i.text))), await app(B.page, () => JSON.stringify(window.__app.feed.feed.items.filter(i => i.src === 'rep').map(i => i.text))));
   await shot(B.page, '18b-report-seen');
   await app(B.page, () => document.querySelector('.rpm-police').click()); await sleep(200);   // значок далеко від машини, за краєм екрана
@@ -1510,8 +1511,14 @@ if (run('12')) try {
   // Б проїжджає поліцію — «Поліція ще тут?» над позначкою; «Так» — ще 2 години від цієї хвилини, час під значком новий
   await app(B.page, () => { const r = window.__app.reports.reps.list[0]; r.at -= 40 * 60000; r.born = r.at; window.__app.core.bus.emit('reports', window.__app.reports.reps); });
   const old = await app(B.page, () => window.__app.reports.reps.list[0].at);
-  for (const k of [12, 10, 8, 6, 4, 2]) { const q = coords[turnIdx[3] + 40 - k]; tB += 5000; await em(B.page, 'loc', { prov: 'gps', lat: q[0], lon: q[1], acc: 5, spd: 20, brg: 315, t: tB }); await sleep(300); }
+  const dA = await app(B.page, ([la, lo]) => window.__app.guide.g.idx.locate({ lat: la, lon: lo }, null).d, pA);
+  for (let d = dA - 300; d <= dA - 100; d += 20) {           // справжній проїзд: фікс щосекунди, 20 м/с
+    const q = await app(B.page, d => { const p = window.__app.guide.g.idx.at(d); return { lat: p.lat, lon: p.lon, brg: p.brg }; }, d);
+    await em(B.page, 'loc', { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 20, brg: q.brg, t: Date.now() }); await sleep(1000);
+    if (await app(B.page, () => !!document.querySelector('.rpq'))) break;
+  }
   await B.page.waitForSelector('.rpq', { timeout: 4000 }).catch(() => {});
+  if (process.env.DEBUG) console.log('ASK', await app(B.page, ([la, lo]) => { const P = window.__app.nav.pos, r = window.__app.reports.reps.list[0]; return JSON.stringify({ mode: P.mode, spd: P.spd, lat: P.lat, lon: P.lon, d: r ? window.__app.core.hav(P, r) : null, r, S: window.__app.S.mapReports }); }, pA));
   const ask = await app(B.page, () => { const q = document.querySelector('.rpq'); return q ? q.textContent : ''; });
   ok('проїжджаємо чужу позначку — над нею «Поліція ще тут?» із «✓ Так» / «✕ Немає»', /Поліція ще тут\?/.test(ask) && /Так/.test(ask) && /Немає/.test(ask), ask);
   await shot(B.page, '18c-report-ask');
@@ -1892,13 +1899,14 @@ if (run('19')) try {
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips');
   const pl = () => app(page, () => ({ chips: [...document.querySelectorAll('.pl-chip')].map(b => b.dataset.plc + (b.classList.contains('on') ? '+' : '-')), rows: [...document.querySelectorAll('.pl-row')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), txt: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
   let st = await pl();
-  ok('«Місця»: угорі шість квадратиків — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені; АЗС увімкнено (як на карті)', st.chips.length === 6 && st.chips[0] === 'fuel+' && st.chips[1] === 'food-', JSON.stringify(st.chips));
-  ok('увімкнено АЗС — список найближчих АЗС попереду в рейсі з відстанню', st.rows.length >= 1 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3,0 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
+  ok('«Місця»: угорі шість квадратиків — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені (стан — як галочки карти)', st.chips.length === 6 && st.chips.map(c => c.slice(0, -1)).join() === 'fuel,food,park,motel,shower,@mapVerified', JSON.stringify(st.chips));
+  await page.click('[data-plc="#none"]'); await sleep(200); await page.click('.pl-chip[data-plc="fuel"]'); await sleep(300); st = await pl();
+  ok('«Прибрати все», потім «АЗС» — список лише АЗС попереду в рейсі, з відстанню', st.chips[0] === 'fuel+' && st.chips.slice(1).every(c => c.endsWith('-')) && st.rows.length >= 2 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3,0 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
   await shot(page, '20-places-chips');
   await page.click('.pl-chip[data-plc="food"]'); await sleep(300); st = await pl();
   ok('торкнулись «Їжа» — у списку кафе, і на карті їжу ввімкнено', st.chips[1] === 'food+' && st.rows.some(r => /Кафе Дорога/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.food === true), JSON.stringify(st.rows));
   await page.click('.pl-chip[data-plc="fuel"]'); await sleep(300); st = await pl();
-  ok('зняли «АЗС» — АЗС зникли зі списку й з карти', st.chips[0] === 'fuel-' && !st.rows.some(r => /OKKO|^АЗС/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.fuel === false), JSON.stringify(st.rows));
+  ok('зняли «АЗС» — АЗС зникли зі списку й з карти, кафе лишилось', st.chips[0] === 'fuel-' && !st.rows.some(r => /OKKO|^АЗС/.test(r)) && st.rows.some(r => /Кафе Дорога/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.fuel === false), JSON.stringify(st.rows));
   await page.click('[data-plc="#none"]'); await sleep(300); st = await pl();
   ok('«Прибрати все» — нічого не вибрано, підказка «виберіть угорі, що шукаєте»', st.chips.every(c => c.endsWith('-')) && /Виберіть угорі/.test(st.txt) && await app(page, () => !window.__app.S.mapVerified && window.__app.S.mapStopTypes.food === false), JSON.stringify(st.chips));
   await page.click('[data-plc="#all"]'); await sleep(300); st = await pl();
