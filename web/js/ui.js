@@ -1,5 +1,5 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
-import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
+import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex, sideLayout } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
 import { chime, initSfx } from './sfx.js';
@@ -642,7 +642,7 @@ function ptsRender() {
 function ptsCross() {
   if (!pm) return;
   const c = $('pts').querySelector('.aim-cross'), bar = $('pts').querySelector('.aim-bar'), mc = document.getElementById('map').getBoundingClientRect(), bt = $('bottom');
-  const land = window.innerWidth > window.innerHeight, br = bar.getBoundingClientRect();
+  const land = sideLayout(), br = bar.getBoundingClientRect();
   const top = land ? mc.top : br.bottom, bot = bt && !bt.hidden && !land ? bt.getBoundingClientRect().top : mc.bottom, right = land ? br.left : mc.right;
   pm.x = Math.round((mc.left + right) / 2); pm.y = Math.round((top + bot) / 2);
   c.style.left = pm.x + 'px'; c.style.top = pm.y + 'px';

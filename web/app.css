@@ -325,7 +325,7 @@ body[data-theme="night"]{
 .spd-grid button.on{background:var(--ink);color:var(--panel)}
 .spd-grid button.wide{grid-column:1/-1;font:600 16px var(--f-ui)}
 .spd-grid button[data-v="0"]{font:600 17px var(--f-ui)}
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}
   #bottom{left:auto;width:46%;border-radius:20px 0 0 0}
@@ -364,16 +364,16 @@ body[data-theme="night"]{
   touch-action:none;-webkit-touch-callout:none;user-select:none;-webkit-user-select:none;cursor:default}
 .app-logo .al-ring{position:relative;display:grid;place-items:center;width:92px;height:92px;border-radius:26px}
 .app-logo .al-ring::before{content:"";position:absolute;inset:0;border-radius:26px;padding:4px;opacity:0;
-  background:conic-gradient(var(--amber) calc(var(--p,0)*1turn),transparent 0);
+  background:conic-gradient(var(--amber) calc(var(--alp,0)*1turn),transparent 0);
   -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
 .app-logo .al-ico{width:80px;height:80px;border-radius:21px;background:#13171c url(icons/icon.svg) center/cover no-repeat;box-shadow:var(--shadow);transition:transform .15s}
 .app-logo:active .al-ico{transform:scale(.95)}
 .app-logo b{font:800 22px/1 var(--f-num);letter-spacing:.14em;margin-top:4px}
 .app-logo small{font-size:12px;color:var(--ink-2)}
-@property --p{syntax:"<number>";inherits:true;initial-value:0}
+@property --alp{syntax:"<number>";inherits:true;initial-value:0}
 .app-logo.arming .al-ring::before{opacity:1;animation:alFill 3s linear forwards}
 .app-logo.arming .al-ico{transform:scale(.9)}
-@keyframes alFill{from{--p:0}to{--p:1}}
+@keyframes alFill{from{--alp:0}to{--alp:1}}
 /* ---- 1.1.12: Лабораторія — окремий екран: угорі схема рейсу, внизу телефон у 3D і дані ---- */
 #labApp{position:fixed;inset:0;z-index:40;background:var(--panel);color:var(--ink);display:grid;grid-template-rows:auto minmax(0,42fr) minmax(0,58fr);
   padding-top:var(--st);padding-bottom:var(--sb)}
@@ -487,7 +487,7 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
 .q-ly .ly-row{min-height:52px}
 .q-ly .btn{margin-top:8px}
 #quick .q-tile,#quick .q-zoom button,#quick .q-x{text-shadow:none}
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
   .q-tile{min-height:70px}
 }
@@ -497,7 +497,7 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
 }
 /* адаптивність (1.0.19): «Моє місце» не налазить на ⓘ; рядок втрати GPS — достатньо високий для пальця */
 #zoom{bottom:calc(var(--bh,150px) + 30px)}
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #rail{right:10px;top:calc(var(--st) + 10px)}
   #zoom{bottom:30px}
   #spdPop{bottom:126px;max-height:calc(100% - var(--st) - 136px);overflow:auto}
@@ -508,13 +508,13 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
   #pick{bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 88px)}
   body:has(#pick:not([hidden])) :is(#speed,#cam,#attr,#zoom){visibility:hidden}
 }
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #pick{left:auto;right:10px;width:calc(46% - 20px);bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--bh,150px) - 84px);overflow:auto}   /* нижче кнопки швидких налаштувань */
 }
 /* «Де ви зараз?» (1.1): під карткою маневру */
 #wherePop{position:absolute;left:10px;right:10px;top:calc(var(--st) + var(--th,140px) + 10px);z-index:8;max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 20px);overflow:auto;padding:10px;border-radius:18px;
   background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
-@media (orientation:landscape){#wherePop{right:auto;width:calc(46% - 10px)}}
+@media (orientation:landscape) and (max-height:520px){#wherePop{right:auto;width:calc(46% - 10px)}}
 /* ---- маршрут (1.1): фура / легковик, варіанти карточками ---- */
 .seg.veh{margin:2px 0 10px}
 .seg.veh button{display:flex;align-items:center;justify-content:center;gap:8px;height:44px;font-size:15px}
@@ -582,7 +582,7 @@ body[data-theme="night"] .vp-stars{color:#e2a400}
 .rp-btns .btn svg{width:20px;height:20px}
 .rp-btns .rp-x{flex:0 0 50px;padding:0}
 body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibility:hidden}
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #routePick{left:auto;width:calc(46% - 16px)}
 }
 @media (max-width:350px){ .rp-cards .alt b{font-size:18px} .rp-btns .btn{padding:0 8px;font-size:14px} }
@@ -606,7 +606,7 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 .rp-zoom{position:absolute;right:4px;bottom:calc(100% + 10px);display:flex;flex-direction:column;gap:8px}
 .rp-zoom button{width:48px;height:48px;border-radius:14px;background:var(--panel);color:var(--ink);box-shadow:var(--shadow);font:700 26px/1 var(--f-num);display:grid;place-items:center}
 .rp-zoom button svg{width:24px;height:24px}
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   .rp-zoom{right:calc(100% + 10px);bottom:0}                       /* альбомна: кнопки масштабу ліворуч від шторки */
   .rp-btns{flex-wrap:wrap}
   .rp-btns .btn.pri{flex:1 1 100%}
@@ -651,7 +651,7 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 .ts-sugg{display:flex;flex-direction:column;gap:4px;margin-top:6px;max-height:34vh;overflow:auto}
 .ts-sugg button{text-align:left;padding:8px 10px;border-radius:10px;background:var(--panel-2)}
 .ts-sugg b{display:block;font-size:15px}.ts-sugg small{color:var(--ink-2);font-size:12px}
-@media (orientation:landscape){ .ts-kv b{font-size:18px} .ts-kv>div{padding:5px} }
+@media (orientation:landscape) and (max-height:520px){ .ts-kv b{font-size:18px} .ts-kv>div{padding:5px} }
 /* позначки водіїв (1.1.4): помаранчева кнопка-трикутник, шторка з трьома великими кнопками, значки на карті */
 #repSheet{position:absolute;left:8px;right:8px;bottom:calc(var(--sb) + 8px);z-index:12;padding:12px 14px 14px;border-radius:22px;background:#1f2329;color:#f1f3f5;box-shadow:0 -6px 30px rgba(0,0,0,.45)}
 #repSheet .q-head b{font-size:22px}
@@ -665,7 +665,7 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 .rpm svg{width:30px;height:30px}
 .rpm-crash{border-color:#e5484d}.rpm-police{border-color:#2f6bff}.rpm-transport{border-color:#f59e0b}
 @media (max-width:340px){ .rep-ic{width:72px;height:72px} .rep-ic svg{width:50px;height:50px} .rep-grid button{font-size:14px} }
-@media (orientation:landscape){ #repSheet{left:auto;width:calc(46% - 16px)} .rep-ic{width:64px;height:64px} .rep-ic svg{width:44px;height:44px} }
+@media (orientation:landscape) and (max-height:520px){ #repSheet{left:auto;width:calc(46% - 16px)} .rep-ic{width:64px;height:64px} .rep-ic svg{width:44px;height:44px} }
 .vp-scope{font-weight:700;font-size:14px;color:var(--ink-2);margin:0 2px 10px;letter-spacing:.01em}
 .vp-empty{color:var(--ink-2);line-height:1.4}
 /* спідометр (1.1.4): червоний — перевищення понад 20 км/год (штраф за КУпАП ст. 122); без GPS — червоно-помаранчевий; знак 50 у населеному пункті */
@@ -704,7 +704,7 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 .vfix{margin-bottom:10px;border-left:6px solid var(--yellow)}
 .vfix .btns{margin-top:8px}
 /* в альбомній орієнтації екран низький: «Шари» стоять у ряд ліворуч від швидких налаштувань, а не під ними */
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   #rail{flex-direction:row-reverse}
   #bLayers{margin-top:0;margin-right:9px}
 }
@@ -726,7 +726,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
   .rp-zoom button{width:44px;height:44px}
 }
 /* альбомна: поки відкрито екран маршруту, плашки-повідомлення не заходять під стовпчик кнопок і шторку */
-@media (orientation:landscape){
+@media (orientation:landscape) and (max-height:520px){
   body:has(#routePick:not([hidden])) #toasts{right:auto;width:calc(54% - 70px)}
 }
 /* «Контрольна точка» не обрізається на вузькій шторці — переноситься на два рядки */
@@ -779,7 +779,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .aim-cross::before,.aim-cross::after{content:"";position:absolute;background:#e5484d;box-shadow:0 0 0 1px #fff}
 .aim-cross::before{left:50%;top:-16px;bottom:-16px;width:3px;margin-left:-1.5px}
 .aim-cross::after{top:50%;left:-16px;right:-16px;height:3px;margin-top:-1.5px}
-@media (orientation:landscape){ .aim-bar{left:auto;width:calc(46% - 16px)} }
+@media (orientation:landscape) and (max-height:520px){ .aim-bar{left:auto;width:calc(46% - 16px)} }
 /* знак обмеження в населеному пункті — завжди, коли воно діє (а не лише при перевищенні): більший, як справжній знак */
 #spdLim{top:-24px;right:-30px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}   /* над кругом, правіше — цифр швидкості не закриває навіть «100» */
 #spdLim.pop{animation:limpop .6s ease-out}
@@ -825,3 +825,20 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .nudge .turn-btn.st-turn svg{filter:none}
 .nudge .turn-btn.hand{border-style:dashed}
 @keyframes turnwait{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
+
+/* ---- 1.1.12: ПЛАНШЕТ (і вертикально, і горизонтально) ----
+   Бічна розкладка («усе праворуч, карта ліворуч») — лише для телефона, покладеного набік (висота до 520 px).
+   На планшеті місця досить: карта на весь екран, а все, що відкривається, — по центру й не ширше ~720 px. */
+@media (min-width:700px) and (min-height:521px){
+  #top{left:0;right:0;margin-inline:auto;width:min(760px,calc(100% - 20px))}
+  #bottom{left:0;right:0;margin-inline:auto;width:min(760px,100%)}
+  #panel{left:0;right:0;margin-inline:auto;width:min(720px,calc(100% - 24px))}
+  #panel.full{left:0;right:0;margin-inline:auto;width:min(760px,100%)}
+  #quick,#wherePop,#pick,#toasts{left:0;right:0;margin-inline:auto;width:min(640px,calc(100% - 20px))}
+  #routePick,#repSheet,.aim-bar{left:0;right:0;margin-inline:auto;width:min(720px,calc(100% - 16px))}
+}
+/* широкий планшет: нижня плашка вужча за екран — круг швидкості й кнопки масштабу опускаємо в кути */
+@media (min-width:1010px) and (min-height:521px){
+  #speed{bottom:calc(var(--sb) + 14px)} #cam{bottom:calc(var(--sb) + 26px)} #zoom{bottom:calc(var(--sb) + 14px)} #attr{bottom:calc(var(--sb) + 4px)}
+  #spdPop{bottom:calc(var(--sb) + 130px)}
+}

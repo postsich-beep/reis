@@ -106,6 +106,8 @@ export const db = {
 
 /* ---------- геометрія ---------- */
 const R = 6371008.8, D2R = Math.PI / 180;
+/** Бічна розкладка: телефон набік (карта ліворуч, усе решта праворуч). Планшет і вертикальний телефон — ні. Те саме правило — в app.css. */
+export const sideLayout = (w = window.innerWidth, h = window.innerHeight) => w > h && h <= 520;
 export function hav(a, b) {
   const dLat = (b.lat - a.lat) * D2R, dLon = (b.lon - a.lon) * D2R;
   const s = Math.sin(dLat / 2) ** 2 + Math.cos(a.lat * D2R) * Math.cos(b.lat * D2R) * Math.sin(dLon / 2) ** 2;

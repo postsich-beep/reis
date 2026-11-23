@@ -1,6 +1,6 @@
 // Карта: MapLibre + кеш тайлів у пам'яті телефону (офлайн), маршрут, позначка машини, камери, зупинки.
 import { PT_SVG } from './pticons.js';
-import { bus, log, S, db, isNight, clamp, sleep } from './core.js';
+import { bus, log, S, db, isNight, clamp, sleep, sideLayout } from './core.js';
 import { pos, routeCps } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
@@ -735,6 +735,7 @@ export function showRoute(coords) {
   b.extend([coords[coords.length - 1][1], coords[coords.length - 1][0]]);
   view.follow = false; view.lastTouch = Date.now() + 20000; bus.emit('view', view);
   const h = map.getContainer().clientHeight;
+  noPad();
   map.fitBounds(b, { padding: { top: Math.round(h * 0.22), bottom: Math.round(h * 0.42), left: 40, right: 40 }, bearing: 0, pitch: 0, duration: 700, maxZoom: 15 });
 }
 // Вибір варіанта: обидва маршрути цілком у верхній частині екрана (над шторкою вибору), як у BlindDriver.
@@ -749,9 +750,16 @@ export function fitRoutes(list, padTop, padBottom) {
   }
   view.follow = false; view.lastTouch = Date.now() + 3600e3; bus.emit('view', view);
   const h = map.getContainer().clientHeight, w = map.getContainer().clientWidth;
-  const land = w > h, side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: 70 };   // справа — кнопки масштабу
-  map.fitBounds(b, { padding: { top: Math.round(padTop), bottom: Math.round(land ? 30 : padBottom), ...side }, bearing: 0, pitch: 0, duration: 600, maxZoom: 14 });
+  const land = sideLayout(w, h), side = land ? { left: 30, right: Math.round(w * 0.46) + 80 } : { left: 34, right: 70 };   // справа — кнопки масштабу
+  // вільного місця по висоті має лишитись хоча б 90 px — інакше карта «не вміщає» рейс і не рухається зовсім
+  let pt = Math.round(padTop), pb = Math.round(land ? 30 : padBottom); const free = h - pt - pb;
+  if (free < 90) { const k = Math.max(0, (h - 90)) / Math.max(1, pt + pb); pt = Math.floor(pt * k); pb = Math.floor(pb * k); }
+  noPad();
+  map.fitBounds(b, { padding: { top: pt, bottom: pb, ...side }, bearing: 0, pitch: 0, duration: 600, maxZoom: 14 });
 }
+// Камера «за машиною» тримає відступ згори (машина нижче центру). fitBounds додає свої відступи ДО нього —
+// на невисокому екрані сума перевищувала висоту карти, і рейс не показувався зовсім. Перед оглядом рейсу відступ знімаємо.
+function noPad() { try { map.setPadding({ top: 0, bottom: 0, left: 0, right: 0 }); } catch (_) {} }
 export function freeView() { view.lastTouch = Date.now(); }
 // Маршрут, який ще лише планується (до «Поїхали»): малюємо без запуску ведення.
 export function previewAlts(list) {

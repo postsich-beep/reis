@@ -2250,6 +2250,62 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   await ctx.close();
 } catch (e) { ok(`прохід 24 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
 
+// ---------- Прохід 25: планшет — вертикально й горизонтально: усе, що відкривається, по центру ----------
+const TABS = [{ n: 'tabP', w: 800, h: 1180, title: 'планшет вертикально 800×1180' }, { n: 'tabL', w: 1180, h: 800, title: 'планшет горизонтально 1180×800' }, { n: 'tabS', w: 1024, h: 600, title: 'малий планшет горизонтально 1024×600' }, { n: 'tab7', w: 600, h: 960, title: 'планшет 7″ вертикально 600×960' }];
+if (run('25')) for (const sc of TABS.filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: 1 });
+  const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const wide = sc.w >= 700;                                       // 7″ вертикально — як великий телефон: на всю ширину
+  const R = sel => app(page, sel => { const e = document.querySelector(sel); if (!e || e.hidden) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; }, sel);
+  const centered = (r, maxW) => r && Math.abs((r.l + r.r) / 2 - sc.w / 2) <= 1.5 && r.l >= 0 && r.r <= sc.w && (!wide || r.w <= maxW);
+  const overflow = () => app(page, () => { const out = []; for (const e of document.querySelectorAll('#top,#bottom,#panel,#quick,#pick,#routePick,#repSheet,.aim-bar,#toasts .toast,#panelBody *')) { if (e.closest('[hidden]')) continue; const r = e.getBoundingClientRect(); if (!r.width) continue; if (r.right > innerWidth + 1 || r.left < -1) out.push((e.id || e.className || e.tagName) + ' ' + Math.round(r.left) + '..' + Math.round(r.right)); } return [...new Set(out)].slice(0, 6); });
+  await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(500);
+  const top = await R('#top'), bot = await R('#bottom'), spd = await R('#speed'), zm = await R('#zoom'), mapR = await R('#map');
+  ok(`[${T}] карта на весь екран; верхня й нижня плашки — по центру${wide ? ', не ширші 760 px' : ''} (а не збоку)`, mapR.w === sc.w && mapR.h === sc.h && centered(top, 760) && centered(bot, 760) && bot.b === sc.h, JSON.stringify({ top, bot }));
+  ok(`[${T}] круг швидкості й кнопки масштабу не налазять на нижню плашку`, spd && zm && (spd.b <= bot.t || spd.r <= bot.l) && (zm.b <= bot.t || zm.l >= bot.r) && spd.l >= 0 && zm.r <= sc.w && spd.b <= sc.h && zm.b <= sc.h, JSON.stringify({ spd, zm, bot }));
+  await shot(page, `31-${sc.n}-map`);
+  await page.click('#bQuick'); await sleep(300);
+  const q = await R('#quick');
+  ok(`[${T}] швидкі налаштування — по центру`, centered(q, 640) && q.b <= bot.t + 2, JSON.stringify(q));
+  await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .app-logo'); await sleep(250);
+  const pn = await R('#panel'), ov1 = await overflow();
+  ok(`[${T}] «Налаштування» відкриваються по центру${wide ? ' (не ширші 720 px)' : ''}, між верхньою і нижньою плашками, нічого не вилазить`, centered(pn, 720) && pn.t >= top.b - 2 && pn.b <= sc.h && pn.h >= 300 && ov1.length === 0, JSON.stringify({ pn, ov1 }));
+  await shot(page, `31-${sc.n}-settings`);
+  await page.click('#panelClose');
+  await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#panelBody .field'); await sleep(250);
+  const pt = await R('#panel'), ov2 = await overflow();
+  ok(`[${T}] «Рейс» — так само по центру`, centered(pt, 720) && ov2.length === 0, JSON.stringify({ pt, ov2 }));
+  await shot(page, `31-${sc.n}-trip`);
+  // рейс: будуємо, вікно варіантів і плашка в дорозі — по центру
+  await page.fill('#in_b', 'Полтава'); await page.click('[data-act="build"]');
+  await page.waitForFunction(() => !document.getElementById('routePick').hidden, null, { timeout: 15000 }); await sleep(900);
+  const rp = await R('#routePick');
+  const fit = await app(page, () => { const m = window.__app.map.map, tr = window.__app.route, c = m.getBounds(); return { w: c.getWest(), e: c.getEast(), s: c.getSouth(), n: c.getNorth() }; });
+  ok(`[${T}] вікно варіантів рейсу — по центру внизу; увесь рейс видно на карті`, centered(rp, 720) && rp.b <= sc.h && fit.w < Math.min(...coords.map(c => c[1])) && fit.e > Math.max(...coords.map(c => c[1])) && fit.s < Math.min(...coords.map(c => c[0])) && fit.n > Math.max(...coords.map(c => c[0])), JSON.stringify({ rp, fit }));
+  await shot(page, `31-${sc.n}-routes`);
+  await page.click('#routePick [data-rp="go"]'); await sleep(900);
+  const top2 = await R('#top'), bot2 = await R('#bottom'), man = await R('#man');
+  ok(`[${T}] у дорозі: картка маневру й нижня плашка — по центру`, centered(top2, 760) && centered(bot2, 760) && man && man.w <= 760, JSON.stringify({ top2, bot2, man }));
+  await shot(page, `31-${sc.n}-drive`);
+  // мітки на дорозі й точки на карті — теж по центру
+  await page.click('#tabRep'); await sleep(350);
+  const rs = await R('#repSheet');
+  ok(`[${T}] «Мітки» — по центру`, centered(rs, 720) && rs.b <= sc.h, JSON.stringify(rs));
+  await app(page, () => window.__reisBack()); await sleep(200);
+  await app(page, () => window.__app.bus.emit('mapPick', { lat: 49.99, lon: 36.21 })); await sleep(300);
+  const pk = await R('#pick');
+  ok(`[${T}] картка точки на карті — по центру`, centered(pk, 640), JSON.stringify(pk));
+  await app(page, () => window.__reisBack()); await sleep(200);
+  // Лабораторія на планшеті
+  await app(page, () => window.__app.lab.openLab()); await sleep(600);
+  const la = await R('#labApp'), lt = await R('.lab-top'), lb = await R('.lab-bot');
+  ok(`[${T}] Лабораторія — на весь екран, дві частини (${sc.w > sc.h ? 'поруч' : 'одна над одною'})`, la.w === sc.w && la.h === sc.h && (sc.w > sc.h ? lt.r <= lb.l + 1 : lt.b <= lb.t + 1) && lb.r <= sc.w && lb.b <= sc.h, JSON.stringify({ lt, lb }));
+  await shot(page, `31-${sc.n}-lab`);
+  await app(page, () => window.__app.lab.closeLab());
+  ok(`[${T}] прохід 25 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`прохід 25 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
+
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });
   const okSrc = await page.waitForFunction(() => { const m = window.__app.map.map; return m && m.getSource && m.getSource('protomaps') && m.isSourceLoaded('protomaps'); }, null, { timeout: 20000 }).then(() => true, () => false);
