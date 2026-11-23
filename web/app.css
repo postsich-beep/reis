@@ -675,7 +675,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .aim-cross::after{top:50%;left:-16px;right:-16px;height:3px;margin-top:-1.5px}
 @media (orientation:landscape){ .aim-bar{left:auto;width:calc(46% - 16px)} }
 /* знак обмеження в населеному пункті — завжди, коли воно діє (а не лише при перевищенні): більший, як справжній знак */
-#spdLim{top:-12px;right:-14px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}
+#spdLim{top:-24px;right:-30px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}   /* над кругом, правіше — цифр швидкості не закриває навіть «100» */
 #spdLim.pop{animation:limpop .6s ease-out}
 @keyframes limpop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}
 
