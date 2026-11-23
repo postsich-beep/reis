@@ -87,7 +87,7 @@ export class RouteTracker {
   pickM(base = null) {
     const o = this.o;
     if (base == null && this.rnd() < o.slow) return 0.1 + 0.7 * this.rnd();
-    return base != null ? clamp(base + this.gauss() * 0.06, Math.min(o.mLo - 0.1, base), Math.max(o.mHi + 0.1, Math.min(base, o.mWide))) : o.mLo + (o.mHi - o.mLo) * this.rnd();
+    return base != null ? clamp(base + this.gauss() * 0.06, o.mLo - 0.1, Math.max(o.mHi + 0.1, Math.min(base, o.mWide))) : o.mLo + (o.mHi - o.mLo) * this.rnd();
   }
   rnd() { this.seed = (this.seed * 1103515245 + 12345) % 2147483648; return this.seed / 2147483648; }
   gauss() { let u = 0, v = 0; while (u === 0) u = this.rnd(); v = this.rnd(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
@@ -195,7 +195,7 @@ export class RouteTracker {
         if (v > sp.at(sp.cap, d)) a = Math.min(a, -o.accDn * 0.8);                              // перед поворотом гальмуємо
         v = clamp(v + a * dt, 0, this.vmax * 1.02);
         // інколи темп змінюється: почався затор (повільно) або скінчився (назад до темпу, якого хмара навчилась)
-        const back = () => this.mMed != null ? clamp(this.mMed + this.gauss() * 0.04, Math.min(o.mLo - 0.1, this.mMed), Math.max(o.mHi + 0.1, Math.min(this.mMed, o.mWide))) : this.pickM(1);
+        const back = () => this.mMed != null ? clamp(this.mMed + this.gauss() * 0.04, o.mLo - 0.1, Math.max(o.mHi + 0.1, Math.min(this.mMed, o.mWide))) : this.pickM(1);
         if (this.m[i] < 0.75 && this.rnd() < o.slowEnd) this.m[i] = back();                     // «затор» скінчився (у середньому за ~5 хв)
         else if (this.rnd() < o.regime) this.m[i] = this.rnd() < 0.5 ? 0.1 + 0.6 * this.rnd() : back();
         else this.m[i] = clamp(this.m[i] + this.gauss() * o.mWalk, 0.08, this.m[i] > o.mHi + 0.1 ? o.mWide : o.mHi + 0.1);
