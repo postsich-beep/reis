@@ -11,7 +11,7 @@ import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
 import * as rough from './rough.js';
 import { vp, onMap as vpOnMap } from './vplaces.js';
-import { reps, REP_SVG } from './reports.js';
+import { reps, REP_SVG, shown as repShown, repStamp } from './reports.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -82,18 +82,41 @@ function routeData(coords, route) {
 export const ROUTE_COLORS = { a: '#2f6bff', b: '#0f9f9a', c: '#8b5cf6' };
 let puck = null, puckEl = null, wps = [], hzMarks = [], pickMarker = null, styleTimer = null, doneD = -1, doneT = 0;
 const evMarks = new Map(), vpMarks = new Map(), repMarks = new Map();
-// Позначки водіїв (ДТП, поліція, транспортна служба): значок у кружечку; торкнутися — що й коли
+// Позначки водіїв (ДТП, поліція, транспортна служба): значок у кружечку, під ним — дата й час (після підтвердження — новий,
+// з галочкою). Торкнутися — що й коли. Вимкнені в «Що показувати на карті» — не малюємо.
 export function drawReports() {
   if (!map) return;
-  const keep = new Set();
-  for (const r of reps.list) {
-    keep.add(r.id); if (repMarks.has(r.id)) continue;
-    const el = document.createElement('button'); el.className = 'rpm rpm-' + r.t; el.innerHTML = REP_SVG[r.t] || ''; el.dataset.rep = r.id;
+  const keep = new Set(), on = S.mapReports !== false;
+  if (on) for (const r of repShown()) {
+    keep.add(r.id);
+    const lbl = (r.conf ? '✓ ' : '') + repStamp(r);
+    if (repMarks.has(r.id)) { const m = repMarks.get(r.id), tt = m.getElement().querySelector('.rpm-t'); if (tt && tt.textContent !== lbl) tt.textContent = lbl; continue; }
+    const el = document.createElement('button'); el.className = 'rpm rpm-' + r.t; el.innerHTML = (REP_SVG[r.t] || '') + '<span class="rpm-t"></span>'; el.dataset.rep = r.id;
+    el.querySelector('.rpm-t').textContent = lbl;
     el.addEventListener('click', e => { e.stopPropagation(); bus.emit('repTap', r.id); });
     repMarks.set(r.id, new maplibregl.Marker({ element: el, anchor: 'center' }).setLngLat([r.lon, r.lat]).addTo(map));
   }
   for (const [id, m] of repMarks) if (!keep.has(id)) { m.remove(); repMarks.delete(id); }
+  if (askM && !keep.has(askM._rid)) askHide();
 }
+// «Поліція ще тут?» — маленька бульбашка над самою позначкою, дві великі кнопки. Сама зникає за 20 с.
+let askM = null, askT = 0;
+export function askShow(r, onAnswer) {
+  if (!map) return;
+  askHide();
+  const el = document.createElement('div'); el.className = 'rpq';
+  el.innerHTML = `<b></b><div><button class="rpq-y" data-ra="y"></button><button class="rpq-n" data-ra="n"></button></div>`;
+  el.querySelector('b').textContent = onAnswer.q; el.querySelector('.rpq-y').textContent = onAnswer.yes; el.querySelector('.rpq-n').textContent = onAnswer.no;
+  el.addEventListener('click', e => { e.stopPropagation(); const b = e.target.closest('[data-ra]'); if (!b) return; askHide(); onAnswer.fn(b.dataset.ra === 'y'); });
+  askM = new maplibregl.Marker({ element: el, anchor: 'bottom', offset: [0, -26] }).setLngLat([r.lon, r.lat]).addTo(map); askM._rid = r.id;
+  clearTimeout(askT); askT = setTimeout(askHide, 20000);
+}
+export function askHide() { clearTimeout(askT); if (askM) { askM.remove(); askM = null; } }
+// Приціл для позначки: поки він увімкнений, дотик до карти — це місце позначки (а не вибір точки маршруту)
+let tapHook = null;
+export function setTapHook(fn) { tapHook = fn || null; document.body.classList.toggle('aiming', !!tapHook); }
+export const aiming = () => !!tapHook;
+export function screenToGeo(x, y) { if (!map) return null; const p = map.unproject([x, y]); return { lat: p.lat, lon: p.lng }; }
 // Перевірене місце: маленький бургер із золотою зіркою — відрізняється від кольорових кружечків піт-стопів
 const VP_ICON = { food: '<svg viewBox="0 0 32 32"><path d="M6 14a10 7 0 0 1 20 0z" fill="#f5a524"/><circle cx="12" cy="10" r=".9" fill="#fff6d6"/><circle cx="17" cy="8.6" r=".9" fill="#fff6d6"/><circle cx="20.5" cy="11" r=".9" fill="#fff6d6"/><path d="M5.5 15.6q2.6 1.8 5.2 0t5.3 0 5.3 0 5.2 0" stroke="#3fae49" stroke-width="2.2" fill="none" stroke-linecap="round"/><rect x="6" y="17.4" width="20" height="3.6" rx="1.8" fill="#7a2e12"/><path d="M6.5 22.4h19a1.5 1.5 0 0 1-1.6 3.1H8.1a1.5 1.5 0 0 1-1.6-3.1z" fill="#f5a524"/></svg>' };
 const VP_STAR = '<i class="vpm-star"><svg viewBox="0 0 24 24"><path d="M12 3.2l2.6 5.5 6 .7-4.5 4.1 1.2 5.9L12 16.5l-5.3 2.9 1.2-5.9L3.4 9.4l6-.7z" fill="#fff"/></svg></i>';
@@ -127,6 +150,7 @@ export function initMap() {
     if (!seenErr.has(m) && seenErr.size < 20) { seenErr.add(m); log('warn', 'карта: ' + m); }
   });
   map.on('style.load', addLayers);
+  map.on('click', e => { if (tapHook) tapHook({ lat: e.lngLat.lat, lon: e.lngLat.lng }); });
   map.on('styleimagemissing', e => { if (!e.id.startsWith('fuel:') || map.hasImage(e.id)) return; try { const f = fuelImage(e.id.slice(5)); map.addImage(e.id, f.img, { pixelRatio: f.dpr }); } catch (_) {} });
   // запасна страховка: якщо стиль змінився, а наших шарів немає — повертаємо їх
   map.on('styledata', () => { if (map.isStyleLoaded() && !map.getSource('route')) addLayers(); });
@@ -161,7 +185,7 @@ export function initMap() {
   bus.on('poi', drawPoi);
   bus.on('feed', drawEvents);
   bus.on('vplaces', drawVerified);
-  bus.on('reports', drawReports); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); });
+  bus.on('reports', drawReports); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); if (k === 'mapReports') drawReports(); });
   bus.on('stopsdb', drawStops);
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   map.on('render', () => { if (!labTimer) labTimer = setTimeout(labelDots, LAB_EVERY); });

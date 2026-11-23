@@ -1,0 +1,80 @@
+name: Відновити версію з архіву
+
+# Якщо опубліковану версію зламали чи вона виявилась поганою — повертаємо робочу одним запуском:
+# Actions → «Відновити версію з архіву» → Run workflow → вписати версію (наприклад v1.1.7.49).
+# Файли беремо із закритої копії (чернетка «Архів · Рейс …»), звіряємо контрольні суми й публікуємо
+# як нове оновлення інтерфейсу з більшим номером — телефони підхоплять його як звичайне оновлення.
+# Оболонку (APK) не відкочуємо: лишаємо ту, що вже стоїть на телефонах.
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Яку версію повернути (як у списку релізів, наприклад v1.1.7.49)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  restore:
+    name: Відновлення
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      R: ${{ github.repository }}
+      TAG: ${{ inputs.tag }}
+    steps:
+      - name: Файли версії — із закритої копії, інакше з публічного релізу
+        run: |
+          set -e
+          mkdir -p src out
+          ID=$(gh api "repos/$R/releases?per_page=100" --paginate -q ".[] | select(.draft and .tag_name == \"archive-$TAG\") | .id" | head -1)
+          if [ -n "$ID" ]; then
+            echo "Беру із закритої копії (реліз $ID)"
+            for a in web.zip reis.apk version.json SHA256SUMS; do
+              AID=$(gh api "repos/$R/releases/$ID/assets" -q ".[] | select(.name == \"$a\") | .id")
+              [ -n "$AID" ] && gh api -H "Accept: application/octet-stream" "repos/$R/releases/assets/$AID" > "src/$a"
+            done
+          else
+            echo "::warning::Закритої копії $TAG немає — беру публічний реліз"
+            gh release download "$TAG" -R "$R" -D src -p web.zip -p version.json
+            gh release download "$TAG" -R "$R" -D src -p SHA256SUMS || true
+          fi
+          test -s src/web.zip
+          if [ -f src/SHA256SUMS ]; then (cd src && sha256sum -c SHA256SUMS --ignore-missing); else echo "::warning::контрольних сум немає (версія до 1.1.9)"; fi
+
+      - name: Новий номер і збірка оновлення
+        id: v
+        run: |
+          set -e
+          curl -fsSL -o cur.json "https://github.com/$R/releases/latest/download/version.json"
+          curl -fsSL -o out/reis.apk "https://github.com/$R/releases/latest/download/reis.apk"
+          NEW=$(python3 -c "import json;print(json.load(open('cur.json'))['web'] + 1)")
+          mkdir w && (cd w && unzip -q ../src/web.zip)
+          OLD=$(python3 -c "import json;print(json.load(open('w/version.json')).get('name',''))")
+          python3 - "$NEW" "$OLD" <<'PY'
+          import json, re, sys
+          new, old = int(sys.argv[1]), sys.argv[2]
+          v = json.load(open('w/version.json')); v['web'] = new; v['name'] = old + ' (відновлено)'
+          json.dump(v, open('w/version.json', 'w'), ensure_ascii=False)
+          c = open('w/js/core.js', encoding='utf-8').read()
+          c = re.sub(r"(export const VERSION = \{ web: )\d+", r"\g<1>%d" % new, c, count=1)
+          open('w/js/core.js', 'w', encoding='utf-8').write(c)
+          cur = json.load(open('cur.json')); cur['web'] = new; cur['name'] = old + ' (відновлено)'
+          json.dump(cur, open('out/version.json', 'w'), ensure_ascii=False)
+          PY
+          (cd w && zip -qr ../out/web.zip .)
+          (cd out && sha256sum reis.apk web.zip version.json > SHA256SUMS)
+          cat out/version.json
+          echo "new=$NEW" >> "$GITHUB_OUTPUT"
+          echo "old=$OLD" >> "$GITHUB_OUTPUT"
+
+      - name: Публікую як останнє оновлення
+        run: |
+          gh release create "restore-${TAG}-w${{ steps.v.outputs.new }}" -R "$R" --latest \
+            --title "Рейс ${{ steps.v.outputs.old }} — відновлено з архіву" \
+            --notes "Повернуто робочу версію $TAG (інтерфейс №${{ steps.v.outputs.new }}). Телефони оновляться самі; APK не змінювався." \
+            out/web.zip out/reis.apk out/version.json out/SHA256SUMS
+          echo "### Відновлено $TAG як інтерфейс №${{ steps.v.outputs.new }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Наступна звичайна збірка сама візьме номер, більший за цей." >> "$GITHUB_STEP_SUMMARY"

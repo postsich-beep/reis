@@ -15,13 +15,13 @@ import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
 import * as showers from './showers.js';
 import { offlineActive } from './offline.js';
-import { sdb, TYPES, F, nearbyRows } from './stopsdb.js';
+import { sdb, TYPES, F, nearbyRows, alongRoute, brandOf } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { vp, byId as byIdVp, listed as vpListed, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass } from './ui_base.js';
 import { t } from './i18n.js';
-import { reps, report, REP_TYPES, REP_SVG, repName, repAgo } from './reports.js';
+import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp } from './reports.js';
 import { limitNow, overLimit } from './limits.js';
 
 /* =====================  ГОЛОВНИЙ ЕКРАН  ===================== */
@@ -52,7 +52,7 @@ function staticLabels() {
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
 const LAYERS = [
   ['fuel', 'f', 'lyFuel'], ['food', 'e', 'lyFood'], ['park', 'p', 'lyPark'], ['motel', 'm', 'lyMotel'], ['shower', 'h', 'lyShower'], ['cam', 'c', 'lyCam'],
-  ['@mapVerified', '', 'lyVerified'], ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
+  ['@mapVerified', '', 'lyVerified'], ['@mapReports', '', 'lyReports'], ['@mapEvents', '', 'lyEvents'], ['@mapHazards', '', 'lyHazards'], ['@roughMap', '', 'lyRough']
 ];
 const layerOn = k => k[0] === '@' ? S[k.slice(1)] !== false : S.mapStops !== false && (S.mapStopTypes || {})[k] !== false;
 function setLayer(k, v) {
@@ -66,7 +66,7 @@ function setLayer(k, v) {
   if (k === 'cam' && v && !S.cams) S.cams = true;
 }
 function layersHtml() {
-  const dot = (ty, k) => k === '@mapVerified' ? '<span class="sdot" style="background:#f5a524;border-color:#f5b301"></span>' : k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
+  const dot = (ty, k) => k === '@mapVerified' ? '<span class="sdot" style="background:#f5a524;border-color:#f5b301"></span>' : k === '@mapReports' ? '<span class="sdot" style="background:#2f6bff;border-color:#ffd34d"></span>' : k === '@mapEvents' ? '<span class="sdot" style="background:var(--red)"></span>'
     : k === '@mapHazards' ? '<span class="sdot hz">20</span>' : k === '@roughMap' ? '<span class="sdot" style="background:linear-gradient(90deg,#2f9e62 33%,#f6bd16 33% 66%,#e5484d 66%)"></span>'
     : `<span class="sdot" style="background:${TYPES[ty].color}${ty === 'c' ? ';border-color:#e5484d' : ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
   const anyOn = LAYERS.some(([k]) => layerOn(k));
@@ -78,7 +78,7 @@ function layersHtml() {
 function layersClick(e) {
   const b = e.target.closest('[data-ly]'); if (!b) return false;
   const k = b.dataset.ly;
-  if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; S.mapVerified = v; }
+  if (k === '#off' || k === '#on') { const v = k === '#on'; const m = {}; for (const [kk] of LAYERS) if (kk[0] !== '@') m[kk] = v; if (v) S.mapStops = true; S.mapStopTypes = m; S.mapEvents = v; S.mapHazards = v; S.roughMap = v; S.mapVerified = v; S.mapReports = v; }
   else setLayer(k, !layerOn(k));
   return true;
 }
@@ -175,7 +175,10 @@ function hud() {
   // червоний — коли перевищено більш ніж на 20 км/год (з цього починається штраф); без GPS — червоно-помаранчевий
   const lim = limitNow(), over = sv.kind !== 'none' && overLimit(kmh, lim);
   sp.classList.toggle('over', over);
-  const ls = $('spdLim'); ls.hidden = !lim || lim.src === 'cam'; if (lim) ls.textContent = lim.max;
+  // знак обмеження в населеному пункті — видно весь час, поки воно діє, навіть без перевищення; з'являється з «підскоком»
+  const ls = $('spdLim'), lsHide = !lim || lim.src === 'cam';
+  if (ls.hidden && !lsHide) { ls.classList.remove('pop'); void ls.offsetWidth; ls.classList.add('pop'); }
+  ls.hidden = lsHide; if (lim) { ls.textContent = lim.max; ls.title = lim.name || ''; }
   $('cam').hidden = !cam;
   if (cam) { $('camMax').innerHTML = cam.max ? cam.max : ICON.cam; $('camDist').textContent = fmtDist(Math.max(0, cam.ahead)); }
 
@@ -505,20 +508,65 @@ function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHi
 function repOpen(open) {
   const box = $('repSheet');
   if (open) {
+    aimEnd();
     box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>
       <div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}</div>
       <div class="muted rep-hint">${t('repHint')}</div>`;
     box.hidden = false;
   } else box.hidden = true;
 }
-async function repClick(e) {
+function repClick(e) {
   const b = e.target.closest('[data-rep]'); if (!b) return;
   const k = b.dataset.rep;
   if (k === 'x') { repOpen(false); return; }
   if (pos.lat == null) { toast(t('repNoPos'), 'yellow', 5000); return; }
-  repOpen(false);
-  const r = await report(k);
-  if (r) { toast(t('repDone', t('rep_' + k)), REP_TYPES[k].level === 'red' ? 'red' : 'green', 6000); P.vibrate(60); }
+  repOpen(false); aimStart(k);
+}
+// Приціл: позначку ставимо там, де водій бачив (уже проїхали — не чекаємо), а не лише під машиною.
+// Дотик до карти — позначка в це місце; або «Сюди» — у перехрестя прицілу; або «Де я зараз».
+let aim = null;
+function aimStart(k) {
+  aim = { k, timer: setTimeout(aimEnd, 60000) };
+  const box = $('aim');
+  box.innerHTML = `<div class="aim-cross" aria-hidden="true"></div><div class="aim-bar"><div class="aim-t"><span class="aim-ic">${REP_SVG[k]}</span><span></span></div>
+    <div class="row"><button class="btn pri" data-aim="cross">${ICON.center}${t('aimCross')}</button><button class="btn" data-aim="here">${t('aimHere')}</button><button class="btn" data-aim="x" aria-label="${t('close')}">${ICON.x}</button></div></div>`;
+  box.querySelector('.aim-t span:last-child').textContent = t('aimHint', t('rep_' + k));
+  box.hidden = false; aimPlaceCross();
+  mapM.setTapHook(p => aimPlace(p));
+}
+function aimPlaceCross() {
+  const c = $('aim').querySelector('.aim-cross'), mc = document.getElementById('map').getBoundingClientRect();
+  const tp = $('top'), bt = $('bottom'), bar = $('aim').querySelector('.aim-bar');
+  const top = Math.max(bar.getBoundingClientRect().bottom, tp && !tp.hidden ? 0 : 0), bot = bt && !bt.hidden ? bt.getBoundingClientRect().top : mc.bottom;
+  aim.x = Math.round(mc.left + mc.width / 2); aim.y = Math.round((top + bot) / 2);
+  c.style.left = aim.x + 'px'; c.style.top = aim.y + 'px';
+}
+function aimEnd() { if (!aim) return; clearTimeout(aim.timer); aim = null; $('aim').hidden = true; mapM.setTapHook(null); }
+function aimPlace(p) {
+  if (!aim) return;
+  const k = aim.k, res = report(k, p);
+  if (res.err === 'far') { toast(t('aimFar'), 'yellow', 6000); return; }
+  if (res.err === 'pos') { toast(t('repNoPos'), 'yellow', 5000); return; }
+  aimEnd();
+  if (res.err) { toast(t(res.err === 'often' ? 'repOften' : 'repMany'), 'yellow', 6000); return; }
+  const id = res.r.id;
+  toast(t('repDoneUndo', t('rep_' + k)), REP_TYPES[k].level === 'red' ? 'red' : 'green', 8000, () => { if (repUndo(id)) toast(t('repUndone'), '', 4000); });
+  P.vibrate(60);
+}
+function aimClick(e) {
+  const b = e.target.closest('[data-aim]'); if (!b || !aim) return;
+  const k = b.dataset.aim;
+  if (k === 'x') { aimEnd(); return; }
+  if (k === 'here') { aimPlace(null); return; }
+  const mc = document.getElementById('map').getBoundingClientRect();
+  aimPlace(mapM.screenToGeo(aim.x - mc.left, aim.y - mc.top));
+}
+// Проїжджаємо чужу позначку — «Поліція ще тут?» над самою позначкою
+let askRep = null;
+function onRepAsk(r) {
+  askRep = r; P.vibrate(40);
+  mapM.askShow(r, { q: t('repAskQ', repName(r)), yes: t('repAskYes'), no: t('repAskNo'),
+    fn: yes => { askRep = null; if (repVote(r.id, yes)) toast(t(yes ? 'repAskThxYes' : 'repAskThxNo'), 'green', 5000); } });
 }
 
 /* ---------- «Маршрут» у дорозі: увесь залишок маршруту на карті; контрольна точка, залишитись, завершити ---------- */
@@ -749,18 +797,72 @@ function vpWhereText(p) {
   return t('vpAway', fmtDist(w.dist));
 }
 function vpMonth(s) { const [y, m] = String(s || '').split('-').map(Number); if (!y || !m) return ''; try { return new Date(y, m - 1, 1).toLocaleDateString(S.lang === 'ru' ? 'ru-RU' : 'uk-UA', { month: 'long', year: 'numeric' }); } catch (_) { return s; } }
-function placesHtml() {
+/* Місця: квадратики «що шукаю» — АЗС, їжа, стоянки, мотелі, душ, перевірені. Ті самі галочки, що й «Що показувати на карті»:
+   поставив — бачиш на карті й списком найближчих попереду по рейсу (або поруч, якщо рейсу немає); зняв — зникло. */
+const PL = [['fuel', 'f', 'plFuel'], ['food', 'e', 'plFood'], ['park', 'p', 'plPark'], ['motel', 'm', 'plMotel'], ['shower', 'h', 'plShower'], ['@mapVerified', '', 'plVerified']];
+const PL_ROW = { fuel: r => r[2] === 'f', food: r => r[2] === 'e', park: r => r[2] === 'p' || r[2] === 's', motel: r => r[2] === 'm', shower: r => r[2] === 'h' || !!(r[3] & F.SHOWER) };
+let plCache = { idx: null, n: 0, list: [] };
+function plNearest(keys) {
+  if (!keys.length || !sdb.ready) return [];
+  const want = r => keys.some(k => PL_ROW[k](r));
+  if (g.active && g.idx && pos.rd != null && pos.onRoute) {
+    if (plCache.idx !== g.idx || plCache.n !== sdb.count) plCache = { idx: g.idx, n: sdb.count, list: alongRoute(g.idx, ['f', 'e', 'p', 's', 'm', 'h'], 1500) };
+    return plCache.list.filter(x => x.d > pos.rd - 150 && want(x.r)).slice(0, 15).map(x => ({ i: x.i, r: x.r, ahead: x.d - pos.rd, off: x.off }));
+  }
+  if (pos.lat == null) return [];
+  const out = [], R = 50000;
+  for (let i = 0; i < sdb.rows.length; i++) {
+    const r = sdb.rows[i]; if (r[2] === 'c' || Math.abs(r[0] - pos.lat) * 111320 > R || !want(r)) continue;
+    const d = hav(pos, { lat: r[0], lon: r[1] }); if (d < R) out.push({ i, r, dist: d });
+  }
+  return out.sort((a, b) => a.dist - b.dist).slice(0, 15);
+}
+function plChipsHtml() {
+  const dot = (k, ty) => k === '@mapVerified' ? `<span class="pl-ic vp">★</span>` : `<span class="pl-ic" style="background:${TYPES[ty].color}${ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
+  const any = PL.some(([k]) => layerOn(k));
+  return `<div class="pl-chips">${PL.map(([k, ty, lbl]) => { const on = layerOn(k); return `<button class="pl-chip${on ? ' on' : ''}" data-plc="${k}" role="checkbox" aria-checked="${on}">${dot(k, ty)}<span>${t(lbl)}</span>${on ? `<i class="pl-ck">${ICON.check}</i>` : ''}</button>`; }).join('')}</div>
+    <div class="pl-all"><button class="btn sm" data-plc="#all">${t('plAll')}</button><button class="btn sm" data-plc="#none"${any ? '' : ' disabled'}>${t('plNone')}</button></div>`;
+}
+function plRowHtml(x) {
+  const [, , ty, f, name, , info] = x.r, fa = (info && info.fa) || [];
+  const kind = stopKindLabel(ty, info), title = ty === 'f' ? brandOf(name) : (name || kind);
+  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && ty !== 'e' && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
+  const where = x.ahead != null ? (x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead))) : fmtDist(x.dist);
+  const side = x.ahead != null && x.off > 300 ? `<small>${esc(t('plOff', fmtDist(x.off)))}</small>` : '';
+  return `<button class="pl-row" data-sti="${x.i}"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER ? ';border-color:#06b6d4' : ''}"></span>
+    <span class="grow"><b>${esc(title)}</b><small>${esc([title !== kind ? kind : '', ...feats].filter(Boolean).join(' · '))}</small></span><span class="pl-d"><b>${esc(where)}</b>${side}</span></button>`;
+}
+function vpListHtml() {
   if (!vp.ready) return `<div class="muted">${t('loading')}</div>`;
   const trip = g.active && g.idx && pos.rd != null, items = vpListed(), list = items.map(x => x.p), W = new Map(items.map(x => [x.p.id, x.w]));
   const where = p => { const w = W.get(p.id); if (!w) return vpWhereText(p);
     if (w.route) return w.ahead < 1000 ? t(w.off > 1500 ? 'vpHereOff' : 'vpHere', fmtDist(w.off)) : t(w.off > 1500 ? 'vpAheadOff' : 'vpOnRoute', fmtDist(w.ahead), fmtDist(w.off));
     return t('vpAway', fmtDist(w.dist)); };
-  const head = `<div class="vp-scope">${t(trip ? 'vpScopeRoute' : pos.lat != null ? 'vpScopeNear' : 'vpScopeAll')}</div>`;
-  if (!list.length) return head + `<div class="card vp-empty">${t(trip ? 'vpNoneRoute' : 'vpNoneNear')}</div><div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
+  const head = `<div class="vp-scope">${t('plVerified')} · ${t(trip ? 'vpScopeRoute' : pos.lat != null ? 'vpScopeNear' : 'vpScopeAll')}</div>`;
+  if (!list.length) return head + `<div class="card vp-empty">${t(trip ? 'vpNoneRoute' : 'vpNoneNear')}</div>`;
   return head + `<div class="list">` + list.map(p => `<button class="vp-row" data-vpid="${esc(p.id)}">
       <img src="data/${esc((p.thumbs || p.photos || [])[0] || '')}" alt="" loading="lazy"><span class="grow"><b>${esc(p.name)}</b><span class="vp-stars">${stars(p.rating)}</span>
-      <small>${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}</small><small class="vp-w">${esc(where(p))}</small></span></button>`).join('') +
-    `</div><div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
+      <small>${esc([t('vpKind_' + (p.kind || 'food')), p.road, vpTxt(p.town)].filter(Boolean).join(' · '))}</small><small class="vp-w">${esc(where(p))}</small></span></button>`).join('') + `</div>`;
+}
+function placesHtml() {
+  const keys = PL.filter(([k]) => k[0] !== '@' && layerOn(k)).map(([k]) => k), trip = g.active && g.idx && pos.rd != null && pos.onRoute;
+  let h = plChipsHtml();
+  if (keys.length) {
+    const list = plNearest(keys);
+    h += `<div class="vp-scope">${t(trip ? 'plScopeRoute' : 'plScopeNear')}</div>`;
+    h += !sdb.ready ? `<div class="muted">${t('loading')}</div>` : list.length ? `<div class="list pl-list">${list.map(plRowHtml).join('')}</div>` : `<div class="card vp-empty">${t(trip ? 'plNoneRoute' : 'plNoneNear')}</div>`;
+  }
+  if (layerOn('@mapVerified')) h += vpListHtml();
+  if (!keys.length && !layerOn('@mapVerified')) h += `<div class="card vp-empty">${t('plPick')}</div>`;
+  return h + `<div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div>`;
+}
+function plClick(k) {
+  if (k === '#all' || k === '#none') {
+    const v = k === '#all', m = { ...(S.mapStopTypes || {}) };
+    for (const [kk] of PL) if (kk[0] !== '@') m[kk] = v;
+    if (v) S.mapStops = true;
+    S.mapStopTypes = m; S.mapVerified = v;
+  } else setLayer(k, !layerOn(k));
 }
 function placeHtml(p) {
   const ph = p.photos || [];
@@ -780,8 +882,15 @@ definePanel('places', {
   title: () => t('tabPlaces'),
   render(body) {
     body.innerHTML = placesHtml();
-    body.onclick = e => { const b = e.target.closest('[data-vpid]'); if (!b) return; vpCur = byIdVp(b.dataset.vpid); if (vpCur) openPanel('place'); };
-  }
+    body.onclick = e => {
+      const c = e.target.closest('[data-plc]');
+      if (c) { plClick(c.dataset.plc); const st = body.scrollTop; body.innerHTML = placesHtml(); body.scrollTop = st; return; }
+      const r = e.target.closest('[data-sti]');
+      if (r) { const i = +r.dataset.sti, row = sdb.rows[i]; if (!row) return; closePanel(); flyTo({ lat: row[0], lon: row[1] }, 15); onStopTap({ i, lat: row[0], lon: row[1] }); return; }
+      const b = e.target.closest('[data-vpid]'); if (!b) return; vpCur = byIdVp(b.dataset.vpid); if (vpCur) openPanel('place');
+    };
+  },
+  update(body) { body.innerHTML = placesHtml(); }
 });
 definePanel('place', {
   title: () => vpCur ? vpCur.name : '', back: 'places', tab: 'places',
@@ -1033,13 +1142,14 @@ export function initUI() {
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
   bus.on('chat', () => refresh('chat'));
   bus.on('vplaces', () => { refresh('places'); refresh('place'); });
+  let plT = 0; bus.on('stopsdb', () => refresh('places')); bus.on('pos', () => { const n = Date.now(); if (n - plT > 10000) { plT = n; refresh('places'); } });
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
   bus.on('trips', () => refresh('trip'));
   bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
-  bus.on('mapPick', onMapPick);
+  bus.on('mapPick', p => { if (!aim) onMapPick(p); });
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
   bus.on('panel', name => { if (name) { if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
@@ -1048,7 +1158,7 @@ export function initUI() {
   bus.on('guide', () => { if (tsOpen()) { const kv = document.querySelector('#routePick .ts-kv'); if (kv) kv.outerHTML = tsKvHtml(); } });
   $('routePick').addEventListener('input', tsInput);
   bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
-  bus.on('stopTap', onStopTap);
+  bus.on('stopTap', x => { if (!aim) onStopTap(x); });
   bus.on('markTap', onMarkTap);
   bus.on('marks', () => refresh('trip'));
   bus.on('evTap', id => {
@@ -1101,6 +1211,7 @@ export function initUI() {
   window.__reisBack = () => {
     if (!$('quick').hidden) { quickOpen(false); return true; }
     if (!$('repSheet').hidden) { repOpen(false); return true; }
+    if (aim) { aimEnd(); return true; }
     if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
@@ -1127,7 +1238,11 @@ export function initUI() {
   $('repSheet').onclick = repClick;
   // екран маршруту відкрили чи закрили (будь-яким шляхом) — карта чиста або знову з позначками
   new MutationObserver(rpSync).observe($('routePick'), { attributes: true, attributeFilter: ['hidden'] });
-  bus.on('repTap', id => { const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repAgo(r)), REP_TYPES[r.t].level, 6000); });
+  bus.on('repTap', id => { if (aim) return; const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repStamp(r) + ' (' + repAgo(r) + ')') + (r.conf ? t('repConf', r.conf) : ''), REP_TYPES[r.t].level, 6000); });
+  bus.on('repAsk', onRepAsk);
+  bus.on('pos', () => { if (askRep && pos.lat != null && hav(pos, askRep) > 800) { askRep = null; mapM.askHide(); } });
+  $('aim').onclick = aimClick;
+  window.addEventListener('resize', () => { if (aim) aimPlaceCross(); });
   // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
   for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
     const b = $(id); let timer = null, t0 = 0, held = false;

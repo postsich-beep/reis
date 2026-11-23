@@ -1454,33 +1454,88 @@ if (run('12')) try {
   const n = coords.length;
   const trip = { id: 't-rep', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
     route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
-  // телефон А стоїть біля поліції на 8-му кілометрі; телефон Б їде тим самим маршрутом позаду, на 2-му
-  const pA = coords[turnIdx[3] + 40], pB = coords[turnIdx[2] + 10];
+  // телефон А стоїть біля поліції на 8-му кілометрі; телефон Б їде тим самим маршрутом позаду, за 700 м
+  const pA = coords[turnIdx[3] + 40], pB = coords[turnIdx[3] + 26];
   await em(A.page, 'loc', { prov: 'gps', lat: pA[0], lon: pA[1], acc: 5, spd: 0, brg: 315, t: Date.now() });
   await app(B.page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
-  await em(B.page, 'loc', { prov: 'gps', lat: pB[0], lon: pB[1], acc: 5, spd: 20, brg: 270, t: Date.now() });
+  let tB = Date.now(); await em(B.page, 'loc', { prov: 'gps', lat: pB[0], lon: pB[1], acc: 5, spd: 20, brg: 315, t: tB });
   await sleep(500);
   await A.page.click('#tabRep'); await A.page.waitForSelector('#repSheet [data-rep="police"]');
   const sh = await app(A.page, () => ({ btns: [...document.querySelectorAll('#repSheet [data-rep]')].map(b => b.dataset.rep + ':' + b.textContent.trim()), r: document.getElementById('repSheet').getBoundingClientRect().bottom <= innerHeight }));
   ok('позначки: трикутник відкриває ДТП · Поліція · Транспортна служба', sh.r && sh.btns.join('|') === 'x:|crash:ДТП|police:Поліція|transport:Транспортна служба', sh.btns.join('|'));
   await shot(A.page, '18-report');
-  await A.page.click('#repSheet [data-rep="police"]'); await sleep(600);
-  ok('позначка «Поліція» з’явилась на карті там, де машина, і пішла іншим водіям', await app(A.page, () => document.querySelectorAll('.rpm-police').length === 1 && document.getElementById('repSheet').hidden) && NTFY.posts === 1, 'POST ' + NTFY.posts);
+  // 1.1.9: шторка прозора, як інші; після вибору — приціл: дотик до карти ставить позначку туди, де бачили
+  const bgA = await app(A.page, () => { const m = getComputedStyle(document.getElementById('repSheet')).backgroundColor.match(/rgba?\(([^)]+)\)/); const a = m ? m[1].split(',').map(Number) : []; return a.length === 4 ? a[3] : 1; });
+  ok('шторка «Що на дорозі?» прозора, як інші (карту під нею видно)', bgA < 0.9, 'alpha ' + bgA);
+  await A.page.click('#repSheet [data-rep="police"]'); await sleep(300);
+  const aimA = await app(A.page, () => { const a = document.getElementById('aim'), c = a.querySelector('.aim-cross'), r = c && c.getBoundingClientRect(); return { on: !a.hidden && document.body.classList.contains('aiming'), sheet: document.getElementById('repSheet').hidden, cx: r ? r.left + r.width / 2 : 0, cy: r ? r.top + r.height / 2 : 0, t: a.textContent }; });
+  ok('після «Поліція» — приціл і підказка «торкніться карти там, де бачили»; позначки ще немає', aimA.on && aimA.sheet && /торкніться карти/.test(aimA.t) && await app(A.page, () => window.__app.reports.reps.list.length === 0), JSON.stringify(aimA));
+  await shot(A.page, '18-report-aim');
+  // далеко від машини — не можна (захист від засмічення)
+  await app(A.page, () => { window.__app.map.setFollow(false); window.__app.map.map.jumpTo({ zoom: 10.5 }); }); await sleep(400);
+  const vw = await app(A.page, () => ({ w: innerWidth, h: innerHeight }));
+  await A.page.mouse.click(14, aimA.cy - 60); await sleep(300);
+  ok('дотик за 3 км від машини — «Задалеко», позначки немає, приціл лишається', /Задалеко/.test(await A.page.textContent('#toasts')) && await app(A.page, () => window.__app.reports.reps.list.length === 0 && !document.getElementById('aim').hidden));
+  await app(A.page, ([la, lo]) => window.__app.map.map.jumpTo({ center: [lo, la], zoom: 15 }), pA); await sleep(400);
+  const tgt = await app(A.page, ([la, lo]) => { const m = window.__app.map.map, r = m.getContainer().getBoundingClientRect(), q = m.project([lo, la]); return { x: r.left + q.x + 60, y: r.top + q.y - 40 }; }, pA);
+  await A.page.mouse.click(tgt.x, tgt.y); await sleep(400);
+  const put = await app(A.page, () => { const r = window.__app.reports.reps.list[0]; const el = document.querySelector('.rpm-police .rpm-t'); return { n: window.__app.reports.reps.list.length, lat: r && r.lat, lon: r && r.lon, lbl: el ? el.textContent : '', aim: !document.getElementById('aim').hidden, toast: document.getElementById('toasts').textContent }; });
+  const dPut = Math.hypot((put.lat - pA[0]) * 111320, (put.lon - pA[1]) * 71500);
+  ok('дотик біля машини — позначка саме там, куди торкнулись (а не під машиною)', put.n === 1 && dPut > 30 && dPut < 200 && !put.aim, JSON.stringify({ ...put, dPut: Math.round(dPut) }));
+  ok('під значком — дата й час позначки («23.11 13:05»)', /^\d\d\.\d\d \d\d:\d\d$/.test(put.lbl), put.lbl);
+  ok('плашка «Позначено… торкніться, щоб скасувати»; іншим ще не пішло (8 с на скасування)', /щоб скасувати/.test(put.toast) && NTFY.posts === 0, 'POST ' + NTFY.posts);
+  // скасування: торкнулись плашки — позначки немає, нікуди не пішла
+  await A.page.click('#toasts .toast:has-text("щоб скасувати")'); await sleep(300);
+  ok('«Скасувати» — позначка зникла й нікуди не пішла', await app(A.page, () => window.__app.reports.reps.list.length === 0 && !document.querySelector('.rpm-police')) && NTFY.posts === 0);
+  // ще раз — «Де я зараз» (поліція тут же); через 8 с позначка йде іншим
+  await app(A.page, () => window.__app.map.setFollow(true));
+  await A.page.click('#tabRep'); await A.page.click('#repSheet [data-rep="police"]'); await sleep(200);
+  await A.page.click('#aim [data-aim="here"]'); await sleep(300);
+  // одразу ще одна — ліміт: не частіше ніж раз на 15 с
+  await app(A.page, () => { document.getElementById('toasts').innerHTML = ''; });
+  await A.page.click('#tabRep'); await A.page.click('#repSheet [data-rep="transport"]'); await sleep(200);
+  await A.page.click('#aim [data-aim="here"]'); await sleep(300);
+  const often = await A.page.textContent('#toasts');
+  ok('ліміт: друга позначка за 15 с — «Зачекайте трохи», зайвої позначки немає', /Зачекайте трохи/.test(often) && await app(A.page, () => window.__app.reports.reps.list.length === 1), often.slice(0, 160));
+  await sleep(8800);
+  ok('позначка «Поліція» з’явилась там, де машина, і через 8 с пішла іншим водіям', await app(A.page, () => document.querySelectorAll('.rpm-police').length === 1 && document.getElementById('repSheet').hidden) && NTFY.posts === 1, 'POST ' + NTFY.posts);
   const sent = JSON.parse(NTFY.msgs[0].message);
   ok('у повідомленні — тип, місце, напрямок і час; більше нічого', sent.t === 'police' && Math.abs(sent.lat - pA[0]) < 1e-4 && typeof sent.at === 'number' && !('name' in sent), NTFY.msgs[0].message);
   await app(B.page, () => window.__app.reports.poll()); await sleep(400);
-  ok('другий телефон бачить поліцію на карті', await app(B.page, () => document.querySelectorAll('.rpm-police').length === 1));
+  ok('другий телефон бачить поліцію на карті, з тим самим часом під значком', await app(B.page, () => document.querySelectorAll('.rpm-police').length === 1 && /^\d\d\.\d\d \d\d:\d\d$/.test(document.querySelector('.rpm-police .rpm-t').textContent)));
   ok('…і в «Подіях»: поліція попереду на маршруті, позначка водія', await app(B.page, () => window.__app.feed.feed.items.some(i => i.src === 'rep' && /Поліція попереду/.test(i.text))), await app(B.page, () => JSON.stringify(window.__app.feed.feed.items.filter(i => i.src === 'rep').map(i => i.text))));
   await shot(B.page, '18b-report-seen');
   await app(B.page, () => document.querySelector('.rpm-police').click()); await sleep(200);   // значок далеко від машини, за краєм екрана
-  ok('торкнутися значка — «Поліція · позначив водій щойно»', /Поліція · позначив водій/.test(await B.page.textContent('#toasts')));
+  ok('торкнутися значка — «Поліція · позначив водій 23.11 13:05 (щойно)»', /Поліція · позначив водій \d\d\.\d\d \d\d:\d\d \(щойно\)/.test(await B.page.textContent('#toasts')), await B.page.textContent('#toasts'));
+  // Б проїжджає поліцію — «Поліція ще тут?» над позначкою; «Так» — ще 2 години від цієї хвилини, час під значком новий
+  await app(B.page, () => { const r = window.__app.reports.reps.list[0]; r.at -= 40 * 60000; r.born = r.at; window.__app.core.bus.emit('reports', window.__app.reports.reps); });
+  const old = await app(B.page, () => window.__app.reports.reps.list[0].at);
+  for (const k of [12, 10, 8, 6, 4, 2]) { const q = coords[turnIdx[3] + 40 - k]; tB += 5000; await em(B.page, 'loc', { prov: 'gps', lat: q[0], lon: q[1], acc: 5, spd: 20, brg: 315, t: tB }); await sleep(300); }
+  await B.page.waitForSelector('.rpq', { timeout: 4000 }).catch(() => {});
+  const ask = await app(B.page, () => { const q = document.querySelector('.rpq'); return q ? q.textContent : ''; });
+  ok('проїжджаємо чужу позначку — над нею «Поліція ще тут?» із «✓ Так» / «✕ Немає»', /Поліція ще тут\?/.test(ask) && /Так/.test(ask) && /Немає/.test(ask), ask);
+  await shot(B.page, '18c-report-ask');
+  const p0 = NTFY.posts;
+  await B.page.click('.rpq .rpq-y'); await sleep(500);
+  const cf = await app(B.page, () => { const r = window.__app.reports.reps.list[0]; return { at: r.at, conf: r.conf, lbl: document.querySelector('.rpm-police .rpm-t').textContent, ask: !!document.querySelector('.rpq') }; });
+  const okMsg = NTFY.msgs.length ? JSON.parse(NTFY.msgs[NTFY.msgs.length - 1].message) : {};
+  ok('«Так» — позначка продовжена від цієї хвилини, під значком новий час із ✓, іншим пішло підтвердження', cf.at > old + 30 * 60000 && cf.conf === 1 && /^✓ \d\d\.\d\d \d\d:\d\d$/.test(cf.lbl) && !cf.ask && NTFY.posts === p0 + 1 && okMsg.k === 'ok' && okMsg.id === sent.id, JSON.stringify({ cf, okMsg }));
+  await app(A.page, () => window.__app.reports.poll()); await sleep(400);
+  ok('у того, хто ставив, — теж «✓» і новий час (підтвердив інший водій)', await app(A.page, () => { const r = window.__app.reports.reps.list[0]; return r.conf === 1 && /^✓ /.test(document.querySelector('.rpm-police .rpm-t').textContent); }));
+  // двоє інших водіїв кажуть «Немає» — позначка зникає в усіх
+  for (const d of ['dev-x1', 'dev-x2']) NTFY.msgs.push({ id: 'm' + (NTFY.msgs.length + 1), time: Math.floor(Date.now() / 1000) + 1, event: 'message', message: JSON.stringify({ v: 1, k: 'no', id: sent.id, dev: d }) });
+  await app(A.page, () => window.__app.reports.poll()); await sleep(400);
+  ok('два «Немає» від різних водіїв — позначка зникла з карти', await app(A.page, () => document.querySelectorAll('.rpm-police').length === 0));
   // через 2 години позначка зникає
-  await app(B.page, () => { const r = window.__app.reports.reps.list[0]; r.at -= 2 * 3600e3 + 1000; });
+  await app(B.page, () => { const r = window.__app.reports.reps.list[0]; if (r) r.at -= 2 * 3600e3 + 1000; });
   await app(B.page, () => window.__app.reports.poll()); await sleep(300);
-  ok('через 2 години позначка зникає з карти', await app(B.page, () => document.querySelectorAll('.rpm').length === 0 && window.__app.reports.reps.list.length === 0));
+  ok('через 2 години без підтверджень позначка зникає з карти', await app(B.page, () => document.querySelectorAll('.rpm').length === 0 && window.__app.reports.reps.list.length === 0));
   // сервер недоступний — своя позначка все одно на карті
   NTFY.fail = true;
-  await A.page.click('#tabRep'); await A.page.click('#repSheet [data-rep="crash"]'); await sleep(400);
+  await app(A.page, () => localStorage.setItem('reis.repMine', '[]'));
+  await A.page.reload(); await A.page.waitForFunction(() => window.__app && window.__app.reports);
+  await em(A.page, 'loc', { prov: 'gps', lat: pA[0], lon: pA[1], acc: 5, spd: 0, brg: 315, t: Date.now() }); await sleep(600);
+  await A.page.click('#tabRep'); await A.page.click('#repSheet [data-rep="crash"]'); await A.page.click('#aim [data-aim="here"]'); await sleep(400);
   ok('немає звʼязку з сервером — своя позначка ДТП усе одно на карті', await app(A.page, () => document.querySelectorAll('.rpm-crash').length === 1));
   NTFY.fail = false;
   ok('прохід «позначки» без помилок JS', A.errors.length === 0 && B.errors.length === 0, A.errors.concat(B.errors).join(' | '));
@@ -1822,6 +1877,46 @@ if (run('18')) try {
   ok('прохід 18 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 18 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 19 (1.1.9): «Місця» — квадратики «що шукаю», найближчі попереду; знак обмеження в місті завжди ============ */
+if (run('19')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length;
+  const trip = { id: 't-pl', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  const p0 = coords[turnIdx[3]];
+  await emitN('loc', { prov: 'gps', lat: p0[0], lon: p0[1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await page.waitForFunction(() => window.__app.stopsdb ? true : true); await sleep(800);
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips');
+  const pl = () => app(page, () => ({ chips: [...document.querySelectorAll('.pl-chip')].map(b => b.dataset.plc + (b.classList.contains('on') ? '+' : '-')), rows: [...document.querySelectorAll('.pl-row')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), txt: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
+  let st = await pl();
+  ok('«Місця»: угорі шість квадратиків — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені; АЗС увімкнено (як на карті)', st.chips.length === 6 && st.chips[0] === 'fuel+' && st.chips[1] === 'food-', JSON.stringify(st.chips));
+  ok('увімкнено АЗС — список найближчих АЗС попереду в рейсі з відстанню', st.rows.length >= 1 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
+  await shot(page, '20-places-chips');
+  await page.click('.pl-chip[data-plc="food"]'); await sleep(300); st = await pl();
+  ok('торкнулись «Їжа» — у списку кафе, і на карті їжу ввімкнено', st.chips[1] === 'food+' && st.rows.some(r => /Кафе Дорога/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.food === true), JSON.stringify(st.rows));
+  await page.click('.pl-chip[data-plc="fuel"]'); await sleep(300); st = await pl();
+  ok('зняли «АЗС» — АЗС зникли зі списку й з карти', st.chips[0] === 'fuel-' && !st.rows.some(r => /OKKO|^АЗС/.test(r)) && await app(page, () => window.__app.S.mapStopTypes.fuel === false), JSON.stringify(st.rows));
+  await page.click('[data-plc="#none"]'); await sleep(300); st = await pl();
+  ok('«Прибрати все» — нічого не вибрано, підказка «виберіть угорі, що шукаєте»', st.chips.every(c => c.endsWith('-')) && /Виберіть угорі/.test(st.txt) && await app(page, () => !window.__app.S.mapVerified && window.__app.S.mapStopTypes.food === false), JSON.stringify(st.chips));
+  await page.click('[data-plc="#all"]'); await sleep(300); st = await pl();
+  ok('«Показати все» — усі квадратики увімкнено, у списку різні місця', st.chips.every(c => c.endsWith('+')) && st.rows.length >= 4, JSON.stringify(st.rows.slice(0, 6)));
+  await page.click('.pl-row:has-text("Душ для водіїв")'); await sleep(500);
+  ok('торкнулись рядка — панель закрилась, картка місця з «Заїхати»', await app(page, () => document.getElementById('panel').hidden && !document.getElementById('pick').hidden && /Душ для водіїв/.test(document.getElementById('pick').textContent)));
+  // знак обмеження в місті — видно й без перевищення
+  const P2 = await newPage(true, { viewport: { width: 360, height: 670 }, keep: true });
+  let q = { lat: 49.99, lon: 36.23 }, tq = Date.now();
+  for (let i = 0; i < 4; i++) { q = { lat: q.lat + 11 / 111320, lon: q.lon }; tq += 1000; await app(P2.page, d => window.__reis('loc', d), { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 11, brg: 0, t: tq }); await sleep(250); }
+  await sleep(1200);
+  const sg = await app(P2.page, () => { const l = document.getElementById('spdLim'), s = document.getElementById('speed'), r = l.getBoundingClientRect(), rs = s.getBoundingClientRect(); return { on: !l.hidden, txt: l.textContent, w: Math.round(r.width), over: s.classList.contains('over'), v: document.getElementById('spdVal').textContent, cover: r.left < rs.left + rs.width * 0.5 }; });
+  ok('у місті 40 км/год (без перевищення) — знак «50» видно весь час, великий, цифр швидкості не закриває', sg.on && sg.txt === '50' && sg.w >= 44 && !sg.over && !sg.cover, JSON.stringify(sg));
+  await shot(P2.page, '21-speed-sign');
+  await P2.ctx.close();
+  ok('прохід 19 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 19 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
 if (run('3')) try {
   const { page, ctx, errors } = await newPage(true, { offline: true });

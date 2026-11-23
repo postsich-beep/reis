@@ -644,3 +644,58 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 #tabGps.g-bad .gc{background:var(--red);border-color:var(--red);color:#fff}
 #tabGps.g-bad .gc svg{filter:none}
 #tabGps span:last-child{font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+
+/* ---------- 1.1.9: позначки водіїв — час під значком, «Ще тут?», приціл, прозора шторка ---------- */
+#repSheet{background:rgba(var(--glass-rgb),var(--gs));color:var(--ink);border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+#repSheet .q-x{color:var(--ink)}
+.rep-grid button{color:var(--ink)}
+.rep-ic{background:rgba(var(--glass2-rgb),.72)}
+.rep-hint{color:var(--ink-2)}
+.rpm{position:relative}
+.rpm-t{position:absolute;left:50%;top:100%;transform:translateX(-50%);margin-top:4px;white-space:nowrap;font:700 11px/1 var(--f-num);padding:3px 6px;border-radius:8px;
+  background:rgba(var(--glass-rgb),.9);color:var(--ink);border:1px solid var(--edge);pointer-events:none;letter-spacing:.2px}
+.rpq{min-width:210px;padding:8px 10px 10px;border-radius:18px;background:rgba(var(--glass-rgb),.95);color:var(--ink);border:1px solid var(--edge);box-shadow:var(--shadow);text-align:center}
+.rpq b{display:block;font:700 17px/1.2 var(--f-ui);margin:2px 0 8px}
+.rpq div{display:flex;gap:8px}
+.rpq button{flex:1;min-height:52px;border-radius:14px;font:800 18px var(--f-ui);color:#fff}
+.rpq-y{background:#2f9e62}.rpq-n{background:#e5484d}
+#aim{position:absolute;inset:0;z-index:13;pointer-events:none}
+#aim[hidden]{display:none}
+.aim-bar{pointer-events:auto;position:absolute;left:8px;right:8px;top:calc(var(--st) + 8px);padding:10px 12px 12px;border-radius:20px;color:var(--ink);
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
+.aim-t{display:flex;gap:10px;align-items:center;font:600 15px/1.3 var(--f-ui)}
+.aim-ic{flex:none;width:42px;height:42px}.aim-ic svg{width:42px;height:42px}
+.aim-bar .row{display:flex;gap:8px;margin-top:10px}
+.aim-bar .btn{flex:1;min-height:50px;display:flex;align-items:center;justify-content:center;gap:6px}
+.aim-bar .btn svg{width:22px;height:22px}
+.aim-bar .btn[data-aim="x"]{flex:none;width:54px}
+.aim-cross{position:fixed;width:60px;height:60px;margin:-30px 0 0 -30px;border:3px solid #e5484d;border-radius:50%;box-shadow:0 0 0 2px #fff,inset 0 0 0 2px #fff}
+.aim-cross::before,.aim-cross::after{content:"";position:absolute;background:#e5484d;box-shadow:0 0 0 1px #fff}
+.aim-cross::before{left:50%;top:-16px;bottom:-16px;width:3px;margin-left:-1.5px}
+.aim-cross::after{top:50%;left:-16px;right:-16px;height:3px;margin-top:-1.5px}
+@media (orientation:landscape){ .aim-bar{left:auto;width:calc(46% - 16px)} }
+/* знак обмеження в населеному пункті — завжди, коли воно діє (а не лише при перевищенні): більший, як справжній знак */
+#spdLim{top:-12px;right:-14px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}
+#spdLim.pop{animation:limpop .6s ease-out}
+@keyframes limpop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}
+
+/* ---------- 1.1.9: Місця — квадратики «що шукаю» і найближчі попереду ---------- */
+.pl-chips{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 8px}
+@media (orientation:landscape),(min-width:600px){ .pl-chips{grid-template-columns:repeat(6,1fr)} }
+.pl-chip{position:relative;min-height:64px;padding:8px 4px 6px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
+  background:rgba(var(--glass2-rgb),.55);color:var(--ink);font:700 14px/1.15 var(--f-ui);border:2px solid transparent;text-align:center;min-width:0}
+.pl-chip.on{border-color:var(--blue,#2f6bff);background:rgba(var(--glass2-rgb),.85)}
+.pl-chip:not(.on){opacity:.72}
+.pl-ic{width:20px;height:20px;border-radius:50%;border:2.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
+.pl-ic.vp{display:grid;place-items:center;background:#f5a524;color:#fff;font-size:13px;line-height:1;border-color:#f5b301}
+.pl-ck{position:absolute;top:4px;right:5px;width:18px;height:18px;border-radius:50%;background:var(--blue,#2f6bff);color:#fff;display:grid;place-items:center}
+.pl-ck svg{width:12px;height:12px}
+.pl-all{display:flex;gap:8px;margin-bottom:10px}
+.pl-all .btn{flex:1}
+.pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
+.pl-row .grow{min-width:0}
+.pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-row small{display:block;color:var(--ink-2);font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-d{flex:none;text-align:right}
+.pl-d b{font:800 16px var(--f-num);color:var(--ink)}
+.pl-list{display:flex;flex-direction:column;gap:6px}

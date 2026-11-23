@@ -34,6 +34,18 @@ jobs:
           WEB=$(python3 -c "import json;print(json.load(open('web/version.json'))['web'])")
           NAME=$(python3 -c "import json;print(json.load(open('web/version.json'))['name'])")
           NATIVE=$(python3 -c "import json;print(json.load(open('web/version.json')).get('native',0))")
+          # Номер інтерфейсу має бути більшим за вже опублікований (після відновлення з архіву він міг вирости) — інакше телефони не оновляться
+          PUB=$(curl -fsSL "https://github.com/${{ github.repository }}/releases/latest/download/version.json" | python3 -c "import json,sys;print(json.load(sys.stdin).get('web',0))" || echo 0)
+          if [ "$WEB" -le "$PUB" ]; then
+            echo "::warning::web $WEB не більший за опублікований $PUB — збираю як $((PUB+1))"
+            WEB=$((PUB+1))
+            python3 - "$WEB" <<'PY'
+          import json, re, sys
+          w = int(sys.argv[1])
+          v = json.load(open('web/version.json')); v['web'] = w; json.dump(v, open('web/version.json', 'w'), ensure_ascii=False)
+          c = open('web/js/core.js', encoding='utf-8').read(); c = re.sub(r"(export const VERSION = \{ web: )\d+", r"\g<1>%d" % w, c, count=1); open('web/js/core.js', 'w', encoding='utf-8').write(c)
+          PY
+          fi
           echo "web=$WEB" >> "$GITHUB_OUTPUT"
           echo "native=$NATIVE" >> "$GITHUB_OUTPUT"
           echo "vname=$NAME" >> "$GITHUB_OUTPUT"
@@ -88,6 +100,8 @@ jobs:
           (cd web && zip -qr ../out/web.zip .)
           echo "{\"apkCode\": ${{ steps.v.outputs.code }}, \"apkName\": \"${{ steps.v.outputs.name }}\", \"web\": ${{ steps.v.outputs.web }}, \"native\": ${{ steps.v.outputs.native }}, \"name\": \"${{ steps.v.outputs.vname }}\"}" > out/version.json
           cat out/version.json
+          (cd out && sha256sum reis.apk web.zip version.json > SHA256SUMS)
+          git archive --format=tar.gz --prefix=reis-${{ steps.v.outputs.name }}/ -o out/source.tar.gz HEAD
           ls -la out
 
       - name: Реліз
@@ -103,6 +117,25 @@ jobs:
             out/reis.apk
             out/web.zip
             out/version.json
+            out/SHA256SUMS
+
+      # Закрита копія кожної версії: чернетка релізу бачить лише власник. Якщо публічний реліз зламають чи зіпсують —
+      # беремо звідси (і повертаємо робочу версію кнопкою «Відновити версію з архіву»).
+      - name: Закрита копія версії (архів)
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: archive-v${{ steps.v.outputs.name }}
+          name: Архів · Рейс ${{ steps.v.outputs.name }}
+          draft: true
+          body: |
+            Закрита копія версії ${{ steps.v.outputs.name }} (інтерфейс ${{ steps.v.outputs.web }}, оболонка ${{ steps.v.outputs.native }}), коміт ${{ github.sha }}.
+            SHA256SUMS — контрольні суми; source.tar.gz — вихідний код саме цієї версії.
+          files: |
+            out/reis.apk
+            out/web.zip
+            out/version.json
+            out/SHA256SUMS
+            out/source.tar.gz
 
       - uses: actions/upload-artifact@v4
         with:

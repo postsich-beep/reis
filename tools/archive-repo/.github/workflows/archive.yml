@@ -1,0 +1,40 @@
+name: Архів версій «Рейсу»
+
+# Закритий репозиторій-архів: раз на 3 години (і кнопкою) забирає кожну нову версію з публічного postsich-beep/reis
+# і зберігає як реліз тут — APK, web.zip, version.json, вихідний код, контрольні суми.
+# Жодних ключів не треба: публічні файли читаються без входу, а пише він лише сам у себе.
+
+on:
+  schedule:
+    - cron: '17 */3 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  mirror:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+      SRC: postsich-beep/reis
+      DST: ${{ github.repository }}
+    steps:
+      - name: Копіюю нові версії
+        run: |
+          set -e
+          gh release list -R "$DST" --limit 1000 --json tagName -q '.[].tagName' | sort > have.txt
+          gh api "repos/$SRC/releases?per_page=100" --paginate -q '.[] | select(.draft | not) | .tag_name' | sort > src.txt
+          n=0
+          for tag in $(comm -23 src.txt have.txt); do
+            n=$((n+1)); [ $n -gt 40 ] && { echo "решту — наступного разу"; break; }
+            rm -rf a && mkdir a
+            for f in reis.apk web.zip version.json SHA256SUMS; do curl -fsSL -o "a/$f" "https://github.com/$SRC/releases/download/$tag/$f" || rm -f "a/$f"; done
+            [ -s a/web.zip ] || { echo "::warning::$tag: немає web.zip"; continue; }
+            curl -fsSL -o "a/source.tar.gz" "https://github.com/$SRC/archive/refs/tags/$tag.tar.gz" || rm -f a/source.tar.gz
+            if [ -f a/SHA256SUMS ]; then (cd a && sha256sum -c SHA256SUMS --ignore-missing); fi
+            (cd a && sha256sum $(ls | grep -v '^SHA256SUMS$') > SHA256SUMS.archive)
+            gh release create "$tag" -R "$DST" --title "Архів $tag" --notes "Копія версії $tag з $SRC, зроблена $(date -u '+%Y-%m-%d %H:%M') UTC." a/*
+            echo "✓ $tag" >> "$GITHUB_STEP_SUMMARY"
+          done
+          echo "Нових версій: $n" >> "$GITHUB_STEP_SUMMARY"
