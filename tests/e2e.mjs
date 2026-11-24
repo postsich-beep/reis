@@ -2251,6 +2251,7 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   // старт: два способи — на карті (дотиком) або «з мого місця»
   await page.click('#pts [data-pt="a"]'); await sleep(300);
   const b2 = await bar();
+  if (sc.n === 'S10') await shot(page, '29b-start-armed');
   ok(`[${T}] торкнулись «Старт» — він чекає дотику до карти; поруч другий спосіб: «Старт — моє місце» (зараз вибрано)`, b2.st.arm === 'a' && b2.chips[0].on && /там буде старт/.test(b2.arm) && /Старт — моє місце/.test(b2.ctx) && b2.ctxOn && b2.aiming, JSON.stringify({ arm: b2.arm, ctx: b2.ctx }));
   const sx = cx - 45, sy = cy + 40, gA = await geoAt(sx, sy);
   await page.mouse.click(sx, sy); await sleep(600);
@@ -2258,6 +2259,7 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   ok(`[${T}] торкнулись карти — старт там (зелений прапорець під пальцем); відстань тепер між двома точками`, b3.wp.some(w => w.cls === 'wp-a' && Math.abs(w.x - sx) <= 2 && Math.abs(w.y - sy) <= 2) && b3.wp.length === 2 && !b3.st.me && Math.abs(b3.st.dist.total - hav(gA, gB)) < 3 && /по прямій$/.test(b3.sum) && b3.st.arm === null, JSON.stringify({ wp: b3.wp, sum: b3.sum, st: b3.st }));
   await page.click('#pts [data-pt="a"]'); await sleep(250);
   const b3b = await bar();
+  if (sc.n === 'S10') await shot(page, '29c-start-set-armed');
   await page.click('#pts [data-pt="me"]'); await sleep(350);
   const b4 = await bar();
   ok(`[${T}] «Старт» ще раз → кнопка «З мого місця»: старт знову моє місце (мітка зникла, відстань — «від вашого місця»)`, /З мого місця/.test(b3b.ctx) && !b3b.ctxOn && b4.st.me && b4.wp.length === 1 && /Моє місце/.test(chipT(b4, 'a')) && /від вашого місця/.test(b4.sum) && b4.st.arm === null, JSON.stringify({ ctx: b3b.ctx, sum: b4.sum, wp: b4.wp }));
@@ -2281,6 +2283,15 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   await page.click('#pick [data-k="a"]'); await sleep(500);
   const b7 = await bar();
   ok(`[${T}] «Старт тут» — старт у цій точці; лишаємось на карті з плашкою (фініш уже є — ніщо не чекає)`, b7.vis && b7.panel && b7.pick && !b7.st.me && b7.wp.some(w => w.cls === 'wp-a') && b7.st.arm === null, JSON.stringify({ st: b7.st, wp: b7.wp }));
+  // старт уже вказано вручну → на картці не «Їхати сюди», а «Фініш тут»: фініш переїжджає, старт лишається, де поставили
+  await app(page, () => window.__app.bus.emit('mapPick', { lat: 49.9856, lon: 36.2112 })); await sleep(350);
+  const pk2 = await app(page, () => [...document.querySelectorAll('#pick .pt-b')].map(b => ({ t: b.textContent.trim(), pri: b.classList.contains('pri'), sw: b.scrollWidth, cw: b.clientWidth })));
+  if (sc.n === 'S10') await shot(page, '30-pick-finish-' + sc.n);
+  const a7 = b7.wp.find(w => w.cls === 'wp-a');
+  await page.click('#pick [data-k="b"]'); await sleep(500);
+  const b7b = await bar(), a7b = b7b.wp.find(w => w.cls === 'wp-a');
+  ok(`[${T}] старт уже вказано вручну — на картці «Фініш тут» (а не «Їхати сюди»): фініш переїхав, старт на місці`, pk2.map(x => x.t).join() === 'Фініш тут,Старт тут,Через' && pk2[0].pri && pk2.every(x => x.sw <= x.cw + 1)
+    && !b7b.st.me && !!a7 && !!a7b && b7b.wp.some(w => w.cls === 'wp-b') && b7b.st.arm === null, JSON.stringify({ pk2, st: b7b.st, wp: b7b.wp }));
   // «Прибрати всі точки» → з чистого аркуша: «Старт тут», і фініш одразу чекає дотику (поставив першу — одразу другу)
   await page.click('#pts [data-pt="reset"]'); await sleep(300);
   const b8 = await bar();
