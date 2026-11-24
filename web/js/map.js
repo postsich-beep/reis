@@ -6,7 +6,7 @@ import { g } from './guide.js';
 import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
-import { off, offlineActive, offlineStyle, tilesBad } from './offline.js';
+import { off, offlineActive, offlineStyle, tilesBad, tileBytesAt } from './offline.js';
 import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
 import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
@@ -795,14 +795,24 @@ function offlineWatch() {
   offTiles = { ok: 0, err: 0, msg: '' };
   if (!offlineActive()) return;
   let tries = 0;
-  const check = () => {
+  const check = async () => {
     if (!map || !offlineActive() || !map.getSource('protomaps')) return;
-    // «малюється» — це коли з файлу справді прийшли об'єкти (суша, вода, дороги), або тайли завантажились без жодної помилки
-    let feat = 0; for (const l of ['earth', 'water', 'roads', 'landuse', 'landcover', 'boundaries']) { try { feat += map.querySourceFeatures('protomaps', { sourceLayer: l }).length; } catch (_) {} if (feat) break; }
-    if (feat > 0 || (offTiles.ok > 0 && offTiles.err === 0 && off.errs === 0)) { log('info', 'офлайн-карта малюється (тайлів: ' + offTiles.ok + ', читань файлу: ' + off.reads + ', помилок: ' + off.errs + ')'); return; }
+    // «Малюється» — це коли з файлу справді прийшли об'єкти: суша, вода, дороги, забудова. Більше нічому не віримо:
+    // у 1.1.13–1.1.14 «квадрати завантажились без помилок» вважалось успіхом, а на екрані було порожнє сіре тло
+    // (бібліотека викидала квадрат через брак набору літер і не казала про це жодною помилкою).
+    let feat = 0; for (const l of ['earth', 'water', 'roads', 'landuse', 'landcover', 'buildings', 'boundaries', 'places']) { try { feat += map.querySourceFeatures('protomaps', { sourceLayer: l }).length; } catch (_) {} if (feat) break; }
+    if (feat > 0) { log('info', 'офлайн-карта малюється (квадратів: ' + offTiles.ok + ', читань файлу: ' + off.reads + ', помилок: ' + off.errs + (off.glyphMiss.length ? ', бракує наборів літер: ' + off.glyphMiss.length : '') + ')'); return; }
     if (++tries < 5) { offWatchT = setTimeout(check, 4000); return; }
-    if (offTiles.err === 0 && off.errs === 0) return;                 // тайлів ніхто не просив (карта схована тощо) — це не збій
-    tilesBad('тайлів 0, зірвалось ' + offTiles.err + (offTiles.msg ? ': ' + offTiles.msg : '') + '; читань ' + off.reads + ', помилок читання ' + off.errs + (off.lastErr ? ': ' + off.lastErr : ''));
+    // 20 секунд — і жодного об'єкта з файлу
+    let why = '';
+    if (offTiles.err || off.errs) why = 'зірвалось квадратів ' + offTiles.err + (offTiles.msg ? ': ' + offTiles.msg : '') + ', помилок читання ' + off.errs + (off.lastErr ? ': ' + off.lastErr : '');
+    else {
+      const c = map.getCenter(), n = await tileBytesAt(c.lat, c.lng, map.getZoom());
+      if (!map || !offlineActive()) return;
+      if (n > 0) why = 'квадрат у файлі є (' + n + ' байтів), а на карті порожньо';
+      else { log('info', 'офлайн-карта: під цим місцем у файлі карти немає (' + c.lat.toFixed(3) + ', ' + c.lng.toFixed(3) + ') — це не збій'); return; }
+    }
+    tilesBad(why + '; читань ' + off.reads);
   };
   offWatchT = setTimeout(check, 4000);
 }
