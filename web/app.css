@@ -920,6 +920,8 @@ body.pts-on #pick{z-index:14}   /* картка точки — поверх пл
 #bMap.on .mt-thumb{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--route)}
 #bMap.nonet .mt-thumb{opacity:.5;filter:grayscale(1)}
 @media (orientation:landscape) and (max-height:520px){ #bMap{margin-top:0;margin-right:9px} }
+/* низький екран (≤ 590): кнопок справа тепер три — коли відкрите меню точки на карті, вони не потрібні й не налазять на нього */
+@media (orientation:portrait) and (max-height:590px){ body:has(#pick:not([hidden])) #rail{visibility:hidden} }
 .mt-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .mt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;padding:7px 6px 8px;border-radius:16px;border:3px solid transparent;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:center}
 .mt-tile.on{border-color:var(--route)}
