@@ -191,7 +191,8 @@ function settingsHtml() {
   <div class="sec">${t('setSources')}</div><div class="form">
     <label class="full">${t('setAlertsToken')}<input id="s_alertsToken" autocomplete="off" value="${esc(S.alertsToken)}"></label>
     <label class="full">${t('setRouteUrl')}<input id="s_routeUrl" autocomplete="off" value="${esc(S.routeUrl)}"></label>
-    <label class="full">${t('setStyleUrl')}<input id="s_styleUrl" autocomplete="off" value="${esc(S.styleUrl)}"></label></div>
+    <label class="full">${t('setStyleUrl')}<input id="s_styleUrl" autocomplete="off" value="${esc(S.styleUrl)}"></label>
+    <label class="full">${t('setSatUrl')}<input id="s_satUrl" autocomplete="off" value="${esc(S.satUrl)}"></label></div>
   <div class="btns"><button class="btn sm" data-act="resetLearn">${t('resetLearn')}</button><button class="btn sm" data-act="clearFeed">${t('clearFeed')}</button></div>
   <div class="btns"><button class="btn sm wide" data-act="about">${t('about')} · ${VERSION.name}</button></div>`;
 }

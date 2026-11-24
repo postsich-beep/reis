@@ -15,6 +15,7 @@ import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
 import * as rough from './rough.js';
 import { vp, onMap as vpOnMap } from './vplaces.js';
 import { reps, REP_SVG, shown as repShown, repStamp } from './reports.js';
+import * as P from './platform.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -146,7 +147,8 @@ export function initMap() {
     container: 'map', style: currentStyle(), center: [31.3, 49.0], zoom: 5.4,
     attributionControl: false, maxPitch: 60, fadeDuration: 120,
     // мережеві запити карти йдуть через кеш у телефоні; власні файли застосунку — напряму
-    transformRequest: url => /^https?:\/\//.test(url) && !url.startsWith(location.origin) ? { url: 'fc://' + url } : undefined
+    // супутникові знімки — напряму (власний кеш у IndexedDB без межі розміру розрісся б на сотні МБ; WebView кешує їх сам)
+    transformRequest: url => /^https?:\/\//.test(url) && !url.startsWith(location.origin) && !isSatUrl(url) ? { url: 'fc://' + url } : undefined
   });
   const seenErr = new Set();
   map.on('error', e => {
@@ -177,9 +179,9 @@ export function initMap() {
   bus.on('pos', onPos);
   const attr = document.getElementById('attr');
   if (attr) {
-    const full = attr.textContent.trim();
-    attr.textContent = 'ⓘ'; attr.title = full;
-    attr.onclick = () => { attr.classList.toggle('open'); attr.textContent = attr.classList.contains('open') ? full : 'ⓘ'; clearTimeout(attr._t); if (attr.classList.contains('open')) attr._t = setTimeout(() => { attr.classList.remove('open'); attr.textContent = 'ⓘ'; }, 6000); };
+    attrBase = attr.textContent.trim(); attr.dataset.full = attrBase;
+    attr.textContent = 'ⓘ'; attr.title = attrBase;
+    attr.onclick = () => { const full = attr.dataset.full; attr.classList.toggle('open'); attr.textContent = attr.classList.contains('open') ? full : 'ⓘ'; clearTimeout(attr._t); if (attr.classList.contains('open')) attr._t = setTimeout(() => { attr.classList.remove('open'); attr.textContent = 'ⓘ'; }, 6000); };
   }
   bus.on('route', drawRoute);
   bus.on('hazards', drawHazards);
@@ -199,6 +201,8 @@ export function initMap() {
   map.on('idle', () => { clearTimeout(labTimer); labTimer = null; labelDots(); });
   setInterval(drawEvents, 60000);
   bus.on('settings', k => { if (k === 'theme') applyTheme(); if (k === 'view3d') follow(true); });
+  bus.on('settings', k => { if (k === 'mapType' || k === 'satUrl') applySat(true); });
+  window.addEventListener('online', () => applySat(false)); window.addEventListener('offline', () => applySat(false));
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { cam.anc = null; follow(true); } });
   window.addEventListener('resize', () => { cam.anc = null; if (view.follow) follow(true); });
   setInterval(() => {
@@ -406,6 +410,7 @@ function addLayers() {
   doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps(); if (planPts) planPoints(planPts);
   offlineWatch();
   tuneLabels();
+  satLayer();
   if (clean) setClean(true);
 }
 const firstSymbolId = () => { try { const l = (map.getStyle().layers || []).find(x => x.type === 'symbol'); return l ? l.id : undefined; } catch (_) { return undefined; } };
@@ -451,6 +456,45 @@ function drawCps() {
   }
   if (key === cpKey) return;
   cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });
+}
+
+/* ---------- тип карти: звичайна чи супутник (1.1.19) ----------
+   Супутник — знімки поверх карти, але ПІД лініями рейсу, назвами вулиць і міст, номерами будинків і нашими значками:
+   видно, як місце виглядає насправді (ворота складу, майданчик для фур), і водночас — куди їхати.
+   Лише з інтернетом: зникла мережа — сам показуємо звичайну (завантажену) карту, з'явилась — повертаємо знімки.
+   Квадрат знімка не прийшов (слабкий сигнал) — під ним просто видно звичайну карту, сірих дірок немає. */
+let attrBase = '', satShown = false;
+export const SAT_ATTR = 'Супутник: Esri, Maxar, Earthstar Geographics';
+const satTpl = () => S.satUrl || 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}';
+function isSatUrl(url) { const pre = satTpl().split('{')[0]; return pre.length > 12 && url.startsWith(pre); }
+export const satWanted = () => S.mapType === 'sat';
+export const satOn = () => satWanted() && P.online();
+function satLayer() {
+  if (!map) return false;
+  const want = satOn();
+  let has = false; try { has = !!map.getLayer('reis-sat'); } catch (_) { return false; }
+  const ready = !!map.getSource('route');                        // стиль іще вантажиться — шар додасть addLayers, щойно він буде готовий
+  if (want && !has && ready) {
+    try {
+      if (!map.getSource('reis-sat')) map.addSource('reis-sat', { type: 'raster', tiles: [satTpl()], tileSize: 256, maxzoom: 18, attribution: SAT_ATTR });
+      // під першим нашим шаром (лінії рейсу кладуться під підписи карти) — тобто над заливками й дорогами карти, під усім, що треба читати
+      const before = ['rough-dot', 'route-alts-case'].find(id => map.getLayer(id)) || firstSymbolId();
+      map.addLayer({ id: 'reis-sat', type: 'raster', source: 'reis-sat', paint: { 'raster-fade-duration': 150 } }, before);
+    } catch (e) { log('warn', 'супутник: ' + e.message); return false; }
+  } else if (!want && has) {
+    try { map.removeLayer('reis-sat'); if (map.getSource('reis-sat')) map.removeSource('reis-sat'); } catch (_) {}
+  }
+  document.body.classList.toggle('mapsat', want);
+  const attr = document.getElementById('attr'); if (attr && attrBase) { attr.dataset.full = attrBase + (want ? ' · ' + SAT_ATTR : ''); attr.title = attr.dataset.full; }
+  satShown = want;
+  return want;
+}
+/** Застосувати вибір типу карти. user — водій щойно вибрав сам (тоді мовчимо: він бачить результат). */
+export function applySat(user) {
+  if (map && user && map.getSource('reis-sat')) { try { if (map.getLayer('reis-sat')) map.removeLayer('reis-sat'); map.removeSource('reis-sat'); } catch (_) {} }   // інша адреса знімків — джерело наново
+  const was = satShown, now = satLayer();
+  if (!user && satWanted() && was !== now) bus.emit('satNet', now);       // мережа зникла / повернулась, а вибрано супутник — UI скаже водієві
+  bus.emit('mapType', { want: satWanted(), on: now });
 }
 
 /* ---------- день / ніч ---------- */
