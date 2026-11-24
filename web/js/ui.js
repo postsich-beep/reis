@@ -15,7 +15,7 @@ import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRou
 import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
 import * as showers from './showers.js';
-import { offlineActive } from './offline.js';
+import { off, offlineActive } from './offline.js';
 import { sdb, TYPES, F, nearbyRows, alongRoute, brandOf } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
@@ -1400,7 +1400,9 @@ export function initUI() {
   bus.on('repTap', id => { if (aim) return; const r = reps.list.find(x => x.id === id); if (r) toast(t(r.own ? 'repMine' : 'repTap', repName(r), repStamp(r) + ' (' + repAgo(r) + ')') + (r.conf ? t('repConf', r.conf) : ''), REP_TYPES[r.t].level, 6000); });
   bus.on('repAsk', onRepAsk);
   bus.on('pos', () => { if (askRep && pos.lat != null && hav(pos, askRep) > 800) { askRep = null; mapM.askHide(); } });
-  bus.on('offlineBad', () => toast(t('offBadToast'), 'red', 15000, () => openPanel('settings')));
+  const offBadSay = why => toast(t(why === 'app' ? 'offBadAppToast' : why === 'tiles' ? 'offBadTilesToast' : 'offBadToast'), 'red', 18000, () => openPanel('settings'));
+  bus.on('offlineBad', offBadSay);
+  if (off.bad) setTimeout(() => offBadSay(off.bad), 1500);      // файл перевіряється ще до запуску інтерфейсу — кажемо про результат тепер
   $('aim').onclick = aimClick;
   $('pts').onclick = ptsClick;
   window.addEventListener('resize', () => { if (aim) aimPlaceCross(); if (pm) ptsCross(); });

@@ -2,7 +2,8 @@
 import { bus, log, S } from './core.js';
 import * as P from './platform.js';
 
-export const off = { supported: P.isNative && P.offlineSupported(), installed: false, size: 0, date: '', free: 0, dl: { state: 'none' }, remote: null, remoteErr: '', bad: '' };
+export const off = { supported: P.isNative && P.offlineSupported(), installed: false, size: 0, date: '', free: 0, dl: { state: 'none' }, remote: null, remoteErr: '',
+  ok: false, bad: '', mode: '', reads: 0, errs: 0, lastErr: '' };
 let timer = null, wasInstalled = false;
 
 export function refreshStatus() {
@@ -11,35 +12,84 @@ export function refreshStatus() {
   const busy = ['running', 'pending', 'paused'].includes(off.dl.state);
   if (busy && !timer) timer = setInterval(refreshStatus, 1500);
   if (!busy && timer) { clearInterval(timer); timer = null; }
-  if (off.installed && !wasInstalled) { wasInstalled = true; off.bad = ''; log('info', 'офлайн-карта: ' + (off.size / 1e6).toFixed(0) + ' МБ, ' + off.date); bus.emit('offlineReady'); verify(); }
-  if (!off.installed) { wasInstalled = false; off.bad = ''; }
+  // файл з'явився: спершу перевіряємо, що він читається шматками (verify), і лише тоді вмикаємо офлайн-карту
+  if (off.installed && !wasInstalled) { wasInstalled = true; off.ok = false; off.bad = ''; off.mode = ''; log('info', 'офлайн-карта: ' + (off.size / 1e6).toFixed(0) + ' МБ, ' + off.date); verify(); }
+  if (!off.installed) { wasInstalled = false; off.ok = false; off.bad = ''; off.mode = ''; }
   bus.emit('offline', off);
   return off;
 }
-// Офлайн-карта показується, коли вона є, читається і водій не вибрав «лише онлайн».
-export const offlineActive = () => off.installed && !off.bad && S.mapMode !== 'online';
+// Офлайн-карта показується, коли вона є, перевірена (читається шматками) і водій не вибрав «лише онлайн».
+export const offlineActive = () => off.installed && off.ok && !off.bad && S.mapMode !== 'online';
 
-// Самоперевірка файлу карти (1.1.12): читаємо заголовок PMTiles так само, як це робить карта (шматком, через Range),
-// і звіряємо довжину файлу з тим, що записано в заголовку. Обірване завантаження чи збій читання — це «сіра карта»:
-// кажемо про це прямо й показуємо онлайн-карту, а не мовчки малюємо порожнє тло.
-export async function verify() {
-  let bad = '';
+/* ---------- читання файлу карти шматками ----------
+   Карта (PMTiles) читає з файлу 1,9 ГБ маленькі шматки: заголовок, каталоги, тайли. Спосіб читання — два:
+     'q'     — шматок задано в адресі (?r=початок-кінець): оболонка №7+ віддає рівно ці байти;
+     'range' — заголовок Range (браузер; оболонка, чий Range працює).
+   До 1.1.12 був лише Range, а Android WebView обробляє його по-своєму (сам перемотує потік) — на телефоні читався
+   тільки початок файлу, жоден тайл не приходив: «сіра карта». Тому тепер спосіб ПЕРЕВІРЯЄМО читанням із середини. */
+const PM_URL = () => location.origin + '/offline/ukraine.pmtiles';
+const nativeRev = () => { try { return +(P.appInfo() || {}).nativeRev || 0; } catch (_) { return 0; } };
+async function readBytes(mode, offset, length, signal) {
+  const end = offset + length - 1, ctrl = new AbortController();
+  if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', () => ctrl.abort(), { once: true }); }
+  const r = mode === 'q' ? await fetch(PM_URL() + '?r=' + offset + '-' + end, { cache: 'no-store', signal: ctrl.signal })
+    : await fetch(PM_URL(), { headers: { Range: 'bytes=' + offset + '-' + end }, cache: 'no-store', signal: ctrl.signal });
+  if (r.status !== 200 && r.status !== 206) throw new Error('HTTP ' + r.status);
+  const cl = r.headers.get('content-length');
+  // замість шматка йде файл цілком (1,9 ГБ) — обриваємо одразу, у пам'ять він не влізе
+  if ((cl != null && +cl > length) || (cl == null && r.status === 200 && mode === 'range' && offset > 0)) { ctrl.abort(); throw new Error('замість шматка прийшов файл цілком'); }
+  return r.arrayBuffer();
+}
+// Джерело для бібліотеки PMTiles: читає нашим перевіреним способом і рахує читання й помилки (видно в «Налаштуваннях»)
+class PmSource {
+  getKey() { return PM_URL(); }
+  async getBytes(offset, length, signal) {
+    if (!off.mode) { await verify(); if (!off.mode) throw new Error('офлайн-карта не читається'); }
+    try { const data = await readBytes(off.mode, offset, length, signal); off.reads++; return { data }; }
+    catch (e) { if (!(signal && signal.aborted)) { off.errs++; off.lastErr = String(e && e.message || e).slice(0, 120); } throw e; }
+  }
+}
+
+// Самоперевірка файлу карти: 1) заголовок PMTiles і повна довжина файлу (обірване завантаження);
+// 2) шматок НЕ з початку файлу — саме так читаються тайли. Не читається — кажемо прямо й показуємо онлайн-карту,
+// а не мовчки малюємо порожнє сіре тло.
+let checking = null;
+export function verify() { if (!checking) checking = doVerify().finally(() => { checking = null; }); return checking; }
+async function doVerify() {
+  let bad = '', mode = '';
   try {
-    const r = await fetch(location.origin + '/offline/ukraine.pmtiles', { headers: { Range: 'bytes=0-126' }, cache: 'no-store' });
-    if (r.status !== 206 && r.status !== 200) throw new Error('HTTP ' + r.status);
-    const buf = await r.arrayBuffer(), v = new DataView(buf);
-    if (buf.byteLength < 127 || String.fromCharCode(...new Uint8Array(buf, 0, 7)) !== 'PMTiles') throw new Error('це не файл карти');
+    const buf = await readBytes('range', 0, 256), head = new Uint8Array(buf), v = new DataView(buf);
+    if (head.length < 127 || String.fromCharCode(...head.subarray(0, 7)) !== 'PMTiles') throw new Error('це не файл карти');
     const u = o => Number(v.getBigUint64(o, true)), need = Math.max(u(8) + u(16), u(24) + u(32), u(40) + u(48), u(56) + u(64));
     if (off.size && off.size < need) bad = 'short:' + Math.round(off.size / 1e6) + '/' + Math.round(need / 1e6);
+    else {
+      const from = 128, n = Math.min(128, head.length - from), want = head.subarray(from, from + n), why = [];
+      for (const m of (nativeRev() >= 7 ? ['q', 'range'] : ['range'])) {
+        try {
+          const got = new Uint8Array(await readBytes(m, from, n));
+          if (got.length === n && got.every((x, i) => x === want[i])) { mode = m; break; }
+          why.push(m + ': не ті байти (' + got.length + ')');
+        } catch (e) { why.push(m + ': ' + (e && e.message || e)); }
+      }
+      if (!mode) { bad = 'app'; off.lastErr = why.join('; ').slice(0, 160); }
+    }
   } catch (e) { bad = 'read:' + (e && e.message || e); }
-  if (bad !== off.bad) {
-    off.bad = bad;
-    if (bad) { log('err', 'офлайн-карта не читається (' + bad + ') — показую онлайн-карту'); bus.emit('offlineBad', bad); }
-    else bus.emit('offlineReady');                 // знову читається — повертаємо офлайн-карту
-    bus.emit('offline', off);
-  }
+  const was = off.bad, wasOk = off.ok;
+  off.bad = bad; off.ok = !bad; off.mode = bad ? '' : mode;
+  if (bad && bad !== was) { log('err', 'офлайн-карта не читається (' + bad + (off.lastErr ? '; ' + off.lastErr : '') + ') — показую онлайн-карту'); bus.emit('offlineBad', bad); }
+  if (!bad && (!wasOk || was)) { log('info', 'офлайн-карта читається, спосіб «' + mode + '»'); bus.emit('offlineReady'); }
+  bus.emit('offline', off);
   return !bad;
 }
+/** Карта увімкнулась, а тайли так і не намалювались (перевіряє map.js): показуємо онлайн-карту й кажемо про це. */
+export function tilesBad(info) {
+  if (off.bad) return;
+  off.bad = 'tiles'; off.lastErr = String(info || off.lastErr || '').slice(0, 160);
+  log('err', 'офлайн-карта не малюється (' + off.lastErr + ') — показую онлайн-карту');
+  bus.emit('offlineBad', 'tiles'); bus.emit('offline', off);
+}
+/** Дочекатися першої перевірки файлу (щоб карта одразу стартувала з правильним джерелом), але не довше за ms. */
+export const whenChecked = (ms = 1500) => !off.installed || off.ok || off.bad ? Promise.resolve() : Promise.race([verify().catch(() => {}), new Promise(r => setTimeout(r, ms))]);
 
 // Власні кольори офлайн-карти (1.1.12). Стандартна світла карта Protomaps малює всі дороги білим по світлому,
 // а вночі її просто «перевертали» фільтром — дороги ставали чорними на темно-сірому: «сіра карта без доріг».
@@ -92,7 +142,7 @@ export function offlineStyle(night = false) {
 
 export function init() {
   if (typeof pmtiles !== 'undefined') {
-    try { const proto = new pmtiles.Protocol(); maplibregl.addProtocol('pmtiles', proto.tile); }
+    try { const proto = new pmtiles.Protocol(); proto.add(new pmtiles.PMTiles(new PmSource())); maplibregl.addProtocol('pmtiles', proto.tile); }
     catch (e) { log('warn', 'pmtiles: ' + e.message); }
   }
   bus.on('native:offline', d => {

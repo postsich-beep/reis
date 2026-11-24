@@ -101,7 +101,9 @@ function offlineHtml() {
       <div class="btns"><button class="btn sm wide" data-act="offCancel">${t('offCancel')}</button></div>`;
   } else {
     if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
-    if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
+    if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad === 'app' ? 'offBadApp' : off.bad === 'tiles' ? 'offBadTiles' : off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
+    // як саме читається файл карти — щоб на знімку екрана було видно причину, якщо карта не малюється
+    if (off.installed) h += `<div class="muted" id="offDiag" style="margin-top:6px;font-size:12px">${esc(t('offDiag', off.mode ? t('offMode_' + off.mode) : '—', off.reads, off.errs) + (off.lastErr ? ' · ' + off.lastErr : '') + ' · ' + t('offShell', (P.appInfo() || {}).nativeRev || '?'))}</div>`;
     const newer = r && off.installed && String(r.date) > String(off.date);
     const btns = [];
     if (!off.installed && r) btns.push(`<button class="btn pri" data-act="offDl">${t('offDownload', GB(r.size || 0))}</button>`);

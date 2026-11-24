@@ -30,6 +30,7 @@ async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
   document.documentElement.lang = S.lang;
   offline.init();
+  await offline.whenChecked(1500);        // файл офлайн-карти перевірено — карта одразу стартує з правильним джерелом
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   bus.on('offlineBad', () => { if (mapM.map) mapM.applyMapSource(); });

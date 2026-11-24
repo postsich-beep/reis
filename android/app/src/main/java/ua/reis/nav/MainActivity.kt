@@ -77,7 +77,7 @@ class MainActivity : Activity() {
                 val u = request.url
                 if (u.host != WebStore.HOST) return null
                 val path = u.path ?: "/"
-                if (path == "/offline/" + OfflineMap.NAME) return OfflineMap.serve(this@MainActivity, request.requestHeaders)
+                if (path == "/offline/" + OfflineMap.NAME) return OfflineMap.serve(this@MainActivity, request.requestHeaders, u.query)
                 return WebStore.serve(this@MainActivity, path)
             }
 
