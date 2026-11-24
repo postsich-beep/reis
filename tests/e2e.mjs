@@ -173,7 +173,7 @@ async function newPage(native, opts = {}) {
     if (PACKS.down) return r.abort();
     PACKS.req.push((/jsdelivr/.test(u) ? 'cdn:' : '') + name);
     if (!PACKS.on || (PACKS.rawDown && !/jsdelivr/.test(u))) return r.fulfill({ status: 404, headers: cors, body: '' });
-    try { const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'addr', 'v1', name)); r.fulfill({ status: 200, contentType: name.endsWith('.json') ? 'application/json' : 'application/octet-stream', headers: cors, body: b }); }
+    try { const b = await readFile(join(process.env.ADDR_DIR || join(ROOT, '..', 'tests', 'fixtures', 'addr'), 'v1', name)); r.fulfill({ status: 200, contentType: name.endsWith('.json') ? 'application/json' : 'application/octet-stream', headers: cors, body: b }); }
     catch (_) { r.fulfill({ status: 404, headers: cors, body: '' }); }
   });
   await page.route('https://ntfy.sh/**', r => {
@@ -2979,6 +2979,26 @@ if (process.env.REALVP && run('vpreal')) try {
   ok('справжня картка «Автопорт» відкривається без помилок', errors.length === 0 && info.imgs === 10 && info.secs.length >= 2, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('знімки справжньої картотеки', false, String(e.message).split('\n')[0]); }
+
+/* ============ справжні пачки номерів на справжній карті (лише на прохання: ADDR_DIR=тека ONLY=addrreal --shots тека) ============ */
+// ADDR_DIR — тека з v1/index.json і пачками, взятими з гілки addr сховища. Карта — справжній квадрат Львова (city.pmtiles).
+if (process.env.ADDR_DIR && run('addrreal')) try {
+  PM.fonts = true; PM.file = 'city'; PACKS.on = true; PACKS.req = []; OFM.down = true;
+  const size = (await pmFile('city')).length;
+  const { page, ctx, errors } = await newPage(true, { offline: true, viewport: { width: 393, height: 800 }, before: async pg => { await ofmStub(pg); await pg.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n; }, [7, size]); } });
+  await page.waitForFunction(() => window.__app.offline.offlineActive() && !!window.__app.map.map.getSource('protomaps'), null, { timeout: 15000 }).catch(() => {});
+  for (const [name, lat, lon, z] of (process.env.ADDR_AT || 'a,49.8070,24.0450,17.3;b,49.8010,24.0520,17.6;c,49.8010,24.0520,18.6').split(';').map(x => x.split(',').map((v, i) => i ? +v : v))) {
+    await app(page, ([lat, lon, z]) => { const P = window.__app; P.map.view.follow = false; P.map.view.lastTouch = Date.now() + 3600e3; P.map.map.jumpTo({ center: [lon, lat], zoom: z, pitch: 0, bearing: 0 }); }, [lat, lon, z]);
+    await sleep(3500);
+    const r = await app(page, () => { const m = window.__app.map.map, f = m.querySourceFeatures('addr', { sourceLayer: 'housenumber' }), d = m.queryRenderedFeatures({ layers: ['reis-house'] }).map(x => String(x.properties.housenumber));
+      return { inData: f.length, drawn: d.length, sample: [...new Set(d)].slice(0, 14), A: { ...window.__app.addr.addr }, err: window.__app.addr.packs.err }; });
+    console.log('ADDRREAL', name, JSON.stringify(r));
+    await shot(page, 'addr-real-' + name);
+  }
+  console.log('ADDRREAL req', JSON.stringify(PACKS.req), 'ofm', OFM.tiles.length);
+  ok('справжні пачки номерів на справжній карті — без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('справжні пачки номерів', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; PACKS.on = false; OFM.down = false; }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
 if (run('2')) try {
