@@ -16,7 +16,9 @@ export const ms = {
 };
 let lastT = 0, hx = 0, hy = 0, hz = 0, peak = 0, cnt = 0, secT = 0, started = false, lastHandled = 0;
 // Сирі заміри для калібрування телефона (calib.js): кожна подія датчиків як є — кутова швидкість у осях телефона й прискорення з тяжінням.
-let rawFn = null;
+let rawFn = null, alt = false;
+/** Порядок осей гіроскопа: false — звичайний (alpha, beta, gamma = X, Y, Z), true — запасний (beta, gamma, alpha). Без аргумента — лише прочитати. */
+export function gyroAxes(v) { if (v !== undefined) alt = !!v; return alt; }
 /** Слухати сирі заміри: fn({ t (с), w: [x, y, z] °/с, g: [x, y, z] м/с² }). Повертає функцію «перестати слухати». Слухач один (екран калібрування). */
 export function onRaw(fn) { rawFn = fn; startMotion(); return () => { if (rawFn === fn) rawFn = null; }; }
 function onMotion(e) {
@@ -28,7 +30,12 @@ function onMotion(e) {
   const a = e.acceleration; if (a && a.x != null) ms.acc = Math.hypot(a.x, a.y, a.z);
   if (!r || r.alpha == null) return;
   const m = Math.hypot(ms.up[0], ms.up[1], ms.up[2]) || 1, ux = ms.up[0] / m, uy = ms.up[1] / m, uz = ms.up[2] / m;
-  const wx = r.beta, wy = r.gamma, wz = r.alpha;                      // °/с навколо осей x, y, z телефона
+  // °/с навколо осей x, y, z телефона. УВАГА (1.1.23): у подіях руху alpha — це вісь X, beta — Y, gamma — Z (так роблять усі
+  // браузери, і так тепер записано у стандарті), а НЕ «alpha навколо Z», як у кутах положення телефона. З 1.1.12 тут стояло
+  // навпаки: поворот телефона навколо вертикалі читався як нахил уперед-назад — калібрування на справжньому телефоні не йшло,
+  // а різкий поворот фури міг зійти за «телефон крутять у руках». alt — запасний порядок (якщо калібрування побачить, що на
+  // цьому телефоні осі все ж переставлено — звіряє з акселерометром, calib.js).
+  const wx = alt ? r.beta : r.alpha, wy = alt ? r.gamma : r.beta, wz = alt ? r.alpha : r.gamma;
   if (rawFn) { try { rawFn({ t: now, w: [wx, wy, wz], g: [g.x, g.y, g.z] }); } catch (_) {} }
   const wUp = wx * ux + wy * uy + wz * uz;                             // навколо вертикалі (проти годинникової — плюс)
   ms.rate = Math.hypot(wx, wy, wz); ms.rateUp = -wUp; ms.yaw -= wUp * dt;

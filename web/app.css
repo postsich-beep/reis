@@ -34,7 +34,7 @@ svg{display:block}
 #map{position:absolute;inset:0}
 body[data-theme="night"] .maplibregl-canvas{filter:invert(1) hue-rotate(180deg) brightness(.86) contrast(.9) saturate(.75)}
 body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлайн-карта вночі має власні темні кольори */
-#attr{position:absolute;right:8px;bottom:calc(var(--bh,150px) + 4px);font-size:12px;line-height:18px;min-width:18px;text-align:center;color:var(--ink-2);background:color-mix(in srgb,var(--panel) 72%,transparent);padding:0 4px;border-radius:9px;white-space:nowrap;opacity:.65;z-index:3;cursor:pointer}
+#attr{position:absolute;right:8px;bottom:calc(var(--bh,150px) - var(--bf,0px) + 4px);font-size:12px;line-height:18px;min-width:18px;text-align:center;color:var(--ink-2);background:color-mix(in srgb,var(--panel) 72%,transparent);padding:0 4px;border-radius:9px;white-space:nowrap;opacity:.65;z-index:3;cursor:pointer}
 #attr.open{opacity:1;font-size:11px;padding:2px 8px}
 
 /* ---- верх: маневр і шторка ---- */
@@ -88,15 +88,21 @@ body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлай
 #cam small{display:block;font:400 11px/1.1 var(--f-ui);color:var(--ink-2)}
 
 /* ---- низ ---- */
-#bottom{position:absolute;left:0;right:0;bottom:0;background:var(--panel);border-radius:20px 20px 0 0;box-shadow:0 -4px 18px rgba(12,20,30,.16);padding:8px 12px calc(var(--sb) + 6px);z-index:6}
-#tripbar{display:flex;align-items:center;gap:10px;min-height:46px;padding:0 2px}
-.tb-main{flex:1;min-width:0;display:flex;flex-direction:column}
-.tb-main b{font:800 34px/1 var(--f-num);font-variant-numeric:tabular-nums}
+/* (1.1.23) #bottom — прозорий стовпчик: згори вниз плашка оновлення, «прийняти GPS», рядок із плашкою часу прибуття, і сама нижня плашка
+   (#tabbar) — лише кнопки й стрілка нахилу. Крізь прозоре видно карту, і дотики там ідуть карті. */
+#bottom{position:absolute;left:0;right:0;bottom:0;z-index:6;pointer-events:none}
+#bottom > *{pointer-events:auto}
+#tabbar{position:relative;background:var(--panel);border-radius:20px 20px 0 0;padding:7px 58px calc(var(--sb) + 6px) 12px}   /* праворуч — місце під стрілку нахилу */
+#tripbar{display:flex;align-items:flex-end;justify-content:space-between;gap:10px;padding:0 10px 6px;pointer-events:none}
+#tripbar > *{pointer-events:auto}
+/* час прибуття, під ним — скільки лишилось: маленька плашка завширшки як сам напис */
+.tb-main{flex:0 1 auto;min-width:0;max-width:calc(100% - 76px);display:flex;flex-direction:column;background:var(--panel);border-radius:14px;padding:6px 12px 6px}
+.tb-main b{font:800 27px/1 var(--f-num);font-variant-numeric:tabular-nums}
 .chip{flex:none;display:flex;align-items:center;gap:6px;padding:7px 11px;border-radius:999px;background:var(--panel-2);font:600 14px/1 var(--f-ui);white-space:nowrap}
 .chip i{width:10px;height:10px;border-radius:50%;background:var(--green)}
 .chip.weak i{background:var(--yellow)} .chip.lost{background:var(--red);color:#fff} .chip.lost i{background:#fff} .chip.none i{background:var(--line)}
-#bAcceptGps{width:100%;min-height:44px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px;margin-bottom:6px}
-.tb-row{display:flex;align-items:baseline;gap:10px;min-width:0}
+#bAcceptGps{display:block;width:calc(100% - 20px);margin-inline:10px;min-height:44px;border-radius:12px;background:var(--amber);color:var(--amber-ink);font-weight:600;padding:6px 10px;margin-bottom:6px}
+.tb-row{display:flex;flex-direction:column;align-items:flex-start;gap:3px;min-width:0}
 .tb-row span{font-size:14px;color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .nudge{flex:none;display:flex;flex-direction:column;gap:6px}
 .nudge button{width:88px;height:40px;border-radius:999px;border:2px solid var(--ink-2);background:var(--panel);color:var(--ink);display:flex;align-items:center;justify-content:center;gap:4px;font:800 20px/1 var(--f-num)}
@@ -267,7 +273,7 @@ body[data-theme="night"]{
 #bCenter.need{background:var(--amber)}
 #speed{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none}
 #cam{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none;border:1px solid var(--edge)}
-#bottom{background:rgba(var(--glass-rgb),var(--ga));box-shadow:none;border-top:1px solid var(--edge)}
+#tabbar,.tb-main{background:rgba(var(--glass-rgb),var(--ga))} #tabbar{border-top:1px solid var(--edge)} .tb-main{border:1px solid var(--edge)}
 #tabs button.act{background:rgba(var(--glass2-rgb),calc(var(--ga) + .15))}
 .chip{background:rgba(var(--glass2-rgb),var(--ga))}
 .chip.lost{background:var(--red)}
@@ -331,7 +337,7 @@ body[data-theme="night"]{
 @media (orientation:landscape) and (max-height:520px){
   #top{right:auto;width:46%}
   #panel{left:auto;width:46%;top:calc(var(--st) + 6px);border-radius:20px 0 0 0}
-  #bottom{left:auto;width:46%;border-radius:20px 0 0 0}
+  #bottom{left:auto;width:46%} #tabbar{border-radius:20px 0 0 0}
   #speed{bottom:14px}#cam{bottom:26px}#zoom{right:calc(46% + 10px);bottom:14px}#rail{right:calc(46% + 10px);top:calc(var(--st) + 10px)}
   #attr{bottom:4px;right:calc(46% + 8px)}
   #panel{bottom:calc(var(--bh,150px) - 14px)}   /* панель закінчується над нижньою плашкою — кнопки внизу форми не ховаються під неї */
@@ -554,7 +560,7 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
   .q-tile{min-height:72px} .q-l{font-size:13px} .q-s{font-size:12px}
 }
 /* адаптивність (1.0.19): «Моє місце» не налазить на ⓘ; рядок втрати GPS — достатньо високий для пальця */
-#zoom{bottom:calc(var(--bh,150px) + 30px)}
+#zoom{bottom:calc(var(--bh,150px) - var(--bf,0px) + 30px)}      /* (1.1.23) --bf — висота прозорого рядка над кнопками, коли праворуч у ньому вільно: «Моє місце» опускається туди */
 @media (orientation:landscape) and (max-height:520px){
   #rail{right:10px;top:calc(var(--st) + 10px)}
   #zoom{bottom:30px}
@@ -652,7 +658,7 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 @media (max-width:350px){ .rp-cards .alt b{font-size:18px} .rp-btns .btn{padding:0 8px;font-size:14px} }
 .alts{grid-auto-flow:row;grid-template-columns:1fr 1fr;overflow:visible}
 /* плашка оновлення (1.1.1): зелена смуга над нижньою панеллю; під час завантаження — заповнюється */
-#updBar{display:flex;align-items:stretch;gap:6px;margin-bottom:6px}
+#updBar{display:flex;align-items:stretch;gap:6px;margin:0 10px 6px}
 #updBar[hidden]{display:none}
 #updGo{flex:1;min-width:0;min-height:44px;display:flex;align-items:center;gap:8px;padding:6px 12px;border-radius:12px;background:var(--green);color:#fff;font-weight:700;font-size:15px;text-align:left;
   text-shadow:none;background-image:linear-gradient(90deg,rgba(255,255,255,.28) var(--p,0%),transparent var(--p,0%))}
@@ -700,7 +706,8 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 #tabs button.main .mc{width:46px;height:46px;margin-top:-14px}
 #tabs button.main .mc svg{width:25px;height:25px}
 #gpsChip{display:none!important}
-.tb-row span{font:700 19px/1.15 var(--f-num);color:var(--ink);letter-spacing:.01em}
+.tb-row span{max-width:100%;font:700 16px/1.1 var(--f-num);color:var(--ink);letter-spacing:.01em}
+.tb-row span:empty{display:none}
 /* «Маршрут» у дорозі (1.1.4): залишок маршруту на карті, три кнопки */
 .ts-more{margin-left:auto;flex:none;padding:6px 10px;border-radius:10px;background:var(--panel-2);color:var(--ink-2);font-size:13px;font-weight:600}
 .ts-kv{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:2px 0 4px}
@@ -889,9 +896,12 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .pl-ok:active{transform:scale(.94)}
 /* вузький екран (до 340): плитки по три в ряд, щоб написи не обрізались */
 @media (max-width:340px){ .pl-chips{grid-template-columns:repeat(3,minmax(0,1fr))} }
-/* відкриті «Місця»: дані рейсу (час прибуття, км, хвилини) у нижній плашці не показуємо — списку більше місця */
-body.places-on #tripbar .tb-main{display:none}
-body.places-on #tripbar:not(:has(.nudge:not([hidden]))){display:none}
+/* відкрита панель (з 1.1.22 — «Місця», з 1.1.23 — будь-яка): плашку з часом прибуття ховаємо — панелі більше місця, і вона стає
+   просто на нижню плашку, без прозорої щілини. Кнопки «без GPS» (Поворот, ±100 м) лишаються. */
+body.panel-open #tripbar .tb-main{display:none}
+body.panel-open #tripbar:not(:has(.nudge:not([hidden]))){display:none}
+/* над кнопками щось стоїть (кнопки «без GPS», «Нова версія», «прийняти GPS») — це окремі кнопки на прозорому, тож панель під них не заходить */
+#bottom:has(.nudge:not([hidden]),#updBar:not([hidden]),#bAcceptGps:not([hidden])) ~ #panel:not(.full){bottom:var(--bh,150px)}
 .pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
 .pl-row .grow{min-width:0}
 .pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -919,7 +929,6 @@ body.places-on #tripbar:not(:has(.nudge:not([hidden]))){display:none}
 .nudge.has-turn .turn-btn{grid-column:1;grid-row:1/span 2}
 .nudge.has-turn #bFwd100{grid-column:2;grid-row:1}.nudge.has-turn #bBack100{grid-column:2;grid-row:2}
 .nudge .turn-btn{width:68px;height:86px;border-radius:20px;flex-direction:column;border-width:3px;gap:4px;font:800 16px/1 var(--f-num);padding:0 2px}
-#tripbar:has(.nudge.has-turn) .tb-row{flex-wrap:wrap;row-gap:2px}
 .nudge .turn-btn svg{width:30px;height:30px;flex:none}
 .nudge .turn-btn span{white-space:nowrap}
 .nudge .turn-btn.red{border-color:#e5484d}.nudge .turn-btn.yellow{border-color:#f6bd16}
@@ -940,7 +949,7 @@ body.kb #panel{top:calc(var(--st) + 6px);bottom:0;left:0;right:0;margin-inline:a
 body.kb #speed,body.kb #zoom,body.kb #cam,body.kb #rail,body.kb #attr,body.kb #top{visibility:hidden}
 /* складаємо рейс (форма «Рейс» або плашка точок): нижня плашка непрозора — під вкладками не просвічують підписи карти.
    В інших панелях (зокрема в «Налаштуваннях», де прозорість плашок якраз і вибирають) вона лишається як налаштовано. */
-body.planning #bottom,body.pts-on #bottom{background:var(--panel)}
+body.planning #tabbar,body.pts-on #tabbar{background:var(--panel)}
 body.planning #tripbar{display:none}   /* складаємо рейс: годинник у нижній плашці не забирає місце у форми */
 body.pts-on #pick{z-index:14}   /* картка точки — поверх плашки точок (у телефоні набік вони в одній колонці) */
 /* ---- 1.1.12: ПЛАНШЕТ (і вертикально, і горизонтально) ----
@@ -974,7 +983,6 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 /* ---- 1.1.22: нахил карти — стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла (1.1.21: повзунок-капсула над «Моїм місцем») ---- */
 #zoom{align-items:center;pointer-events:none}        /* сам стовпчик дотиків не ловить */
 #zoom > *{pointer-events:auto}
-#bottom{padding-right:58px}                          /* усе в плашці посунуто ліворуч — праворуч місце під стрілку нахилу */
 #tilt{--tv:0;position:absolute;right:6px;top:6px;bottom:calc(var(--sb) + 4px);width:48px;color:var(--ink);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;cursor:ns-resize;outline:none;border-radius:14px}
 #tilt:focus-visible{box-shadow:0 0 0 3px var(--route)}
 .tl-track{position:absolute;inset:0;display:block}
@@ -984,7 +992,7 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 #tilt.drag .tl-thumb{transform:scale(1.18);color:var(--amber)}
 #tilt:not(.drag) .tl-thumb{transition:bottom .18s ease-out,transform .12s,color .12s}
 #tilt.flat .tl-dn,#tilt.max .tl-up{opacity:.28}      /* на краю: далі нікуди */
-@media (max-width:340px){ #bottom{padding:8px 52px calc(var(--sb) + 6px) 8px} #tilt{right:4px;width:44px} }
+@media (max-width:340px){ #tabbar{padding:7px 52px calc(var(--sb) + 6px) 8px} #tilt{right:4px;width:44px} }
 
 /* ---- 1.1.22: «Мітки» — позначки попереду на маршруті (список у вікні) ---- */
 .rep-near{margin:2px 0 10px}
@@ -1005,19 +1013,27 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-head b{flex:1;min-width:0;font:700 19px/1.2 var(--f-ui)}
 .cb-x{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:#eef2f6;background:rgba(255,255,255,.08)}
 .cb-x svg{width:24px;height:24px}
-.cb-steps{flex:none;list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 0;padding:0}
-.cb-steps li{display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:8px;border-top:4px solid rgba(255,255,255,.14);color:#8693a0;font:600 12.5px/1.15 var(--f-ui);text-align:center;min-width:0}
-.cb-steps li b{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.1);font:800 14px/1 var(--f-num);color:#c4ccd4}
-.cb-steps li svg{width:26px;height:26px;padding:4px;border-radius:50%;background:rgba(255,255,255,.1)}
-.cb-steps li.cur{border-color:var(--amber);color:#fff}
+/* (1.1.23) три малюнки з рукою — це три кроки: екран до себе · ліва грань · права грань. Поточний підсвічено, зроблений — із галочкою */
+.cb-steps{list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 8px;padding:0;width:100%}
+.cb-steps li{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 7px;border-radius:14px;border:2px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
+  color:#9aa6b2;font:600 12.5px/1.15 var(--f-ui);text-align:center;min-width:0;transition:border-color .15s,background .15s}
+.cb-pose{display:block;height:88px;opacity:.5;transition:opacity .15s} .cb-pose svg{display:block;height:100%;width:auto}
+.cb-hand{fill:#d9dfe6;stroke:#8d99a6;stroke-width:1.6;stroke-linejoin:round}
+.cb-case{fill:#212934;stroke:#e6ebf0;stroke-width:2}
+.cb-scr{fill:#4f8ff7} .cb-key{fill:#9aa5b1} .cb-bar{fill:none;stroke:#e6ebf0;stroke-width:1.6;stroke-linecap:round}
+.cb-steps li b{position:absolute;left:6px;top:6px;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);font:800 13px/1 var(--f-num);color:#c4ccd4}
+.cb-steps li b svg{width:14px;height:14px;stroke-width:3}
+.cb-tl{display:block;min-height:15px}
+.cb-steps li.cur{border-color:var(--amber);background:rgba(245,163,0,.12);color:#fff}
+.cb-steps li.cur .cb-pose,.cb-steps li.done .cb-pose{opacity:1}
 .cb-steps li.cur b{background:var(--amber);color:var(--amber-ink)}
 .cb-steps li.done{border-color:#2f9e62;color:#9fdcb9}
-.cb-steps li.done b,.cb-steps li.done svg{background:#2f9e62;color:#fff}
+.cb-steps li.done b{background:#2f9e62;color:#fff}
 /* вміст по центру, а якщо не влазить — від верху й прокручується (нічого ні на що не наїжджає) */
 .cb-body{flex:1;min-height:0;display:flex;overflow-y:auto;padding:8px 0 4px}
 .cb-in{margin:auto;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
-.cb-stage{flex:none;width:min(290px,80vw)}
-.cb-gauge{position:relative}
+.cb-stage{flex:none;width:100%;max-width:400px;display:flex;flex-direction:column;align-items:center}
+.cb-gauge{position:relative;width:min(230px,66vw)}
 .cb-dial{display:block;width:100%;height:auto}
 .cb-ring{fill:none;stroke:rgba(255,255,255,.14);stroke-width:10;stroke-linecap:round}
 .cb-goal{fill:none;stroke:#2f9e62;stroke-width:12;stroke-linecap:round}
@@ -1044,7 +1060,9 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-prog i{display:block;width:0;height:100%;border-radius:4px;background:#2f9e62;transition:width .12s linear}
 .cb-hint{min-height:20px;font:600 14.5px/1.35 var(--f-ui);color:#9fb0c0}
 .cb-hint.warn{color:#ffcf5c}
-.cb-foot{flex:none;padding-top:6px;font:400 13px/1.35 var(--f-ui);color:#8693a0;text-align:center}
+.cb-diag{flex:none;min-height:16px;padding-top:4px;font:500 12px/1.3 var(--f-ui);color:#8b97a3;text-align:center}
+.cb-diag.warn{color:#ffcf5c}
+.cb-foot{flex:none;padding-top:4px;font:400 13px/1.35 var(--f-ui);color:#8693a0;text-align:center}
 .cb-res{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:480px}
 .cb-rl,.cb-rr{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%}
 .cb-big{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;font:800 46px/1 var(--f-num);color:#fff;background:#2f9e62;box-shadow:0 0 0 9px rgba(47,158,98,.2);margin:6px 0 4px}
@@ -1057,19 +1075,20 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-btns .btn{flex:1;min-height:52px;font-size:16.5px}
 .cb-btns .btn.pri{flex:1.5}
 .cb-btns .btn:not(.pri){background:rgba(255,255,255,.1);color:#eef2f6}
-@media (max-height:640px){ .cb-foot{display:none} .cb-stage{width:min(250px,76vw)} .cb-in{gap:8px} .cb-big{width:60px;height:60px} .cb-big svg{width:36px;height:36px} }
+@media (max-height:700px){ .cb-foot{display:none} }
+@media (max-height:640px){ .cb-gauge{width:min(190px,58vw)} .cb-pose{height:62px} .cb-in{gap:6px} .cb-ang{min-height:28px;font-size:24px;line-height:28px} .cb-big{width:60px;height:60px} .cb-big svg{width:36px;height:36px} }
 @media (orientation:landscape) and (max-height:520px){
   .cb-head{min-height:44px} .cb-x{width:42px;height:42px}
-  .cb-steps li{flex-direction:row;justify-content:center;gap:7px;padding-top:6px}
   .cb-in{flex-direction:row;justify-content:center;gap:26px}
-  .cb-stage{width:210px} .cb-ang{font-size:24px;min-height:28px}
+  .cb-stage{width:300px} .cb-steps{margin-bottom:4px;gap:6px} .cb-steps li{padding:5px 2px} .cb-pose{height:50px} .cb-gauge{width:176px} .cb-ang{font-size:22px;min-height:24px;line-height:24px;margin-top:0}
   .cb-info{flex:1;max-width:400px}
   .cb-res{flex-direction:row;max-width:none;gap:22px;align-items:center} .cb-rl{flex:1} .cb-rr{flex:1.1}
   .cb-rows div{padding:7px 12px} .cb-btns .btn{min-height:48px}
 }
 @media (min-width:700px) and (min-height:650px){
-  .cb-head b{font-size:23px} .cb-steps li{font-size:15px}
-  .cb-stage{width:380px} .cb-ang{font-size:38px;min-height:44px}
+  .cb-head b{font-size:23px} .cb-steps li{font-size:15.5px;padding:12px 4px 10px;border-radius:18px} .cb-steps{gap:12px;margin-bottom:14px} .cb-pose{height:120px}
+  .cb-steps li b{width:28px;height:28px;font-size:16px;left:9px;top:9px} .cb-steps li b svg{width:17px;height:17px} .cb-diag{font-size:14px}
+  .cb-stage{max-width:560px} .cb-gauge{width:340px} .cb-ang{font-size:38px;min-height:44px}
   .cb-info,.cb-res{max-width:600px} .cb-title{font-size:27px} .cb-text{font-size:18.5px} .cb-hint{font-size:17px;min-height:24px} .cb-prog{width:380px;height:10px}
   .cb-rows span{font-size:17px} .cb-rows b{font-size:21px} .cb-foot{font-size:15px}
   .cb-phone{border-width:3.5px;border-radius:12px} .cb-phone i{inset:8px 6px 12px}
