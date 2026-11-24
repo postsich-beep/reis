@@ -1145,10 +1145,10 @@ function plPic(ty, sh) {
 }
 function plChipsHtml() {
   const chip = ([k, ty, lbl, full]) => { const on = layerOn(k); return `<button class="pl-chip${on ? ' on' : ''}" data-plc="${k}" role="checkbox" aria-checked="${on}"${full ? ` aria-label="${esc(t(full))}"` : ''}>${plPic(k[0] === '@' || k === 'cam' ? k : ty)}<span>${t(lbl)}</span>${on ? `<i class="pl-ck">${ICON.check}</i>` : ''}</button>`; };
-  const any = LAYERS.some(([k]) => layerOn(k)), all = LAYERS.every(([k]) => layerOn(k));
-  return `<div class="pl-chips">${[...PL, ...PL_MAP].map(chip).join('')}</div>
-    <div class="pl-all"><button class="btn sm" data-plc="#all"${all ? ' disabled' : ''}>${t('plAll')}</button><button class="btn sm" data-plc="#none"${any ? '' : ' disabled'}>${t('plNone')}</button></div>`;
+  return `<div class="pl-chips">${[...PL, ...PL_MAP].map(chip).join('')}</div>`;
 }
+const plAllHtml = () => { const any = LAYERS.some(([k]) => layerOn(k)), all = LAYERS.every(([k]) => layerOn(k));
+  return `<div class="pl-all"><button class="btn sm" data-plc="#all"${all ? ' disabled' : ''}>${t('plAll')}</button><button class="btn sm" data-plc="#none"${any ? '' : ' disabled'}>${t('plNone')}</button></div>`; };
 function plRowHtml(x) {
   const [, , ty, f, name, , info] = x.r, fa = (info && info.fa) || [];
   const kind = stopKindLabel(ty, info), title = ty === 'f' ? brandOf(name) : (name || kind);
@@ -1172,7 +1172,9 @@ function vpListHtml() {
 }
 function placesHtml() {
   const keys = PL.filter(([k]) => k[0] !== '@' && layerOn(k)).map(([k]) => k), trip = g.active && g.idx && pos.rd != null && pos.onRoute;
-  let h = plChipsHtml();
+  // Плитки — окремо; усе, що нижче, — у «.pl-rest». Він починається від верху ОСТАННЬОГО ряду плиток (там остання клітинка порожня:
+  // плиток 11), тож квадрат «Готово», що липне до низу, може піднятись у цю порожню клітинку, але не вище — на плитки не лягає ніколи.
+  let h = plAllHtml();
   if (keys.length) {
     const list = plNearest(keys);
     h += `<div class="vp-scope">${t(trip ? 'plScopeRoute' : 'plScopeNear')}</div>`;
@@ -1181,8 +1183,16 @@ function placesHtml() {
   if (layerOn('@mapVerified')) h += vpListHtml();
   if (!keys.length && !layerOn('@mapVerified')) h += `<div class="card vp-empty">${t('plPick')}</div>`;
   // «Готово» (1.1.22) — маленький квадрат із галочкою в правому нижньому куті: завжди під пальцем і не забирає місце в списку
-  return h + `<div class="muted pl-how">${t('vpHowAdd')}</div><div class="pl-done"><button class="pl-ok" data-plc="#done" aria-label="${t('plDone')}">${ICON.check}</button></div>`;
+  return plChipsHtml() + `<div class="pl-rest"><div class="pl-up"></div>${h}<div class="muted pl-how">${t('vpHowAdd')}</div><div class="pl-done"><button class="pl-ok" data-plc="#done" aria-label="${t('plDone')}">${ICON.check}</button></div><div class="pl-end"></div></div>`;
 }
+// Рядок списку, що саме проходить під квадратом «Готово», відсуває свій правий край (відстань лишається на видноті)
+let plDodgeRaf = 0;
+function plDodge() {
+  plDodgeRaf = 0;
+  const ok = document.querySelector('#panelBody .pl-ok'); if (!ok) return; const r = ok.getBoundingClientRect();
+  for (const row of document.querySelectorAll('#panelBody .pl-row, #panelBody .vp-row')) { const b = row.getBoundingClientRect(); row.classList.toggle('dodge', b.bottom > r.top + 1 && b.top < r.bottom - 1); }
+}
+const plDodgeSoon = () => { if (!plDodgeRaf) plDodgeRaf = requestAnimationFrame(plDodge); };
 function plClick(k) {
   if (k === '#all' || k === '#none') setAllLayers(k === '#all');
   else setLayer(k, !layerOn(k));
@@ -1202,7 +1212,7 @@ function placeHtml(p) {
     <div class="btns">${vpOnMap(p) ? `<button class="btn pri" data-vp="go">${g.active ? t('vpVia') : t('vpRoute')}</button><button class="btn" data-vp="map">${t('vpOnMap')}</button>` : ''}</div>
     ${!vpOnMap(p) || p.own ? `<div class="btns"><button class="btn" data-vp="setloc">${t('vpSetLoc')}</button></div>` : ''}`;
 }
-function plDraw(body) { body.innerHTML = placesHtml(); }
+function plDraw(body) { body.innerHTML = placesHtml(); body.onscroll = plDodgeSoon; plDodge(); plDodgeSoon(); }
 definePanel('places', {
   title: () => t('tabPlaces'),
   render(body) {
@@ -1210,7 +1220,7 @@ definePanel('places', {
     body.onclick = e => {
       const c = e.target.closest('[data-plc]');
       if (c && c.dataset.plc === '#done') { closePanel(); return; }
-      if (c) { plClick(c.dataset.plc); const st = body.scrollTop; plDraw(body); body.scrollTop = st; return; }
+      if (c) { plClick(c.dataset.plc); const st = body.scrollTop; plDraw(body); body.scrollTop = st; plDodge(); return; }
       const r = e.target.closest('[data-sti]');
       if (r) { const i = +r.dataset.sti, row = sdb.rows[i]; if (!row) return; closePanel(); flyTo({ lat: row[0], lon: row[1] }, 15); onStopTap({ i, lat: row[0], lon: row[1] }); return; }
       const b = e.target.closest('[data-vpid]'); if (!b) return; vpCur = byIdVp(b.dataset.vpid); if (vpCur) openPanel('place');
