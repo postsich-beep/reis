@@ -31,10 +31,8 @@
 <!-- одна кнопка швидких налаштувань замість стовпчика з 9 кнопок: на вузьких і коротких екранах нічого не накладається -->
 <nav id="rail">
   <button class="rb" id="bQuick" aria-haspopup="dialog" aria-expanded="false"></button>
-  <!-- тип карти (1.1.19): схема чи супутник; і «подивитися в Google» — супутник і панорами вулиць у застосунку Google Maps -->
-  <button class="rb" id="bMap" aria-haspopup="dialog" aria-expanded="false"></button>
-  <!-- що показувати на карті (АЗС, їжа, стоянки, камери…) — одразу з головного екрана -->
-  <button class="rb" id="bLayers" aria-haspopup="dialog" aria-expanded="false"></button>
+  <!-- тип карти: один дотик — схема ↔ супутник (супутник лише з інтернетом) -->
+  <button class="rb" id="bMap" aria-pressed="false"></button>
 </nav>
 <div id="quick" role="dialog" hidden></div>
 <!-- «Моє місце» зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->

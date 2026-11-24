@@ -528,8 +528,6 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
 .q-zoom{display:flex;align-items:center;gap:10px;margin-top:10px}
 .q-zoom span{flex:1;text-align:center;font:600 14px var(--f-ui);color:var(--ink-2)}
 .q-zoom button{flex:none;width:88px;height:52px;border-radius:16px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);font:700 30px/1 var(--f-num)}
-.q-ly .ly-row{min-height:52px}
-.q-ly .btn{margin-top:8px}
 #quick .q-tile,#quick .q-zoom button,#quick .q-x{text-shadow:none}
 @media (orientation:landscape) and (max-height:520px){
   #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
@@ -744,17 +742,12 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 /* «Назад» прилипає до самого низу: під ним нічого не визирає */
 #panel.full #panelBody{padding-bottom:0}
 #panel.full .pb-back{padding-bottom:calc(var(--sb) + 10px);background:linear-gradient(transparent,var(--panel) 18px)}
-/* ---- 1.1.5: «Що показувати на карті» — окрема кнопка справа, під швидкими налаштуваннями ---- */
-#bLayers{margin-top:9px}
-#bLayers svg{width:30px;height:30px}
-#bLayers.off svg{opacity:.45}
 /* голос: старий застосунок — пропонуємо оновити */
 .vfix{margin-bottom:10px;border-left:6px solid var(--yellow)}
 .vfix .btns{margin-top:8px}
-/* в альбомній орієнтації екран низький: «Шари» стоять у ряд ліворуч від швидких налаштувань, а не під ними */
+/* в альбомній орієнтації екран низький: кнопки справа стоять у ряд, а не стовпчиком */
 @media (orientation:landscape) and (max-height:520px){
   #rail{flex-direction:row-reverse}
-  #bLayers{margin-top:0;margin-right:9px}
 }
 /* ---- 1.1.6 ---- */
 /* GPS і трикутник помінялись місцями: кружечок GPS — справа над картою (зелений — сигнал є, червоний — немає),
@@ -845,6 +838,21 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .pl-ck svg{width:12px;height:12px}
 .pl-all{display:flex;gap:8px;margin-bottom:10px}
 .pl-all .btn{flex:1}
+/* 1.1.20: усі галочки карти — тут (кнопки «Шари» справа вгорі більше немає); «Готово» — завжди внизу під пальцем */
+.pl-chip span{max-width:100%;overflow-wrap:anywhere}
+.pl-sub{margin:6px 4px 6px;font:600 12.5px/1.2 var(--f-ui);color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
+.pl-ic.cam{width:24px;height:24px;border:0;box-shadow:none;background:none}
+.pl-ic.cam svg{display:block;width:24px;height:24px}
+.pl-ic.hz{display:grid;place-items:center;width:auto;min-width:26px;height:21px;padding:0 3px;border-radius:5px;background:#fff;border:2px solid var(--red);color:#b4161b;font:700 12px/1 var(--f-ui);box-shadow:none}
+.pl-done{position:sticky;bottom:0;z-index:2;margin:12px -4px 0;padding:14px 4px 4px;background:linear-gradient(to bottom,rgba(var(--glass-rgb),0),rgb(var(--glass-rgb)) 36%)}
+.pl-done .btn{min-height:52px;font-size:17px}
+/* під кнопкою лишається смужка відступу панелі — зафарбовуємо її, щоб рядки списку не визирали з-під «Готово» */
+.pl-done::after{content:"";position:absolute;left:0;right:0;top:100%;height:48px;background:rgb(var(--glass-rgb))}
+/* зовсім низька панель (альбомна в рейсі без GPS): «Готово» не прилипає, а стоїть наприкінці — інакше закривала б плитки */
+.pl-done.flow{position:static;padding-top:0;background:none}
+.pl-done.flow::after{display:none}
+/* вузький екран (до 340): плитки по три в ряд, як на звичайному, — менше гортати до «Ще на карті» */
+@media (max-width:340px){ .pl-chips{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .pl-chip{font-size:13px;padding:8px 2px 6px} }
 .pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
 .pl-row .grow{min-width:0}
 .pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -913,33 +921,12 @@ body.pts-on #pick{z-index:14}   /* картка точки — поверх пл
   #spdPop{bottom:calc(var(--sb) + 130px)}
 }
 
-/* ---- 1.1.19: тип карти — кнопка справа вгорі (між швидкими налаштуваннями й «Що показувати»), віконце як у Google Maps ---- */
+/* ---- 1.1.19: тип карти — кнопка справа вгорі, під швидкими налаштуваннями; з 1.1.20 — один дотик: схема ↔ супутник ---- */
 #bMap{margin-top:9px;padding:0;overflow:hidden}
 #bMap .mt-thumb{display:block;width:42px;height:42px;border-radius:50%;overflow:hidden;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(19,23,28,.18)}
 #bMap .mt-thumb svg{display:block;width:100%;height:100%;filter:none!important}
-#bMap.on .mt-thumb{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--route)}
+#bMap:active{transform:scale(.94)}
 #bMap.nonet .mt-thumb{opacity:.5;filter:grayscale(1)}
 @media (orientation:landscape) and (max-height:520px){ #bMap{margin-top:0;margin-right:9px} }
-/* низький екран (≤ 590): кнопок справа тепер три — коли відкрите меню точки на карті, вони не потрібні й не налазять на нього */
-@media (orientation:portrait) and (max-height:590px){ body:has(#pick:not([hidden])) #rail{visibility:hidden} }
-.mt-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.mt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;padding:7px 6px 8px;border-radius:16px;border:3px solid transparent;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:center}
-.mt-tile.on{border-color:var(--route)}
-.mt-tile[aria-disabled="true"]{opacity:.5}
-.mt-tile[aria-disabled="true"] .mt-pic{filter:grayscale(1)}
-.mt-pic{display:block;width:100%;max-width:132px;aspect-ratio:16/10;border-radius:10px;overflow:hidden}
-.mt-pic svg{display:block;width:100%;height:100%}
-.mt-tile:active,.mt-link:active{transform:scale(.97)}
-.mt-note{margin:8px 2px 0;font-size:13px;line-height:1.35;color:var(--ink-2)}
-.mt-sec{margin:12px 4px 2px;font:600 12.5px/1.2 var(--f-ui);color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
-.mt-link{display:flex;align-items:center;gap:10px;width:100%;min-height:54px;margin-top:6px;padding:6px 10px 6px 8px;border-radius:14px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:left}
-.mt-link[disabled]{opacity:.5}
-.mt-li{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;color:#fff}
-.mt-li svg{width:20px;height:20px}
-.mt-li.gm{background:#ea4335} .mt-li.sv{background:#f9ab00}
-.mt-link .grow{flex:1;min-width:0}
-.mt-link b{display:block;font:600 14.5px/1.2 var(--f-ui)} .mt-link small{display:block;margin-top:1px;font:400 12.5px/1.25 var(--f-ui);color:var(--ink-2)}
-.mt-link > svg{flex:none;width:19px;height:19px;color:var(--ink-2)}
-#quick .mt-tile,#quick .mt-link{text-shadow:none}
 /* супутник уночі: знімок не «перевертаємо» фільтром нічної карти — лише трохи приглушуємо */
 body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturate(.9)}
