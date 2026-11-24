@@ -900,6 +900,8 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
    просто на нижню плашку, без прозорої щілини. Кнопки «без GPS» (Поворот, ±100 м) лишаються. */
 body.panel-open #tripbar .tb-main{display:none}
 body.panel-open #tripbar:not(:has(.nudge:not([hidden]))){display:none}
+/* над кнопками щось стоїть (кнопки «без GPS», «Нова версія», «прийняти GPS») — це окремі кнопки на прозорому, тож панель під них не заходить */
+#bottom:has(.nudge:not([hidden]),#updBar:not([hidden]),#bAcceptGps:not([hidden])) ~ #panel:not(.full){bottom:var(--bh,150px)}
 .pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
 .pl-row .grow{min-width:0}
 .pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

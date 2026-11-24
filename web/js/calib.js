@@ -63,7 +63,10 @@ export const CAL = {
   TURN_MIN: 70, TURN_MAX: 124,   // що вважаємо «приблизно 90°» для одного повороту (точність дає розмах, а не цей коридор)
   K_DEAD: 0.04,          // у межах ±4 % гіроскоп «у нормі»: поправка 1 (рука неточніша за датчик)
   K_MIN: 0.86, K_MAX: 1.16,      // розумні межі поправки: далі — повернули не на 90°
-  ASYM: 0.22,            // ліворуч і праворуч мають бути схожі (різниця до 22 % від середнього) — інакше десь не довели до «ребром»
+  ASYM: 0.22,            // ліворуч і праворуч мають бути схожі (різниця до 22 % від середнього) — інакше десь не довели до грані
+  // Один бік не довели до грані — це і «боки різні», і «розмах замалий» разом; саме так воно й виглядає як «гіроскоп занижує на 10 %».
+  // Справжня похибка гіроскопа дає боки ОДНАКОВІ. Тому велика поправка (понад 6 %) при помітно різних боках (понад 12 %) — це рука, а не датчик.
+  ASYM_K: 0.12, K_SURE: 0.06,
   BIAS_BAD: 1.0,         // °/с — дрейф, з яким гіроскопу довіряти не варто
   RIGID_RMS: 0.25,       // °/с — розкид кутової швидкості, нижче якого телефон «закріплено» (тримач, стіл), а не в руці
   AX_TURN: 50, AX_BAD: 35, AX_OK: 18,   // самоперевірка осей гіроскопа: після повороту на AX_TURN° «угору» за гіроскопом має збігатися з акселерометром (до AX_OK°); розбіжність понад AX_BAD° при тому, що запасний порядок осей збігається, — осі переставлено
@@ -256,7 +259,7 @@ export function judge({ left, right, bias, yawBias, rigid, pose, hz, nat, loss }
     web: +(web / 2).toFixed(1), loss: +(+loss || 0).toFixed(1), native: nat ? +(+nat.N).toFixed(1) : null,
     bias: +(+(yawBias != null ? yawBias : bias) || 0).toFixed(3), rigid: !!rigid, pose: pose || null, hz: hz || 0, why: '' };
   if (Math.abs(+bias || 0) > CAL.BIAS_BAD) { r.ok = false; r.why = 'bias'; r.bias = +(+bias).toFixed(2); }
-  else if (asym > CAL.ASYM) { r.ok = false; r.why = 'asym'; }
+  else if (asym > CAL.ASYM || (asym > CAL.ASYM_K && Math.abs(kRaw - 1) > CAL.K_SURE)) { r.ok = false; r.why = 'asym'; }
   else if (src === 'web' && r.loss > CAL.LOSS_MAX) { r.ok = false; r.why = 'jank'; }
   else if (kRaw < CAL.K_MIN || kRaw > CAL.K_MAX) { r.ok = false; r.why = 'range'; }
   return r;
