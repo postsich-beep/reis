@@ -1279,9 +1279,9 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await page.click('#panelClose');
     await page.click('#bQuick'); await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває шторку`, await app(page, () => document.getElementById('quick').hidden));
     await page.click('#bQuick'); ok(`${T}: системна «Назад» закриває шторку`, await app(page, () => window.__reisBack() && document.getElementById('quick').hidden));
-    // вкладки внизу: кожна відкриває свою панель і закривається
+    // кружечок GPS біля круга швидкості (1.1.22) і вкладки внизу: кожне відкриває свою панель і закривається
     for (const [tab, re] of [['gps', /GPS/], ['feed', /Події/], ['trip', /Рейс/], ['places', /Місця/]]) {
-      await page.click(`#tabs button[data-panel="${tab}"]`);
+      await page.click(tab === 'gps' ? '#spdGps' : `#tabs button[data-panel="${tab}"]`);
       if (tab === 'trip') {     // у дорозі «Рейс» — шторка з усім залишком рейсу, закривається «Залишитись у рейсі»
         ok(`${T}: вкладка «Рейс» у дорозі — шторка з рейсом`, await app(page, () => document.getElementById('routePick').dataset.mode === 'trip' && !document.getElementById('routePick').hidden && /Залишитись у рейсі/.test(document.getElementById('routePick').textContent)));
         await page.click('#routePick [data-ts="stay"]');
@@ -1291,8 +1291,9 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
       const ttl = await app(page, () => document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent);
       ok(`${T}: вкладка «${tab}» відкриває панель`, re.test(ttl), ttl);
       if (tab === 'feed') await page.click('#panelBody .pb-back button');          // «Події» на весь екран — закриває «Назад» унизу
+      else if (tab === 'gps') await page.click('#panelClose');                     // панель GPS накриває круг швидкості — закриваємо хрестиком
       else await page.click(`#tabs button[data-panel="${tab}"]`);
-      ok(`${T}: ${tab === 'feed' ? '«Назад»' : 'повторний дотик'} закриває «${tab}»`, await app(page, () => document.getElementById('panel').hidden));
+      ok(`${T}: ${tab === 'feed' ? '«Назад»' : tab === 'gps' ? 'хрестик' : 'повторний дотик'} закриває «${tab}»`, await app(page, () => document.getElementById('panel').hidden));
     }
     // трикутник у нижній панелі відкриває «Що на дорозі?»
     await page.click('#tabRep');
@@ -3508,7 +3509,7 @@ if (run('32')) try {
     const c5b = await calSt(page), r5 = c5b.st.result || {};
     await shot(page, '46-calib-4-' + sc.n);
     if (main) {
-      ok(`[${T}] праворуч через пряме до 90° і затримали — «Телефон відкалібровано»: 90° цей телефон бачить як ${r5.seen90}° (гіроскоп занижує на 10 %), поправка +11 %; голос «Готово…»`, c5.step === 4 && r5.ok && !r5.fine && Math.abs(r5.seen90 - 81) < 2.5 && Math.abs(r5.k - 1.111) < 0.035 && /Телефон відкалібровано/.test(c5b.title) && /бачить як = 8\d,\d° \| Поправка = \+1\d,\d % \| Телефон тримали = з нахилом 20°/.test(c5b.rows) && c5b.spoken.some(x => /Готово\. Телефон відкалібровано/.test(x)) && /cal-done/.test(c5b.sfx) && c5b.btns === 'Готово | Повторити' && c5b.steps === '✓1Тримати | ✓2Ліворуч | ✓3Праворуч | ✓Готово', JSON.stringify({ r5, rows: c5b.rows, title: c5b.title, spoken: c5b.spoken, sfx: c5b.sfx, btns: c5b.btns, steps: c5b.steps }));
+      ok(`[${T}] праворуч через пряме до 90° і затримали — «Телефон відкалібровано»: 90° цей телефон бачить як ${r5.seen90}° (гіроскоп занижує на 10 %), поправка +11 %; голос «Готово…»`, c5.step === 4 && r5.ok && !r5.fine && Math.abs(r5.seen90 - 81) < 2.5 && Math.abs(r5.k - 1.111) < 0.035 && /Телефон відкалібровано/.test(c5b.title) && /бачить як = 8\d(,\d)?° \| Поправка = \+1\d(,\d)? % \| Телефон тримали = з нахилом 20°/.test(c5b.rows) && c5b.spoken.some(x => /Готово\. Телефон відкалібровано/.test(x)) && /cal-done/.test(c5b.sfx) && c5b.btns === 'Готово | Повторити' && c5b.steps === '✓1Тримати | ✓2Ліворуч | ✓3Праворуч | ✓Готово', JSON.stringify({ r5, rows: c5b.rows, title: c5b.title, spoken: c5b.spoken, sfx: c5b.sfx, btns: c5b.btns, steps: c5b.steps }));
       ok(`[${T}] кожен зарахований крок — ще й вібрацією (екрана «ребром» не видно): коротко, коротко, довго`, /(^|,)160,(.*,)?160,(.*,)?350$/.test(await app(page, () => window.__vib.join())), await app(page, () => window.__vib.join()));
     } else ok(`[${T}] праворуч через пряме до 90° і затримали — «Телефон відкалібровано»: гіроскоп точний (90° бачить як ${r5.seen90}°), поправка не потрібна; телефон тримали ${up[0] === 1 ? 'набік' : 'з нахилом'}`, c5.step === 4 && r5.ok && r5.fine && r5.k === 1 && Math.abs(r5.seen90 - 90) < 2.5 && /Поправка = не потрібна/.test(c5b.rows) && (up[0] === 1 ? /набік/.test(c5b.rows) : /з нахилом 20°/.test(c5b.rows)) && /Гіроскоп цього телефона точний/.test(c5b.text), JSON.stringify({ r5, rows: c5b.rows, text: c5b.text }));
     ok(`[${T}] результат: усе читається, кнопки «Готово» й «Повторити» в межах екрана`, (await readCheck(page, '#calib')).length === 0 && (b => b.w >= 120 && b.h >= 48 && b.b <= sc.h && b.r <= sc.w)(await box('#calib [data-cb="save"]')), JSON.stringify([await readCheck(page, '#calib'), await box('#calib [data-cb="save"]')]));
