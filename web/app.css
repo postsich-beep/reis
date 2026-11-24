@@ -550,6 +550,8 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
   #pick{bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--th,140px) - var(--bh,150px) - 88px)}
   body:has(#pick:not([hidden])) :is(#speed,#cam,#attr,#zoom){visibility:hidden}
 }
+/* дуже низький екран (320×568): перемикач типу карти довгий — поки відкрите меню точки, кнопки справа не потрібні й ховаються */
+@media (orientation:portrait) and (max-height:590px){ body:has(#pick:not([hidden])) #rail{visibility:hidden} }
 @media (orientation:landscape) and (max-height:520px){
   #pick{left:auto;right:10px;width:calc(46% - 20px);bottom:calc(var(--bh,150px) + 10px);max-height:calc(100% - var(--st) - var(--bh,150px) - 84px);overflow:auto}   /* нижче кнопки швидких налаштувань */
 }
@@ -826,33 +828,48 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 #spdLim.pop{animation:limpop .6s ease-out}
 @keyframes limpop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}
 
-/* ---------- 1.1.9: Місця — квадратики «що шукаю» і найближчі попереду ---------- */
-.pl-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px;margin:2px 0 8px}
-.pl-chip{position:relative;min-height:64px;padding:8px 4px 6px;border-radius:14px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;
-  background:rgba(var(--glass2-rgb),.55);color:var(--ink);font:700 14px/1.15 var(--f-ui);border:2px solid transparent;text-align:center;min-width:0}
+/* ---------- Місця: плитки «що показувати» і найближчі попереду ----------
+   1.1.9 — шість квадратиків; 1.1.20 — усі одинадцять галочок карти тут; 1.1.22 — плитки компактні (по чотири в ряд),
+   замість кружечків — мінізображення, «Готово» — маленький квадрат у куті: список із відстанями видно одразу. */
+.pl-chips{display:grid;grid-template-columns:repeat(auto-fill,minmax(77px,1fr));grid-auto-rows:55px;gap:6px;margin:0 0 6px}
+.pl-chip{position:relative;min-height:52px;padding:5px 2px 5px;border-radius:13px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;
+  background:rgba(var(--glass2-rgb),.55);color:var(--ink);font:700 12.5px/1.12 var(--f-ui);border:2px solid transparent;text-align:center;min-width:0}
 .pl-chip.on{border-color:var(--blue,#2f6bff);background:rgba(var(--glass2-rgb),.85)}
-.pl-chip:not(.on){opacity:.72}
-.pl-ic{width:20px;height:20px;border-radius:50%;border:2.5px solid #fff;box-shadow:0 0 0 1px rgba(0,0,0,.15)}
-.pl-ic.vp{display:grid;place-items:center;background:#f5a524;color:#3d2500;font-size:13px;line-height:1;border-color:#f5b301;text-shadow:none}
-.pl-ck{position:absolute;top:4px;right:5px;width:18px;height:18px;border-radius:50%;background:var(--blue,#2f6bff);color:#fff;display:grid;place-items:center}
-.pl-ck svg{width:12px;height:12px}
-.pl-all{display:flex;gap:8px;margin-bottom:10px}
-.pl-all .btn{flex:1}
-/* 1.1.20: усі галочки карти — тут (кнопки «Шари» справа вгорі більше немає); «Готово» — завжди внизу під пальцем */
-.pl-chip span{max-width:100%;overflow-wrap:anywhere}
-.pl-sub{margin:6px 4px 6px;font:600 12.5px/1.2 var(--f-ui);color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
-.pl-ic.cam{width:24px;height:24px;border:0;box-shadow:none;background:none}
-.pl-ic.cam svg{display:block;width:24px;height:24px}
-.pl-ic.hz{display:grid;place-items:center;width:auto;min-width:26px;height:21px;padding:0 3px;border-radius:5px;background:#fff;border:2px solid var(--red);color:#b4161b;font:700 12px/1 var(--f-ui);box-shadow:none}
-.pl-done{position:sticky;bottom:0;z-index:2;margin:12px -4px 0;padding:14px 4px 4px;background:linear-gradient(to bottom,rgba(var(--glass-rgb),0),rgb(var(--glass-rgb)) 36%)}
-.pl-done .btn{min-height:52px;font-size:17px}
-/* під кнопкою лишається смужка відступу панелі — зафарбовуємо її, щоб рядки списку не визирали з-під «Готово» */
-.pl-done::after{content:"";position:absolute;left:0;right:0;top:100%;height:48px;background:rgb(var(--glass-rgb))}
-/* зовсім низька панель (альбомна в рейсі без GPS): «Готово» не прилипає, а стоїть наприкінці — інакше закривала б плитки */
-.pl-done.flow{position:static;padding-top:0;background:none}
-.pl-done.flow::after{display:none}
-/* вузький екран (до 340): плитки по три в ряд, як на звичайному, — менше гортати до «Ще на карті» */
-@media (max-width:340px){ .pl-chips{grid-template-columns:repeat(3,minmax(0,1fr));gap:6px} .pl-chip{font-size:13px;padding:8px 2px 6px} }
+.pl-chip:not(.on){opacity:.66}
+.pl-chip span:last-of-type{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pl-ic{flex:none;width:24px;height:24px;border-radius:50%;box-shadow:0 0 0 1.5px rgba(255,255,255,.9),0 0 0 2.5px rgba(0,0,0,.14)}
+.pl-ic.pic{display:grid;place-items:center}
+.pl-ic.pic svg{display:block;width:17px;height:17px;filter:none}
+.pl-ic.pic.sh{box-shadow:0 0 0 2.5px #06b6d4}                                    /* у точки є душ — бірюзовий обідок, як на карті */
+.pl-ic.vp{display:grid;place-items:center;background:#f5a524;color:#3d2500;font-size:15px;line-height:1;text-shadow:none}
+.pl-ic.cam{width:25px;height:25px;box-shadow:none;background:none}
+.pl-ic.cam svg{display:block;width:25px;height:25px}
+.pl-ic.rep{width:27px;height:25px;border-radius:0;box-shadow:none;background:none}
+.pl-ic.rep svg{display:block;width:27px;height:27px;margin-top:-1px}
+.pl-ic.hz{display:grid;place-items:center;width:auto;min-width:27px;height:22px;padding:0 3px;border-radius:5px;background:#fff;border:2px solid var(--red);color:#b4161b;font:700 12px/1 var(--f-ui);box-shadow:none}
+.pl-ck{position:absolute;top:3px;right:3px;width:16px;height:16px;border-radius:50%;background:var(--blue,#2f6bff);color:#fff;display:grid;place-items:center}
+.pl-ck svg{width:11px;height:11px}
+.pl-all{display:flex;gap:6px;margin:0 60px 10px 0}                 /* праворуч — місце під квадрат «Готово» */
+.pl-all .btn{flex:1;min-height:38px;padding:4px 6px;font-size:14px}
+.pl-how{margin-top:12px;padding-right:60px}
+/* «Готово» — маленький квадрат із галочкою в правому нижньому куті «Місць»: липне до низу, висоти в списку не займає.
+   Нічого не закриває: вище за останній ряд плиток піднятись не може (а там остання клітинка порожня), кнопки «Показати все /
+   Прибрати все» лишають йому місце праворуч, а рядок списку під ним відсуває правий край (.dodge). */
+.pl-rest{margin-top:-61px;pointer-events:none}
+.pl-rest > *{pointer-events:auto}
+.pl-up{height:61px;pointer-events:none}
+.pl-done{position:sticky;bottom:-10px;height:54px;z-index:2;display:flex;justify-content:flex-end;pointer-events:none}   /* без від'ємного відступу: інакше квадрат міг би піднятись вище за «.pl-rest» */
+.pl-end{height:10px;pointer-events:none}
+.pl-row.dodge,.vp-row.dodge{padding-right:68px}
+.pl-ok{flex:none;width:54px;height:54px;border-radius:16px;display:grid;place-items:center;pointer-events:auto;
+  background:var(--amber);color:var(--amber-ink);box-shadow:0 4px 14px rgba(0,0,0,.38),0 0 0 2px rgba(var(--glass-rgb),.9)}
+.pl-ok svg{width:30px;height:30px;stroke-width:2.6}
+.pl-ok:active{transform:scale(.94)}
+/* вузький екран (до 340): плитки по три в ряд, щоб написи не обрізались */
+@media (max-width:340px){ .pl-chips{grid-template-columns:repeat(3,minmax(0,1fr))} }
+/* відкриті «Місця»: дані рейсу (час прибуття, км, хвилини) у нижній плашці не показуємо — списку більше місця */
+body.places-on #tripbar .tb-main{display:none}
+body.places-on #tripbar:not(:has(.nudge:not([hidden]))){display:none}
 .pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
 .pl-row .grow{min-width:0}
 .pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -915,18 +932,46 @@ body.pts-on #pick{z-index:14}   /* картка точки — поверх пл
   #quick,#wherePop,#pick,#toasts{left:0;right:0;margin-inline:auto;width:min(640px,calc(100% - 20px))}
   #routePick,#repSheet,.aim-bar{left:0;right:0;margin-inline:auto;width:min(720px,calc(100% - 16px))}
 }
-/* широкий планшет: нижня плашка вужча за екран — круг швидкості й кнопки масштабу опускаємо в кути */
+/* широкий планшет: нижня плашка вужча за екран — круг швидкості опускаємо в кут; «Моє місце» (1.1.21) — не в самому куті,
+   а вище: під пальцем, не на ⓘ і не біля смуги жестів; над ним — повзунок нахилу */
 @media (min-width:1010px) and (min-height:521px){
-  #speed{bottom:calc(var(--sb) + 14px)} #cam{bottom:calc(var(--sb) + 26px)} #zoom{bottom:calc(var(--sb) + 14px)} #attr{bottom:calc(var(--sb) + 4px)}
+  #speed{bottom:calc(var(--sb) + 14px)} #cam{bottom:calc(var(--sb) + 26px)} #zoom{bottom:calc(var(--sb) + 96px)} #attr{bottom:calc(var(--sb) + 4px)}
   #spdPop{bottom:calc(var(--sb) + 130px)}
 }
 
 /* ---- 1.1.19: тип карти — кнопка справа вгорі, під швидкими налаштуваннями; з 1.1.20 — один дотик: схема ↔ супутник ---- */
-#bMap{margin-top:9px;padding:0;overflow:hidden}
-#bMap .mt-thumb{display:block;width:42px;height:42px;border-radius:50%;overflow:hidden;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(19,23,28,.18)}
-#bMap .mt-thumb svg{display:block;width:100%;height:100%;filter:none!important}
-#bMap:active{transform:scale(.94)}
-#bMap.nonet .mt-thumb{opacity:.5;filter:grayscale(1)}
-@media (orientation:landscape) and (max-height:520px){ #bMap{margin-top:0;margin-right:9px} }
+/* 1.1.22: не кругла мініатюра, а перемикач із двох значків — складена карта (схема) і супутник над Землею; увімкнений підсвічено */
+#bMap{margin-top:9px;padding:4px;width:50px;height:98px;border-radius:25px;display:flex;flex-direction:column;gap:2px;align-items:stretch}
+#bMap .mt-seg{flex:1;min-height:0;display:grid;place-items:center;border-radius:21px;border:2px solid transparent;transition:background .15s,border-color .15s,opacity .15s}
+#bMap .mt-seg svg{display:block;width:28px;height:28px;filter:none}
+#bMap .mt-seg:not(.on){opacity:.62}
+#bMap .mt-seg.on{background:var(--panel);border-color:var(--amber);box-shadow:0 1px 5px rgba(0,0,0,.25)}
+#bMap:active{transform:scale(.96)}
+#bMap.nonet .mt-seg[data-k="sat"]{opacity:.32;filter:grayscale(1)}
+@media (orientation:landscape) and (max-height:520px){ #bMap{margin-top:0;margin-right:9px;width:98px;height:50px;flex-direction:row} }
 /* супутник уночі: знімок не «перевертаємо» фільтром нічної карти — лише трохи приглушуємо */
 body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturate(.9)}
+
+/* ---- 1.1.21: повзунок нахилу карти — справа, над «Моїм місцем» ---- */
+#zoom{align-items:center;pointer-events:none}        /* сам стовпчик дотиків не ловить (між кнопками й на порожньому місці під «Моє місце» карта рухається, як завжди) */
+#zoom > *{pointer-events:auto}
+/* телефон набік: повзунок — окремо від «Мого місця», біля правого краю екрана (місце й висоту ставить tiltFit) */
+#tilt.side{position:fixed;right:10px}
+/* меню точки на карті відкрите — повзунок не потрібен і не лізе під меню */
+body:has(#pick:not([hidden])) #tilt{visibility:hidden}
+#zoom #bCenter[hidden]{display:grid!important;visibility:hidden;pointer-events:none}   /* місце під «Моє місце» тримаємо завжди — повзунок не стрибає */
+#tilt{--tv:0;position:relative;box-sizing:border-box;width:50px;height:176px;padding:8px 0 8px;border-radius:25px;display:flex;flex-direction:column;align-items:center;gap:4px;
+  background:rgba(var(--glass-rgb),var(--ga));border:1px solid var(--edge);color:var(--ink);touch-action:none;-webkit-user-select:none;user-select:none;-webkit-tap-highlight-color:transparent;cursor:ns-resize;outline:none}
+#tilt:focus-visible{box-shadow:0 0 0 3px var(--route)}
+.tl-cap{flex:none;font:800 12px/14px var(--f-num);letter-spacing:.04em;color:var(--ink-2);text-shadow:0 0 2px var(--halo),0 0 5px var(--halo),0 0 9px var(--halo);transition:color .15s}
+#tilt:not(.flat) .tl-cap:first-child,#tilt.flat .tl-cap:last-child{color:var(--ink)}            /* підсвічено той край, де зараз вид: 3D чи 2D */
+.tl-track{position:relative;flex:1;width:100%;min-height:0;display:block}
+.tl-track::before{content:"";position:absolute;left:50%;top:6px;bottom:6px;width:6px;margin-left:-3px;border-radius:3px;background:rgba(var(--glass2-rgb),.95);box-shadow:inset 0 0 0 1px var(--edge)}
+.tl-fill{position:absolute;left:50%;bottom:6px;width:6px;margin-left:-3px;border-radius:3px;background:var(--amber);height:calc(var(--tv) * (100% - 36px) + 12px)}
+.tl-thumb{position:absolute;left:50%;bottom:calc(var(--tv) * (100% - 36px));width:36px;height:36px;margin-left:-18px;border-radius:50%;display:grid;place-items:center;
+  background:var(--panel);color:var(--ink);border:2px solid var(--amber);box-shadow:0 2px 7px rgba(0,0,0,.32);transition:transform .12s}
+#tilt.drag .tl-thumb{transform:scale(1.14);box-shadow:0 3px 12px rgba(0,0,0,.4)}
+#tilt:not(.drag) .tl-thumb,#tilt:not(.drag) .tl-fill{transition:bottom .18s ease-out,height .18s ease-out,transform .12s}
+.tl-thumb svg{width:22px;height:22px;display:block}
+.tl-plane{fill:rgba(245,163,0,.28);stroke:currentColor;stroke-width:1.7;stroke-linejoin:round}
+.tl-road{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-dasharray:2.4 2.2}

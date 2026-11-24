@@ -35,8 +35,14 @@
   <button class="rb" id="bMap" aria-pressed="false"></button>
 </nav>
 <div id="quick" role="dialog" hidden></div>
-<!-- «Моє місце» зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->
+<!-- справа внизу: повзунок нахилу карти (згори ↔ збоку; те саме, що двома пальцями вгору-вниз), під ним «Моє місце» —
+     воно зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною (місце під нього тримаємо завжди) -->
 <div id="zoom">
+  <div id="tilt" role="slider" tabindex="0" aria-orientation="vertical" aria-valuemin="0" aria-valuemax="60" aria-valuenow="0">
+    <span class="tl-cap">3D</span>
+    <span class="tl-track"><i class="tl-fill"></i><b class="tl-thumb"><svg viewBox="0 0 24 24" aria-hidden="true"><polygon class="tl-plane" points="5,18.5 19,18.5 19,5.5 5,5.5"/><path class="tl-road" d="M12 18.5V5.5"/></svg></b></span>
+    <span class="tl-cap">2D</span>
+  </div>
   <button class="rb" id="bCenter" hidden></button>
 </div>
 

@@ -33,6 +33,57 @@ function layoutVars() {
   const r = document.documentElement.style;
   r.setProperty('--th', Math.round($('top').getBoundingClientRect().height) + 'px');
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
+  tiltFit();
+}
+/* ---------- повзунок нахилу карти (1.1.21) ----------
+   Стоїть справа над «Моїм місцем». Угору — дивимось збоку (3D, до 60°), униз — згори (2D): те саме, що провести двома
+   пальцями вгору-вниз по карті. Повзунок завжди показує справжній кут карти, хоч би хто його змінив.
+   Висота — скільки є місця між «Моїм місцем» і тим, що вище в тій самій колонці (кнопки справа, верхня плашка); якщо
+   на зручний повзунок місця немає (низький екран) — його не показуємо: лишаються плитка «2D / 3D» і жест. */
+const TILT_H = 176, TILT_MIN = 112, TILT_THUMB = 36;
+function tiltFit() {
+  const el = $('tilt'); if (!el) return;
+  const rail = $('rail').getBoundingClientRect(), side = sideLayout();
+  let top, room;
+  if (side) {
+    // телефон набік: «Моє місце» стоїть посеред екрана (біля краю нижньої плашки), і повзунок над ним закривав би стрілку машини —
+    // тому тут повзунок окремо: біля правого краю екрана, між кнопками справа і нижньою плашкою
+    top = Math.round(rail.bottom + 10); room = Math.floor($('bottom').getBoundingClientRect().top - 10 - top);
+  } else {
+    const z = $('zoom').getBoundingClientRect(), x1 = z.right, x0 = x1 - 50;
+    top = Math.max(8, rail.top);
+    for (const id of ['top', 'rail']) { const o = $(id), r = o.getBoundingClientRect(); if (r.width && getComputedStyle(o).visibility !== 'hidden' && r.right > x0 + 1 && r.left < x1 - 1) top = Math.max(top, r.bottom + 10); }
+    room = Math.floor(z.bottom - 50 - 9 - top);
+  }
+  const h = Math.min(TILT_H, room), show = h >= TILT_MIN;
+  el.classList.toggle('side', side); el.style.top = side ? top + 'px' : '';
+  if (el.hidden === show) el.hidden = !show;
+  if (show) el.style.height = h + 'px';
+}
+function tiltDraw(v) {
+  const el = $('tilt'); if (!el) return;
+  v = Math.max(0, Math.min(mapM.PITCH_MAX, Math.round(v))); const k = v / mapM.PITCH_MAX;
+  if (el.dataset.v === String(v)) return; el.dataset.v = String(v);
+  el.style.setProperty('--tv', k.toFixed(3));
+  el.setAttribute('aria-valuenow', String(v)); el.setAttribute('aria-valuetext', v < 3 ? t('tiltTop') : t('tiltDeg', v));
+  el.classList.toggle('flat', v < 3);
+  // маленька «карта» на бігунці сама нахиляється: квадрат (згори) → приплюснута трапеція (збоку)
+  const h = 13 - 7 * k, ins = 3.4 * k, y1 = (12 + h / 2).toFixed(1), y0 = (12 - h / 2).toFixed(1);
+  el.querySelector('.tl-plane').setAttribute('points', `5,${y1} 19,${y1} ${(19 - ins).toFixed(1)},${y0} ${(5 + ins).toFixed(1)},${y0}`);
+  el.querySelector('.tl-road').setAttribute('d', `M12 ${y1}V${y0}`);
+}
+function tiltInit() {
+  const el = $('tilt'); if (!el) return;
+  el.setAttribute('aria-label', t('tiltAria'));
+  const tr = el.querySelector('.tl-track'); let drag = false, val = 0;
+  const fromY = y => { const r = tr.getBoundingClientRect(), f = 1 - Math.min(1, Math.max(0, (y - r.top - TILT_THUMB / 2) / Math.max(1, r.height - TILT_THUMB)));
+    let v = Math.round(f * mapM.PITCH_MAX); if (v <= 3) v = 0; else if (v >= mapM.PITCH_MAX - 2) v = mapM.PITCH_MAX; return v; };
+  el.addEventListener('pointerdown', e => { drag = true; try { el.setPointerCapture(e.pointerId); } catch (_) {} el.classList.add('drag'); val = fromY(e.clientY); mapM.setTilt(val, true); e.preventDefault(); });
+  el.addEventListener('pointermove', e => { if (!drag) return; const v = fromY(e.clientY); if (v !== val) { val = v; mapM.setTilt(v, true); } });
+  const end = () => { if (!drag) return; drag = false; el.classList.remove('drag'); mapM.setTilt(val, false); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); el.addEventListener('lostpointercapture', end);
+  el.addEventListener('keydown', e => { const d = e.key === 'ArrowUp' ? 5 : e.key === 'ArrowDown' ? -5 : 0; if (d) { e.preventDefault(); mapM.setTilt(mapM.tiltShown() + d, false); } });
+  bus.on('tilt', tiltDraw); tiltDraw(mapM.tiltShown());
 }
 
 function staticLabels() {
@@ -88,21 +139,22 @@ function setAllLayers(v) {
 const Q_IDLE = 15000;
 let quickTimer = null;
 const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
-/* ---------- тип карти: кнопка справа вгорі, як у Google Maps ----------
+/* ---------- тип карти: перемикач справа вгорі ----------
    1.1.19 — віконце з вибором і посиланнями в Google Maps; 1.1.20 (прохання Олексія) — ОДИН ДОТИК, як «2D / 3D»:
-   клац — супутник, ще клац — схема. Без віконець і без виходу з програми.
-   На кнопці — мініатюра ТІЄЇ карти, на яку перейдемо дотиком: на схемі — знімок, на супутнику — схема.
-   Без інтернету супутника немає: дотик лише пояснює це (карта лишається завантаженою). */
+   клац — супутник, ще клац — схема. Без віконець і без виходу з програми. Повідомлень про перемикання теж немає
+   (1.1.21): карта змінилась на очах — це й так видно.
+   1.1.22: кругла мініатюра була незрозуміла («що це за кружок?»). Тепер це перемикач із двох зрозумілих значків —
+   складена карта (схема) і супутник над Землею (знімки); той, що ввімкнений, підсвічено. Дотик будь-де — перемкнути.
+   Без інтернету супутника немає: його значок блідий, дотик лише пояснює (карта лишається завантаженою). */
 const MT_PIC = {
-  sat: '<svg viewBox="0 0 64 40" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="64" height="40" fill="#3f5a35"/><path d="M0 0h26l-8 17H0z" fill="#6c7d3f"/><path d="M30 0h34v14L40 22z" fill="#86764f"/><path d="M0 22l20-3 6 21H0z" fill="#2f4a2b"/><path d="M42 26l22-6v20H36z" fill="#5d6b38"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#d8d2c4" stroke-width="3.2" fill="none"/><rect x="44" y="27" width="6" height="5" fill="#bdb4a5"/><rect x="52" y="29" width="5" height="4" fill="#a59c8d"/><rect x="9" y="6" width="5" height="4" fill="#b9b1a2"/></svg>',
-  scheme: '<svg viewBox="0 0 64 40" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="64" height="40" fill="#eef0e7"/><path d="M0 0h22v14H0z" fill="#cfe4c2"/><path d="M44 26c6-2 14 0 20 4v10H40z" fill="#b8d4ee"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#c9ccd2" stroke-width="6" fill="none"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#f7cf5b" stroke-width="3.6" fill="none"/><path d="M30 0v40M0 16h64" stroke="#fff" stroke-width="2.4"/><rect x="36" y="20" width="6" height="5" fill="#dcd6cc"/><rect x="8" y="22" width="7" height="5" fill="#dcd6cc"/></svg>'
+  scheme: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3.5 7.4 10.4 4.6l7.2 2.8 6.9-2.8v16L17.6 23.4l-7.2-2.8-6.9 2.8z" fill="#f7f3e6" stroke="#6b7280" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.4 4.6v16M17.6 7.4v16" stroke="#b9bec7" stroke-width="1.2"/><path d="M5 16.8c2.6-.6 3.9-3.6 6.6-4.2 2.6-.6 3.4 1.9 6 1.2 2-.5 3.2-2.2 5.4-3.2" fill="none" stroke="#f5a300" stroke-width="2.2" stroke-linecap="round"/><circle cx="20.3" cy="17.8" r="1.7" fill="#2f6bff"/></svg>',
+  sat: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M2.5 28a11.5 11.5 0 0 1 23 0z" fill="#2f7fd6"/><path d="M6.3 24.2c1.7-1.5 4-1.3 5 .2.8 1.3-.3 2.3.3 3.6H4.8c.1-1.5.6-2.8 1.5-3.8zM16.4 22.3c1.5-.9 3.6-.5 4.7.9.9 1.2 1.9 2.9 2.2 4.8h-5.4c-.8-1.8-2.9-3.8-1.5-5.7z" fill="#3fa650"/><g transform="rotate(-38 14 10)"><rect x="11.3" y="6.4" width="5.4" height="7.2" rx="1.1" fill="#e5e7eb" stroke="#374151" stroke-width="1.3"/><rect x="3.3" y="7.7" width="6.2" height="4.6" rx=".7" fill="#2f6bff" stroke="#1e3a8a" stroke-width="1.1"/><rect x="18.5" y="7.7" width="6.2" height="4.6" rx=".7" fill="#2f6bff" stroke="#1e3a8a" stroke-width="1.1"/><path d="M9.5 10h1.8M16.7 10h1.8M6.4 7.7v4.6M21.6 7.7v4.6" stroke="#1e3a8a" stroke-width="1"/><path d="M14 13.6v2.2" stroke="#374151" stroke-width="1.3" stroke-linecap="round"/></g></svg>'
 };
 const mtShown = () => mapM.satOn() ? 'sat' : 'scheme';
 function mapTypeTap() {
   if (!$('quick').hidden) quickOpen(false);
   if (mtShown() === 'scheme' && !P.online()) { toast(t('mtSatOffline'), 'yellow', 5000); return; }   // супутник без інтернету — неможливо: пояснюємо, карту не чіпаємо
   S.mapType = mtShown() === 'sat' ? 'scheme' : 'sat';                                                   // settings → map.applySat
-  toast(t(S.mapType === 'sat' ? 'mtToSat' : 'mtToScheme'), '', 1500);
   railState();
 }
 function quickHtml() {
@@ -158,9 +210,10 @@ function railState() {
   const qb = $('bQuick');
   qb.innerHTML = ICON.quick + (!S.voice ? `<i class="q-badge mute">${ICON.mute}</i>` : S.rec ? '<i class="q-badge rec"></i>' : '');
   qb.classList.toggle('muted', !S.voice);
-  const mb = $('bMap'), alt = mtShown() === 'sat' ? 'scheme' : 'sat', key = alt + (P.online() ? '' : '-nonet');
-  if (mb.dataset.k !== key) { mb.dataset.k = key; mb.innerHTML = `<span class="mt-thumb">${MT_PIC[alt]}</span>`; mb.classList.toggle('nonet', !P.online() && alt === 'sat');
-    mb.setAttribute('aria-pressed', String(alt === 'scheme')); mb.setAttribute('aria-label', t(alt === 'sat' ? 'mtBtnToSat' : 'mtBtnToScheme')); }
+  const mb = $('bMap'), cur = mtShown(), key = cur + (P.online() ? '' : '-nonet');
+  if (mb.dataset.k !== key) { mb.dataset.k = key; mb.classList.toggle('nonet', !P.online());
+    mb.innerHTML = ['scheme', 'sat'].map(k => `<span class="mt-seg${k === cur ? ' on' : ''}" data-k="${k}">${MT_PIC[k]}</span>`).join('');
+    mb.setAttribute('aria-pressed', String(cur === 'sat')); mb.setAttribute('aria-label', t(cur === 'sat' ? 'mtBtnSat' : 'mtBtnScheme')); }
   const c = $('bCenter'), need = !view.follow;
   if (c.hidden === need) { c.hidden = !need; c.classList.toggle('need', need); }
   quickRender();
@@ -1039,25 +1092,42 @@ function plNearest(keys) {
   }
   return out.sort((a, b) => a.dist - b.dist).slice(0, 15);
 }
-function plChipsHtml() {
-  const dot = (k, ty) => k === '@mapVerified' ? `<span class="pl-ic vp">★</span>` : k === 'cam' ? `<span class="pl-ic cam">${CAM_SVG}</span>`
-    : k === '@mapReports' ? '<span class="pl-ic" style="background:#2f6bff;border-color:#ffd34d"></span>' : k === '@mapEvents' ? '<span class="pl-ic" style="background:var(--red)"></span>'
-    : k === '@mapHazards' ? '<span class="pl-ic hz">20</span>' : k === '@roughMap' ? '<span class="pl-ic" style="background:linear-gradient(90deg,#2f9e62 33%,#f6bd16 33% 66%,#e5484d 66%)"></span>'
-    : `<span class="pl-ic" style="background:${TYPES[ty].color}${ty === 'h' ? ';border-color:#06b6d4' : ''}"></span>`;
-  const chip = ([k, ty, lbl, full]) => { const on = layerOn(k); return `<button class="pl-chip${on ? ' on' : ''}" data-plc="${k}" role="checkbox" aria-checked="${on}"${full ? ` aria-label="${esc(t(full))}"` : ''}>${dot(k, ty)}<span>${t(lbl)}</span>${on ? `<i class="pl-ck">${ICON.check}</i>` : ''}</button>`; };
-  const any = LAYERS.some(([k]) => layerOn(k)), all = LAYERS.every(([k]) => layerOn(k));
-  return `<div class="pl-chips">${PL.map(chip).join('')}</div>
-    <div class="pl-sub">${t('plAlsoMap')}</div>
-    <div class="pl-chips pl-more">${PL_MAP.map(chip).join('')}</div>
-    <div class="pl-all"><button class="btn sm" data-plc="#all"${all ? ' disabled' : ''}>${t('plAll')}</button><button class="btn sm" data-plc="#none"${any ? '' : ' disabled'}>${t('plNone')}</button></div>`;
+/* Мінізображення замість кольорових кружечків (1.1.22, прохання Олексія): на значку — те, що він означає (колонка, вилка
+   з ножем, «P», ліжко, душ…), а колір значка — той самий, що в точки цього виду на карті. Ті самі значки — у списку нижче. */
+const picSvg = d => `<svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${d}</svg>`;
+const PIC_D = {
+  f: '<path d="M5.5 20V5.6A1.6 1.6 0 0 1 7.1 4h4.8a1.6 1.6 0 0 1 1.6 1.6V20"/><path d="M4 20h11"/><path d="M7.6 7.4h3.8v3.2H7.6z" fill="#fff" stroke="none"/><path d="M13.5 11.2h1.3a1.5 1.5 0 0 1 1.5 1.5v3.8a1.5 1.5 0 0 0 3 0V8.6L17 6.2"/>',
+  e: '<path d="M6 3v5.8a2.5 2.5 0 0 0 5 0V3"/><path d="M8.5 3v18"/><path d="M17.2 21v-8.6h-2c-.9 0-1.4-.6-1.3-1.5.3-3.2 1.3-5.7 3.3-7.9z"/>',
+  p: '<path d="M8.2 20.2V4h4.9a4.6 4.6 0 0 1 0 9.2H8.2" stroke-width="2.8"/>',
+  m: '<path d="M3 6.5V19"/><path d="M3 15.4h18"/><path d="M21 19v-5.6a3 3 0 0 0-3-3h-6.8v4.9"/><circle cx="7.1" cy="11.6" r="1.7" fill="#fff" stroke="none"/>',
+  h: '<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.2 8.3h7.6"/><path d="M12 12.2v.01M15 12.2v.01M18 12.2v.01M12.6 15.4v.01M15.6 15.4v.01M18.6 15.4v.01M13.2 18.6v.01M16.2 18.6v.01M19.2 18.6v.01" stroke-width="2.4"/>',
+  bell: '<path d="M6.4 9.6a5.6 5.6 0 1 1 11.2 0c0 5.4 2.2 6.4 2.2 6.4H4.2s2.2-1 2.2-6.4z"/><path d="M10.2 19.4a2 2 0 0 0 3.6 0"/>',
+  road: '<path d="M2.5 14.5c1.7-4.4 3.4-4.4 5.1 0s3.4 4.4 5.1 0 3.4-4.4 5.1 0 2.3 3.2 3.7 1.2"/>'
+};
+/** Значок виду місця: ty — літера виду зупинки (f, e, p, s, m, h) або ключ шару (cam, @mapVerified, @mapReports…). sh — у точки є душ. */
+function plPic(ty, sh) {
+  if (ty === 'cam' || ty === 'c') return `<span class="pl-ic cam">${CAM_SVG}</span>`;
+  if (ty === '@mapVerified') return '<span class="pl-ic vp">★</span>';
+  if (ty === '@mapReports') return `<span class="pl-ic rep">${REP_SVG.police}</span>`;
+  if (ty === '@mapEvents') return `<span class="pl-ic pic" style="background:var(--red)">${picSvg(PIC_D.bell)}</span>`;
+  if (ty === '@mapHazards') return '<span class="pl-ic hz">20</span>';
+  if (ty === '@roughMap') return `<span class="pl-ic pic" style="background:linear-gradient(90deg,#2f9e62 34%,#e0a800 34% 67%,#e5484d 67%)">${picSvg(PIC_D.road)}</span>`;
+  const k = ty === 's' ? 'p' : ty;
+  return `<span class="pl-ic pic${sh && k !== 'h' ? ' sh' : ''}" style="background:${TYPES[ty] ? TYPES[ty].color : '#1f2937'}">${picSvg(PIC_D[k] || PIC_D.p)}</span>`;
 }
+function plChipsHtml() {
+  const chip = ([k, ty, lbl, full]) => { const on = layerOn(k); return `<button class="pl-chip${on ? ' on' : ''}" data-plc="${k}" role="checkbox" aria-checked="${on}"${full ? ` aria-label="${esc(t(full))}"` : ''}>${plPic(k[0] === '@' || k === 'cam' ? k : ty)}<span>${t(lbl)}</span>${on ? `<i class="pl-ck">${ICON.check}</i>` : ''}</button>`; };
+  return `<div class="pl-chips">${[...PL, ...PL_MAP].map(chip).join('')}</div>`;
+}
+const plAllHtml = () => { const any = LAYERS.some(([k]) => layerOn(k)), all = LAYERS.every(([k]) => layerOn(k));
+  return `<div class="pl-all"><button class="btn sm" data-plc="#all"${all ? ' disabled' : ''}>${t('plAll')}</button><button class="btn sm" data-plc="#none"${any ? '' : ' disabled'}>${t('plNone')}</button></div>`; };
 function plRowHtml(x) {
   const [, , ty, f, name, , info] = x.r, fa = (info && info.fa) || [];
   const kind = stopKindLabel(ty, info), title = ty === 'f' ? brandOf(name) : (name || kind);
   const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && ty !== 'e' && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
   const where = x.ahead != null ? (x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead))) : fmtDist(x.dist);
   const side = x.ahead != null && x.off > 300 ? `<small>${esc(t('plOff', fmtDist(x.off)))}</small>` : '';
-  return `<button class="pl-row" data-sti="${x.i}"><span class="sdot" style="background:${TYPES[ty].color}${f & F.SHOWER ? ';border-color:#06b6d4' : ''}"></span>
+  return `<button class="pl-row" data-sti="${x.i}">${plPic(ty, !!(f & F.SHOWER))}
     <span class="grow"><b>${esc(title)}</b><small>${esc([title !== kind ? kind : '', ...feats].filter(Boolean).join(' · '))}</small></span><span class="pl-d"><b>${esc(where)}</b>${side}</span></button>`;
 }
 function vpListHtml() {
@@ -1074,7 +1144,9 @@ function vpListHtml() {
 }
 function placesHtml() {
   const keys = PL.filter(([k]) => k[0] !== '@' && layerOn(k)).map(([k]) => k), trip = g.active && g.idx && pos.rd != null && pos.onRoute;
-  let h = plChipsHtml();
+  // Плитки — окремо; усе, що нижче, — у «.pl-rest». Він починається від верху ОСТАННЬОГО ряду плиток (там остання клітинка порожня:
+  // плиток 11), тож квадрат «Готово», що липне до низу, може піднятись у цю порожню клітинку, але не вище — на плитки не лягає ніколи.
+  let h = plAllHtml();
   if (keys.length) {
     const list = plNearest(keys);
     h += `<div class="vp-scope">${t(trip ? 'plScopeRoute' : 'plScopeNear')}</div>`;
@@ -1082,9 +1154,17 @@ function placesHtml() {
   }
   if (layerOn('@mapVerified')) h += vpListHtml();
   if (!keys.length && !layerOn('@mapVerified')) h += `<div class="card vp-empty">${t('plPick')}</div>`;
-  // «Готово» завжди внизу під пальцем: вибрав галочки — і назад до карти
-  return h + `<div class="muted" style="margin-top:12px">${t('vpHowAdd')}</div><div class="pl-done"><button class="btn pri wide" data-plc="#done">${t('plDone')}</button></div>`;
+  // «Готово» (1.1.22) — маленький квадрат із галочкою в правому нижньому куті: завжди під пальцем і не забирає місце в списку
+  return plChipsHtml() + `<div class="pl-rest"><div class="pl-up"></div>${h}<div class="muted pl-how">${t('vpHowAdd')}</div><div class="pl-done"><button class="pl-ok" data-plc="#done" aria-label="${t('plDone')}">${ICON.check}</button></div><div class="pl-end"></div></div>`;
 }
+// Рядок списку, що саме проходить під квадратом «Готово», відсуває свій правий край (відстань лишається на видноті)
+let plDodgeRaf = 0;
+function plDodge() {
+  plDodgeRaf = 0;
+  const ok = document.querySelector('#panelBody .pl-ok'); if (!ok) return; const r = ok.getBoundingClientRect();
+  for (const row of document.querySelectorAll('#panelBody .pl-row, #panelBody .vp-row')) { const b = row.getBoundingClientRect(); row.classList.toggle('dodge', b.bottom > r.top + 1 && b.top < r.bottom - 1); }
+}
+const plDodgeSoon = () => { if (!plDodgeRaf) plDodgeRaf = requestAnimationFrame(plDodge); };
 function plClick(k) {
   if (k === '#all' || k === '#none') setAllLayers(k === '#all');
   else setLayer(k, !layerOn(k));
@@ -1104,11 +1184,7 @@ function placeHtml(p) {
     <div class="btns">${vpOnMap(p) ? `<button class="btn pri" data-vp="go">${g.active ? t('vpVia') : t('vpRoute')}</button><button class="btn" data-vp="map">${t('vpOnMap')}</button>` : ''}</div>
     ${!vpOnMap(p) || p.own ? `<div class="btns"><button class="btn" data-vp="setloc">${t('vpSetLoc')}</button></div>` : ''}`;
 }
-// «Готово» прилипає до низу «Місць» — завжди під пальцем. Лише на зовсім низькій панелі (альбомна орієнтація в рейсі без GPS:
-// видно ~120 пікселів) кнопка стоїть наприкінці, інакше вона закривала б самі плитки.
-const plDoneFit = body => { const d = body.querySelector('.pl-done'); if (d) d.classList.toggle('flow', body.clientHeight < 200); };
-function plDraw(body) { body.innerHTML = placesHtml(); plDoneFit(body); }
-window.addEventListener('resize', () => { if (currentPanel() === 'places') plDoneFit($('panelBody')); });
+function plDraw(body) { body.innerHTML = placesHtml(); body.onscroll = plDodgeSoon; plDodge(); plDodgeSoon(); }
 definePanel('places', {
   title: () => t('tabPlaces'),
   render(body) {
@@ -1116,7 +1192,7 @@ definePanel('places', {
     body.onclick = e => {
       const c = e.target.closest('[data-plc]');
       if (c && c.dataset.plc === '#done') { closePanel(); return; }
-      if (c) { plClick(c.dataset.plc); const st = body.scrollTop; plDraw(body); body.scrollTop = st; return; }
+      if (c) { plClick(c.dataset.plc); const st = body.scrollTop; plDraw(body); body.scrollTop = st; plDodge(); return; }
       const r = e.target.closest('[data-sti]');
       if (r) { const i = +r.dataset.sti, row = sdb.rows[i]; if (!row) return; closePanel(); flyTo({ lat: row[0], lon: row[1] }, 15); onStopTap({ i, lat: row[0], lon: row[1] }); return; }
       const b = e.target.closest('[data-vpid]'); if (!b) return; vpCur = byIdVp(b.dataset.vpid); if (vpCur) openPanel('place');
@@ -1490,6 +1566,7 @@ export function initUI() {
   $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
   document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
+  tiltInit();
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
   $('tabRep').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); repOpen($('repSheet').hidden); };
 
@@ -1535,6 +1612,8 @@ export function initUI() {
     document.body.classList.toggle('panel-open', !!name);
     // складаємо рейс (форма «Рейс», рейс ще не їде): рядок із годинником у нижній плашці ховаємо — формі більше місця, кнопка «Побудувати» не ховається під плашку
     document.body.classList.toggle('planning', (name === 'trip' || name === 'archive') && !g.active && !g.arrived);
+    // відкриті «Місця» (1.1.22): час прибуття, кілометри й хвилини внизу зараз не потрібні — ховаємо, списку з відстанями більше місця
+    document.body.classList.toggle('places-on', name === 'places' || name === 'place');
     requestAnimationFrame(layoutVars);
   });
   window.addEventListener('resize', () => { if (aim) aimPlaceCross(); });
