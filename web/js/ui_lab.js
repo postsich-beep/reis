@@ -352,7 +352,7 @@ function gpsHtml() {
     <div class="btns"><button class="btn wide" data-act="journal">${t('jSave')}</button></div>`;
 }
 definePanel('gps', {
-  title: () => 'GPS', half: true,
+  title: () => 'GPS',
   render(body) {
     body.innerHTML = gpsHtml();
     body.onclick = e => {

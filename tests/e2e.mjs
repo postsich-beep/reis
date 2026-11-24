@@ -1137,15 +1137,16 @@ const layoutCheck = () => {
   const R = el => el.getBoundingClientRect();
   const nm = el => el.id ? '#' + el.id : (el.getAttribute('data-panel') ? 'tab:' + el.getAttribute('data-panel') : el.className ? '.' + String(el.className).split(' ')[0] : el.tagName);
   const inter = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
-  // (1.1.23) #bottom — прозорий стовпчик; справжні плашки в ньому — нижня (#tabbar), час прибуття (.tb-main), кнопки «без GPS», оновлення, «прийняти GPS»
-  const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#tabbar', '#tripbar .tb-main', '#nudge', '#updBar', '#bAcceptGps', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
+  // (1.1.24) #bottom — прозорий стовпчик; нижня плашка — контур із двома виступами: справжні її частини — кнопки (#tabs), лівий виступ із часом
+  // (.tb-main) і правий зі стрілкою нахилу (#tilt); між виступами над кнопками — карта, там стоять кнопки «без GPS»
+  const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#tabs', '#tabbar .tb-main', '#tilt', '#nudge', '#updBar', '#bAcceptGps', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
   for (const el of top) { const r = R(el); if (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1) out.push('за межами екрана: ' + nm(el) + ' [' + [r.left, r.top, r.right, r.bottom].map(Math.round) + ']'); }
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (inter(R(top[i]), R(top[j]))) out.push('накладаються: ' + nm(top[i]) + ' і ' + nm(top[j]));
-  for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button', '#bottom > *', '#updBar > *']) {
+  for (const sel of ['#tripbar > *', '#tabbar .tb-main > *', '#remain > span', '#tabs > button', '#man > *', '#nudge > button', '#rail > *', '#updBar > *']) {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bMap,#tilt,#bCenter,#speed,#spdGps,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bCal,#bMap,#tilt,#bCenter,#speed,#spdGps,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -3363,7 +3364,7 @@ const calSt = page => app(page, () => { const C = window.__app.uiCalib.calibStat
     title: tx('#cbTitle') || tx('.cb-res .cb-title'), text: tx('#cbText') || tx('.cb-res .cb-text'), hint: tx('#cbHint'), ang: tx('#cbAng'), prog: q('#cbProg') ? q('#cbProg').style.width : '', foot: tx('.cb-foot'),
     phone: ph ? ph.style.transform : '', needle: nd ? nd.getAttribute('transform') : '', rest: q('#cbRest') ? q('#cbRest').dataset.to + ':' + (q('#cbRest').getAttribute('d') ? 1 : 0) : '', arc: q('#cbArc') ? q('#cbArc').getAttribute('d') : '', side: q('#cbPh3d') ? q('#cbPh3d').classList.contains('side') : null,
     rows: [...box.querySelectorAll('.cb-rows > div')].map(d => d.querySelector('span').textContent.trim() + ' = ' + d.querySelector('b').textContent.trim()).join(' | '), btns: [...box.querySelectorAll('.cb-btns button')].map(b => b.textContent.trim()).join(' | '),
-    spoken: (window.__spoken || []).slice(-6), sfx: window.__app.sfx.sfxLog.map(x => x.kind).filter(k => /^cal-/.test(k)).join(), saved: window.__app.S.gyroCal, tab: document.getElementById('tabCal').className, tabLbl: document.getElementById('tabCal').getAttribute('aria-label') }; });
+    spoken: (window.__spoken || []).slice(-6), sfx: window.__app.sfx.sfxLog.map(x => x.kind).filter(k => /^cal-/.test(k)).join(), saved: window.__app.S.gyroCal, tab: document.getElementById('bCal').className, tabLbl: document.getElementById('bCal').getAttribute('aria-label') }; });
 const waitCal = async (page, fn, ms = 9000) => { let s = null; for (let i = 0; i < ms / 100; i++) { s = await calSt(page); if (fn(s)) return s; await sleep(100); } return s; };
 
 if (run('32')) try {
@@ -3538,8 +3539,8 @@ if (run('32')) try {
     }
     // б) нижня стрічка: значки лінією, один колір; «Телефон» і «Мітки» не світяться
     const tb = await app(page, () => { const bs = [...document.querySelectorAll('#tabs > button')]; return { order: bs.map(b => b.dataset.panel || b.id).join(), labels: bs.map(b => b.textContent.trim()).join('|'),
-      colors: bs.filter(b => !b.classList.contains('main')).map(b => getComputedStyle(b).color), tc: bs.filter(b => b.querySelector('.tc')).map(b => getComputedStyle(b.querySelector('.tc')).backgroundColor), fills: [...document.querySelectorAll('#tabCal svg [fill]:not([fill="none"]):not([fill="currentColor"]), #tabRep svg [fill]:not([fill="none"]):not([fill="currentColor"])')].length,
-      cal: document.getElementById('tabCal').className, calLbl: document.getElementById('tabCal').getAttribute('aria-label'), rep: document.getElementById('tabRep').className, repLbl: document.getElementById('tabRep').getAttribute('aria-label'), badge: !!document.querySelector('#tabRep .badge') }; });
+      colors: bs.filter(b => !b.classList.contains('main')).map(b => getComputedStyle(b).color), tc: bs.filter(b => b.querySelector('.tc')).map(b => getComputedStyle(b.querySelector('.tc')).backgroundColor), fills: [...document.querySelectorAll('#bCal svg [fill]:not([fill="none"]):not([fill="currentColor"]), #tabRep svg [fill]:not([fill="none"]):not([fill="currentColor"])')].length,
+      cal: document.getElementById('bCal').className, calLbl: document.getElementById('bCal').getAttribute('aria-label'), rep: document.getElementById('tabRep').className, repLbl: document.getElementById('tabRep').getAttribute('aria-label'), badge: !!document.querySelector('#tabRep .badge') }; });
     ok(`[${T}] нижня стрічка: Телефон · Події · Рейс · Місця · Мітки; значки «Телефон» (телефон зі стрілками) і «Мітки» (кашкет) — лінією, без кольорових плям, того самого кольору, що й сусідні`, tb.order === 'tabCal,feed,trip,places,tabRep' && /^Телефон\|Події\d*\|Рейс\|Місця\|Мітки$/.test(tb.labels) && new Set(tb.colors).size === 1 && tb.tc.every(c => c === 'rgba(0, 0, 0, 0)') && tb.fills === 0, JSON.stringify(tb));
     ok(`[${T}] калібрування ще не робили — значок не світиться («${tb.calLbl}»); позначок на маршруті немає — «Мітки» не світяться, числа немає`, !/cal-ok/.test(tb.cal) && /ще не робили/.test(tb.calLbl) && !/has/.test(tb.rep) && !tb.badge && tb.repLbl === 'Позначити подію на дорозі', JSON.stringify(tb));
     ok(`[${T}] нижня стрічка: нічого не накладається й не обрізано`, (await page.evaluate(layoutCheck)).length === 0 && (await readCheck(page, '#tabs')).length === 0, JSON.stringify([await page.evaluate(layoutCheck), await readCheck(page, '#tabs')]));
@@ -3551,7 +3552,7 @@ if (run('32')) try {
     await app(page, ([up, scale, hand, altAx]) => window.__gy.start({ up, scale, noise: 0.4, tremor: hand ? 12 : 0, sway: hand ? 2 : 0, axes: altAx ? 'alt' : '' }), [up, main ? 0.9 : 1, hand, altAx]);
     await sleep(700);
     await app(page, () => { window.__spoken.length = 0; window.__vib = []; window.ReisNative.vibrate = ms => { window.__vib.push(ms); }; });
-    await page.click('#tabCal'); await sleep(450);
+    await page.click('#bCal'); await sleep(450);
     const c1 = await calSt(page);
     ok(`[${T}] «Телефон» відкриває калібрування на ВЕСЬ екран; три малюнки з рукою — це три кроки: «Екран до себе · Ліва грань · Права грань», перший підсвічено`, c1.open && c1.box.l === 0 && c1.box.t === 0 && c1.box.w === c1.box.vw && c1.box.h === c1.box.vh && c1.box.sw <= c1.box.cw + 1 && c1.steps === '▶Екран до себе | ·Ліва грань | ·Права грань' && c1.step === 1, JSON.stringify(c1));
     { const tl = c1.tiles, hMin = land && sc.h <= 520 ? 48 : sc.h <= 640 ? 58 : 70;
@@ -3601,7 +3602,7 @@ if (run('32')) try {
     ok(`[${T}] результат: усе читається, кнопки «Готово» й «Повторити» в межах екрана`, (await readCheck(page, '#calib')).length === 0 && (b => b.w >= 120 && b.h >= 48 && b.b <= sc.h && b.r <= sc.w)(await box('#calib [data-cb="save"]')), JSON.stringify([await readCheck(page, '#calib'), await box('#calib [data-cb="save"]')]));
     // «Готово» — збережено, значок зелений
     await page.click('#calib [data-cb="save"]'); await sleep(500);
-    const d1 = await calSt(page), tabC = await box('#tabCal'), tcBg = await app(page, () => getComputedStyle(document.querySelector('#tabCal .tc')).backgroundColor), toast1 = await page.textContent('#toasts');
+    const d1 = await calSt(page), tabC = await box('#bCal'), tcBg = await app(page, () => getComputedStyle(document.querySelector('#bCal .tc')).backgroundColor), toast1 = await page.textContent('#toasts');
     ok(`[${T}] «Готово» — екран закрито, калібрування збережено, значок «Телефон» унизу зелений («${d1.tabLbl}»), коротке підтвердження`, !d1.open && d1.saved && d1.saved.v === 1 && Math.abs(d1.saved.k - (main ? 1.111 : 1)) < (hand ? 0.06 : 0.035) && Date.now() - d1.saved.at < 20000 && /cal-ok/.test(d1.tab) && tabC.color === 'rgb(47, 158, 98)' && tcBg !== 'rgba(0, 0, 0, 0)' && /зроблено/.test(d1.tabLbl) && /Калібрування збережено/.test(toast1), JSON.stringify({ saved: d1.saved, tab: d1.tab, color: tabC.color, tcBg, lbl: d1.tabLbl, toast1 }));
     if (altAx) { const ax = await app(page, () => ({ alt: window.__app.sensors.gyroAxes(), S: window.__app.S.gyroAlt }));
       ok(`[${T}] порядок осей запамʼятовано для датчиків (так рахуватиме й ведення без GPS, і наступне калібрування)`, ax.alt === true && ax.S === true, JSON.stringify(ax)); }
@@ -3614,15 +3615,15 @@ if (run('32')) try {
       ok(`[${T}] у веденні: служба нарахувала поворот 90° — з поправкою цього телефона це ${(y[1] - y[0]).toFixed(1)}° (стільки фура повернула насправді)`, Math.abs((y[1] - y[0]) - 90 * d1.saved.k) < 0.2 && Math.abs((y[1] - y[0]) - 100) < 3, JSON.stringify(y));
       // перезапуск: збережено
       await page.reload(); await page.waitForFunction(() => window.__app && document.getElementById('boot') === null, null, { timeout: 15000 }); await sleep(500);
-      const rl = await app(page, () => ({ k: window.__app.S.gyroCal && window.__app.S.gyroCal.k, tab: document.getElementById('tabCal').className, gk: window.__app.calib.gyroK() }));
+      const rl = await app(page, () => ({ k: window.__app.S.gyroCal && window.__app.S.gyroCal.k, tab: document.getElementById('bCal').className, gk: window.__app.calib.gyroK() }));
       ok(`[${T}] після перезапуску калібрування на місці: значок зелений, поправка та сама`, /cal-ok/.test(rl.tab) && Math.abs(rl.k - d1.saved.k) < 1e-6 && rl.gk === rl.k, JSON.stringify(rl));
       // минуло понад 90 днів — значок знову блідий: варто повторити
       await app(page, () => { const S = window.__app.S; S.gyroCal = { ...S.gyroCal, at: Date.now() - 91 * 864e5 }; window.__app.bus.emit('calib', S.gyroCal); }); await sleep(200);
-      const old = await box('#tabCal');
+      const old = await box('#bCal');
       ok(`[${T}] калібруванню понад 90 днів — значок знову не світиться («${old.label}»); поправка у веденні лишається`, !/cal-ok/.test(old.cls) && /давно/.test(old.label) && await app(page, () => window.__app.calib.gyroK() > 1.08), JSON.stringify(old));
       // «Повторити» і хрестик: без «Готово» нічого не змінюється
       await gyInstall(page); await app(page, () => window.__gy.start({ up: [0, 1, 0], scale: 1, noise: 0.3, native: false })); await sleep(500);      // тут — без служби навігації: лише заміри екрана
-      await page.click('#tabCal'); await waitCal(page, s => s.step === 2, 6000);
+      await page.click('#bCal'); await waitCal(page, s => s.step === 2, 6000);
       // спершу праворуч — теж зараховано; кроки вгорі міняються місцями
       await app(page, () => window.__gy.turn(-90, 60));
       const rf = await waitCal(page, s => s.step === 3, 7000); await sleep(250); const rfb = await calSt(page);
@@ -3639,12 +3640,12 @@ if (run('32')) try {
       await page.click('#calib [data-cb="x"]'); await sleep(250);
       const cl = await calSt(page);
       ok(`[${T}] хрестик закриває; без «Готово» збережене калібрування не змінилось`, !cl.open && Math.abs(cl.saved.k - d1.saved.k) < 1e-6, JSON.stringify(cl.saved));
-      await page.click('#tabCal'); await sleep(300);
+      await page.click('#bCal'); await sleep(300);
       const bk = await app(page, () => { const was = !document.getElementById('calib').hidden, r = window.__reisBack(); return { was, r, open: !document.getElementById('calib').hidden, again: window.__reisBack() }; });
       ok(`[${T}] системна кнопка «Назад» закриває калібрування (а не згортає програму)`, bk.was && bk.r === true && !bk.open && bk.again === false, JSON.stringify(bk));
       // датчики мовчать — чесно кажемо; ожили — продовжуємо
       await app(page, () => window.__gy.stop());
-      await page.click('#tabCal'); await sleep(4200);
+      await page.click('#bCal'); await sleep(4200);
       const ns = await calSt(page);
       ok(`[${T}] датчики руху мовчать 3,5 с — не чекаємо вічно: «Датчики руху мовчать», пояснено, що буде без калібрування`, ns.open && ns.view === 'nosens' && /Датчики руху мовчать/.test(ns.title) && /за швидкістю й кнопкою «Поворот»/.test(ns.text) && (await readCheck(page, '#calib')).length === 0, JSON.stringify({ view: ns.view, title: ns.title, text: ns.text, read: await readCheck(page, '#calib') }));
       await app(page, () => window.__gy.start({ up: [0, 0.2, 0.98] })); await sleep(900);
@@ -3656,7 +3657,7 @@ if (run('32')) try {
       const free = await app(page, () => { const N = window.__app.nav; window.__reis('sens', { var: 0.05, yaw: 300 }); return { busy: window.__app.calib.calBusy(), hist: N.debugState().yawHist.length }; });
       // екран (WebView) датчиків не віддає зовсім, а служба навігації кут рахує — калібруємо лише за нею (раз на секунду)
       await app(page, () => { window.__gy.start({ up: [0, 1, 0], scale: 0.9, raw: false, native: true }); window.__spoken.length = 0; }); await sleep(300);
-      await page.click('#tabCal');
+      await page.click('#bCal');
       const sl2 = await waitCal(page, s => s.step === 2, 9000);
       await app(page, () => window.__gy.turn(90, 45)); const sl3 = await waitCal(page, s => s.step === 3, 9000);
       await app(page, () => window.__gy.turn(-180, 60)); const sl4 = await waitCal(page, s => s.step === 4, 11000); await sleep(300);

@@ -103,7 +103,9 @@ export const currentPanel = () => current;
 export function openPanel(name, arg) {
   const def = panels[name]; if (!def) return;
   current = name;
-  const p = $('panel'); p.hidden = false; p.classList.toggle('half', !!def.half); p.classList.toggle('full', !!def.full);
+  // (1.1.24) Кожна панель — на весь екран: верхня плашка з маневром і нижня з кнопками тут нічого не дають, лише заважають гортати.
+  // Закрити — ✕ угорі, «Готово»/«Назад» унизу чи системна «Назад». (Те, чому потрібна карта, — не панелі, а маленькі вікна поверх неї.)
+  const p = $('panel'); p.hidden = false; p.classList.remove('half'); p.classList.toggle('full', def.full !== false);
   $('panelTitle').textContent = def.title();
   $('panelBack').hidden = !def.back;
   $('panelBack').onclick = () => openPanel(def.back);

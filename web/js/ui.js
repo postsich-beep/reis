@@ -27,6 +27,7 @@ import { PT_SVG, ptTag } from './pticons.js';
 import { labOpen, closeLab } from './lab.js';
 import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp, repsAhead } from './reports.js';
 import { calibOpen, calibClose } from './ui_calib.js';
+import { bindPhotoZoom } from './photozoom.js';
 import { calFresh, calGet } from './calib.js';
 import { limitNow, overLimit } from './limits.js';
 
@@ -35,14 +36,26 @@ function layoutVars() {
   const r = document.documentElement.style;
   r.setProperty('--th', Math.round($('top').getBoundingClientRect().height) + 'px');
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
-  // (1.1.23) рядок над кнопками прозорий: ліворуч у ньому плашка часу прибуття, а праворуч вільно (якщо немає кнопок «без GPS» і
-  // плашок на всю ширину над ним) — туди опускаються «Моє місце» й ⓘ: карті більше місця
-  const tb = $('tripbar'), th = tb.getBoundingClientRect().height;
-  r.setProperty('--bf', (th > 0 && $('nudge').hidden && $('updBar').hidden && $('bAcceptGps').hidden ? Math.round(th) : 0) + 'px');
+  barShape();
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:
 // унизу — вид згори (2D), угорі — збоку (до 60°). Те саме, що двома пальцями вгору-вниз по карті: стрілка йде за жестом, жест — за нею.
+// (1.1.24) Контур нижньої плашки: низька середина з кнопками й два виступи вгору (ліворуч — час прибуття, праворуч — стрілка нахилу).
+// Малюємо одним шляхом у SVG за справжніми розмірами — із заокругленими кутами назовні й плавними «впадинами» всередині.
+// Коли виступи опущено (відкрита панель, складаємо рейс) — це звичайна плашка із заокругленим верхом.
+function barShape() {
+  const bar = $('tabbar'), sv = $('tbShape'); if (!bar || !sv) return;
+  const B = bar.getBoundingClientRect(), L = bar.querySelector('.tb-main').getBoundingClientRect(), T = $('tilt').getBoundingClientRect(), tabs = $('tabs').getBoundingClientRect();
+  const W = Math.round(B.width), H = Math.round(B.height); if (!W || !H) return;
+  const xL = Math.round(L.right - B.left), xR = Math.round(T.left - B.left) - 2, yB = Math.round(tabs.top - B.top), R = 18, q = Math.min(14, Math.max(0, yB - R) / 1.2);
+  const top = yB > 6 && xR - xL > 2 * q + 8
+    ? `M0 ${R}Q0 0 ${R} 0L${xL - R} 0Q${xL} 0 ${xL} ${R}L${xL} ${yB - q}Q${xL} ${yB} ${xL + q} ${yB}L${xR - q} ${yB}Q${xR} ${yB} ${xR} ${yB - q}L${xR} ${R}Q${xR} 0 ${xR + R} 0L${W - R} 0Q${W} 0 ${W} ${R}`
+    : `M0 ${R}Q0 0 ${R} 0L${W - R} 0Q${W} 0 ${W} ${R}`;
+  const key = W + '|' + H + '|' + top; if (sv.dataset.k === key) return; sv.dataset.k = key;
+  sv.querySelector('.tb-fill').setAttribute('d', `M0 ${H}L` + top.slice(1) + `L${W} ${H}Z`);
+  sv.querySelector('.tb-edge').setAttribute('d', top);
+}
 const TILT_THUMB = 34;
 function tiltFit() {}                      // місце й висоту дає сама плашка (CSS); лишено для layoutVars
 function tiltDraw(v) {
@@ -80,9 +93,9 @@ function staticLabels() {
   const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces' };
   const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places };
   tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
-  // 1.1.22: нижня стрічка спокійна, без кольорових плям. Крайня ліворуч — «Калібрування телефона» (зелена, коли відкалібровано);
-  // крайня праворуч — «Мітки» кашкетом поліції (зелена, коли на маршруті є позначки). Кружечок GPS переїхав до круга швидкості.
-  $('tabCal').innerHTML = `<span class="tc">${ICON.calTab}</span><span>${t('tabCal')}</span>`;
+  // 1.1.22: нижня стрічка спокійна, без кольорових плям. «Мітки» — кашкет поліції (зелений, коли на маршруті є позначки).
+  // (1.1.24) «Калібрування телефона» — кругла кнопка праворуч угорі, між налаштуваннями й видом карти (зелена, коли відкалібровано).
+  $('bCal').innerHTML = ICON.calTab;
   $('tabRep').innerHTML = `<span class="tc">${ICON.repTab}</span><span>${t('tabRep')}</span>`;
   $('spdGps').innerHTML = ICON.gpsSig;
   tabCalSync(); repTabSync();
@@ -334,11 +347,15 @@ function hud() {
   if (sb.hidden === snapOn) { sb.hidden = !snapOn; if (snapOn) sb.innerHTML = ICON.pin + '<span>' + t('snapRoute') + '</span>'; }
   if (man.hidden === show) { man.hidden = !show; stripEl.classList.toggle('alone', !show); stripUpdate(); requestAnimationFrame(layoutVars); }
 
-  // нижній рядок
-  if (g.arrived) { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = t('tripDone'); }
-  else if (g.active && g.route) { $('eta').textContent = fmtClock(new Date(g.eta)); $('remain').textContent = fmtDist(g.remain) + ' · ' + fmtDur(g.remTime); }
-  else if (plan.trip && plan.trip.route) { const r = plan.trip.route; $('eta').textContent = fmtClock(new Date()); $('remain').textContent = fmtDist(r.dist) + ' · ' + fmtDur(r.time) + ' · ' + t('previewReady'); }
-  else { $('eta').textContent = fmtClock(new Date()); $('remain').textContent = ''; }
+  // лівий виступ нижньої плашки: час прибуття, під ним — що лишилось, кожне окремим рядком (між ними невидимий « · »)
+  let clock = new Date(), parts = [];
+  if (g.arrived) parts = [t('tripDone')];
+  else if (g.active && g.route) { clock = new Date(g.eta); parts = [fmtDist(g.remain), fmtDur(g.remTime)]; }
+  else if (plan.trip && plan.trip.route) { const r = plan.trip.route; parts = [fmtDist(r.dist), fmtDur(r.time), t('previewReady')]; }
+  $('eta').textContent = fmtClock(clock);
+  const key = parts.join('|'), rm = $('remain');
+  if (rm.dataset.k !== key) { rm.dataset.k = key; rm.innerHTML = parts.map(x => `<span>${esc(x)}</span>`).join('<i> · </i>'); requestAnimationFrame(layoutVars); }
+}
 }
 
 /* ---------- рейс без «Поїхали»: водій побудував маршрут і просто поїхав ним — вмикаємо ведення самі ---------- */
@@ -693,9 +710,10 @@ function repOpen(open) {
     // (1.1.22) значок «Мітки» горить зеленим — отже, є позначки попереду: показуємо їх тут же, найближчі перші; дотик — показати на карті
     const near = repsAhead().slice(0, 4);
     const nearHtml = near.length ? `<div class="rep-near"><div class="rep-sub">${t('repAheadTitle')}</div>${near.map(x => `<button class="rep-row" data-repgo="${esc(x.r.id)}"><span class="rep-ri">${REP_SVG[x.r.t]}</span><span class="grow"><b>${esc(repName(x.r))}</b><small>${esc(repAgo(x.r))}</small></span><span class="rep-d">${esc(x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead)))}</span></button>`).join('')}</div>` : '';
-    box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>${nearHtml}
-      <div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}</div>
-      <div class="muted rep-hint">${t('repHint')}</div>`;
+    // (1.1.24) Низька майже прозора смужка внизу: три кнопки в ряд і ✕. Під значком і підписом кожної кнопки — щільніша підкладка
+    // (текст читається на будь-якій карті), сама смужка майже прозора й карту не закриває. Великого заголовка й довгого тексту немає.
+    box.setAttribute('aria-label', t('repTitle'));
+    box.innerHTML = `${nearHtml}<div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}<button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
     box.hidden = false;
   } else box.hidden = true;
 }
@@ -709,9 +727,9 @@ function repTabSync() {
   if (bd && bd.textContent !== String(n)) bd.textContent = String(n);
   b.setAttribute('aria-label', n ? t('repBtnHas', n) : t('repBtn'));
 }
-// «Калібрування телефона» в нижній стрічці: зелений — відкалібровано (і не давніше ніж 90 днів), блідий — ні
+// «Калібрування телефона» (кнопка праворуч угорі): зелена — відкалібровано (і не давніше ніж 90 днів), звичайна — ні
 function tabCalSync() {
-  const b = $('tabCal'); if (!b) return; const ok = calFresh();
+  const b = $('bCal'); if (!b) return; const ok = calFresh();
   b.classList.toggle('cal-ok', ok);
   b.setAttribute('aria-label', t(ok ? 'tabCalOk' : calGet() ? 'tabCalOld' : 'tabCalNo'));
 }
@@ -1070,13 +1088,14 @@ definePanel('trip', {
     const active = g.trip && (g.active || g.arrived);
     body.innerHTML = active ? tripActiveHtml() : planHtml();
     body.onclick = tripClicks; body.oninput = tripInput; body.onfocusin = tripFocus;
-    $('panel').classList.toggle('half', !active && !!plan.trip);     // маршрут побудовано — панель нижче, лінію видно на карті
+    // Маршрут побудовано, але ще не рушили — панель нижча: лінію маршруту видно на карті над нею (тут карта потрібна).
+    // У решті випадків «Рейс», як і всі панелі, — на весь екран (ui_base.js).
+    { const half = !active && !!plan.trip, P = $('panel'); P.classList.toggle('half', half); P.classList.toggle('full', !half); }
     // (1.1.22) деталі рейсу в дорозі — на ВЕСЬ екран: верхня плашка з маневром і нижня (час, кілометри, вкладки) належать карті й тут заважали
-    $('panel').classList.toggle('full', !!active);
   },
   update(body) {
     const active = g.trip && (g.active || g.arrived);
-    $('panel').classList.toggle('full', !!active);
+    { const half = !active && !!plan.trip, P = $('panel'); P.classList.toggle('half', half); P.classList.toggle('full', !half); }
     if (active) { body.innerHTML = tripActiveHtml(); return; }
     // форму не перемальовуємо, щоб не збивати введення
     const sum = $('planSum'), er = $('planErr'), bb = body.querySelector('[data-act="build"]'), ns = $('newSec');
@@ -1237,7 +1256,10 @@ definePanel('place', {
     body.innerHTML = placeHtml(vpCur);
     body.onclick = e => {
       const im = e.target.closest('[data-ph]');
-      if (im) { const pv = $('photoView'); pv.innerHTML = `<button class="pv-x" data-pv="x" aria-label="${t('close')}">${ICON.x}</button><div class="pv-strip">${(vpCur.photos || []).map(src => `<img src="data/${esc(src)}" alt="">`).join('')}</div>`; pv.hidden = false; const st = pv.querySelector('.pv-strip'); st.scrollLeft = st.clientWidth * +im.dataset.ph; return; }
+      if (im) {      // фото на весь екран: гортаємо пальцем; (1.1.24) двома пальцями — збільшити, одним — зсунути, подвійний дотик — збільшити / повернути
+        const pv = $('photoView'), n = (vpCur.photos || []).length;
+        pv.innerHTML = `<button class="pv-x" data-pv="x" aria-label="${t('close')}">${ICON.x}</button><div class="pv-strip">${(vpCur.photos || []).map(src => `<div class="pv-slide"><img src="data/${esc(src)}" alt="" draggable="false"></div>`).join('')}</div><div class="pv-hint">${t('pvHint')}${n > 1 ? ' · ' + t('pvSwipe') : ''}</div>`;
+        pv.classList.remove('zoomed'); pv.hidden = false; const st = pv.querySelector('.pv-strip'); st.scrollLeft = st.clientWidth * +im.dataset.ph; bindPhotoZoom(pv); return; }
       const b = e.target.closest('[data-vp]'); if (!b) return;
       const p = vpCur, k = b.dataset.vp;
       if (k === 'map') { closePanel(); flyTo(p, 16); }
@@ -1590,7 +1612,7 @@ export function initUI() {
   // кружечок GPS біля круга швидкості — подробиці про сигнал (як раніше з нижньої стрічки)
   $('spdGps').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); currentPanel() === 'gps' ? closePanel() : openPanel('gps'); };
   // калібрування телефона — на весь екран
-  $('tabCal').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); closePanel(); calibOpen(); };
+  $('bCal').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); closePanel(); calibOpen(); };
   bus.on('calib', tabCalSync); bus.on('calibSaved', () => { tabCalSync(); toast(t('cbSaved'), 'green', 5000); });
   bus.on('reports', repTabSync); bus.on('trip', repTabSync);
   $('bMap').onclick = e => { e.stopPropagation(); mapTypeTap(); };
@@ -1697,5 +1719,5 @@ export function initUI() {
   $('bAcceptGps').onclick = acceptPending;
   $('gpsChip').onclick = () => openPanel('gps');
 
-  $('photoView').onclick = e => { if (e.target.closest('[data-pv="x"]') || e.target === $('photoView')) $('photoView').hidden = true; };
+  $('photoView').onclick = e => { if (e.target.closest('[data-pv="x"]') || e.target === $('photoView')) { $('photoView').hidden = true; $('photoView').innerHTML = ''; } };
 }
