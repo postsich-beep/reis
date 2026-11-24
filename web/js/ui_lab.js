@@ -16,7 +16,7 @@ import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from 
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
 import { logoHtml } from './lab.js';
-import { cacheInfo as addrCacheInfo } from './addr.js';
+import { packInfo, packDownloadAll, packStop, packDeleteAll } from './addr.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
@@ -104,7 +104,6 @@ function offlineHtml() {
     if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
     if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad === 'app' ? 'offBadApp' : off.bad === 'tiles' ? 'offBadTiles' : off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
     // як саме читається файл карти — щоб на знімку екрана було видно причину, якщо карта не малюється
-    if (off.installed) h += `<div class="muted" id="addrInfo" style="margin-top:6px;font-size:12px">${esc(t('addrInfo', '…'))}</div>`;
     if (off.installed) h += `<div class="muted" id="offDiag" style="margin-top:6px;font-size:12px">${esc(t('offDiag', off.mode ? t('offMode_' + off.mode) : '—', off.reads, off.errs) + (off.lastErr ? ' · ' + off.lastErr : '') + (off.glyphMiss && off.glyphMiss.length ? ' · ' + t('offGlyphMiss', off.glyphMiss.length) : '') + ' · ' + t('offShell', (P.appInfo() || {}).nativeRev || '?'))}</div>`;
     const newer = r && off.installed && String(r.date) > String(off.date);
     const btns = [];
@@ -115,6 +114,8 @@ function offlineHtml() {
     if (r && off.free && off.free < (r.size || 0) + 3e8) h += `<div class="muted" style="margin-top:6px;color:var(--red)">${t('offNoSpace', GB(off.free))}</div>`;
   }
   h += '</div>';
+  // номери будинків без мережі: власні пачки на всю Україну (addr.js) — окрема картка під офлайн-картою
+  if (off.installed) h += `<div class="card" id="addrPack" style="margin-top:8px"><div style="font-weight:600">${t('addrPackTitle')}</div><div class="muted" id="addrPackState" style="margin-top:4px">${t('loading')}</div><div id="addrPackProg"></div><div class="btns" id="addrPackBtns"></div></div>`;
   h += `<div class="list" style="margin-top:8px">${toggleRow('offlineWifi', t('set_offlineWifi'), t('setd_offlineWifi'), S.offlineWifi)}</div>`;
   if (off.installed) h += `<div class="muted" style="margin:10px 2px 6px">${t('setMapMode')}</div>` + seg('mapMode', [['auto', t('mapAuto'), S.mapMode === 'auto'], ['online', t('mapOnline'), S.mapMode === 'online'], ['offline', t('mapOffline'), S.mapMode === 'offline']]);
   h += `<div class="muted" style="margin-top:8px">${t('offRouteNote')}</div>`;
@@ -194,13 +195,32 @@ function settingsHtml() {
   <div class="btns"><button class="btn sm" data-act="resetLearn">${t('resetLearn')}</button><button class="btn sm" data-act="clearFeed">${t('clearFeed')}</button></div>
   <div class="btns"><button class="btn sm wide" data-act="about">${t('about')} · ${VERSION.name}</button></div>`;
 }
-// скільки квадратів номерів будинків уже лежить у телефоні (рядок у розділі офлайн-карти)
-function addrInfoFill() { addrCacheInfo().then(i => { const e = $('addrInfo'); if (e) e.textContent = t('addrInfo', i.tiles); }).catch(() => {}); }
+// «Номери будинків без мережі»: що є на сервері, що вже в телефоні, кнопки «завантажити / зупинити / видалити»
+const addrMB = b => (b / 1e6).toFixed(b < 1e7 ? 1 : 0).replace('.', ','), addrNum = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
+const addrDate = d => /^\d{8}$/.test(d || '') ? d.slice(6) + '.' + d.slice(4, 6) + '.' + d.slice(0, 4) : (d || '');
+let addrFillN = 0;
+async function addrPackFill() {
+  if (!$('addrPack')) return;
+  const my = ++addrFillN, i = await packInfo(); if (my !== addrFillN) return;
+  const st = $('addrPackState'), bt = $('addrPackBtns'), pr = $('addrPackProg'); if (!st || !bt) return;
+  const del = `<button class="btn" data-act="addrDel">${t('addrPackDel')}</button>`;
+  let txt = '', btns = '', prog = '';
+  if (i.busy) { txt = t('addrPackBusy', i.done, i.total); prog = `<div class="prog"><i style="width:${i.total ? Math.round(i.done / i.total * 100) : 0}%"></i></div>`; btns = `<button class="btn sm wide" data-act="addrStop">${t('addrPackStop')}</button>`; }
+  else if (!i.index) { txt = t('addrPackNoData'); if (i.have) btns = del; }
+  else if (i.fresh === i.index.packs) { txt = t('addrPackAll', addrNum(i.index.total), addrDate(i.index.date)); btns = del; }
+  else {
+    const left = i.index.bytes - (i.old ? 0 : i.bytes);
+    txt = (i.have ? t('addrPackSome', i.have, i.index.packs) + ' ' : '') + (i.old ? t('addrPackOld', addrDate(i.index.date)) + ' ' : '') + t('addrPackNone', addrMB(i.index.bytes), addrNum(i.index.total));
+    btns = `<button class="btn pri" data-act="addrGet">${i.old ? t('addrPackUpd') : t(i.have ? 'addrPackMore' : 'addrPackGet', addrMB(Math.max(left, 0)))}</button>` + (i.have ? del : '');
+  }
+  if (i.err && !i.busy) txt += ' ' + t('addrPackErr', i.err);
+  st.textContent = txt; pr.innerHTML = prog; bt.innerHTML = btns;
+}
 definePanel('settings', {
   title: () => t('settings'),
   render(body) {
     body.innerHTML = settingsHtml();
-    addrInfoFill();
+    addrPackFill();
     body.onclick = e => {
       const row = e.target.closest('[data-tg]'), b = e.target.closest('button');
       const vr = e.target.closest('[data-voice]'); if (vr) { selectVoice(vr.dataset.voice); return; }
@@ -242,6 +262,9 @@ definePanel('settings', {
       else if (a === 'about') openPanel('about');
       else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
+      else if (a === 'addrGet') { packDownloadAll().then(okAll => { if (okAll) toast(t('addrPackDone'), 'green', 6000); }); setTimeout(addrPackFill, 100); }
+      else if (a === 'addrStop') { packStop(); }
+      else if (a === 'addrDel') { if (b.dataset.sure) packDeleteAll().then(addrPackFill); else { b.dataset.sure = '1'; b.textContent = t('addrPackDelSure'); } }
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
     };
     body.onchange = e => {
@@ -511,7 +534,8 @@ definePanel('about', {
 });
 export function initLab() {
   bus.on('stopsdb', () => { const el = $('ptsSec'); if (el) el.innerHTML = pointsHtml(); });
-  bus.on('offline', () => { const el = $('offSec'); if (el) el.innerHTML = offlineHtml(); });
+  bus.on('offline', () => { const el = $('offSec'); if (el) { el.innerHTML = offlineHtml(); addrPackFill(); } });
+  bus.on('addrPacks', addrPackFill);
   bus.on('settings', k => { if (k === 'lang' && offlineActive()) applyMapSource(); });
   bus.on('sim', () => refresh('lab'));
   bus.on('rough', () => refresh('lab'));

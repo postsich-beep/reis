@@ -147,7 +147,8 @@ const VP_COMPLEX = { id: 'test-complex', kind: 'complex', name: 'Комплек�
     photos: ['verified/bistro-1.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: стоянка, готель і кафе.', ru: 'Советуем: стоянка, гостиница и кафе.' }, tags: { uk: ['Стоянка для фур', 'Готель'], ru: ['Стоянка для фур', 'Гостиница'] },
     services: [[{ uk: 'Стоянка для фури — душ входить у вартість', ru: 'Стоянка для фуры — душ входит в стоимость' }, '100 грн'], [{ uk: 'Готель: одномісний номер', ru: 'Гостиница: одноместный номер' }, '1000 грн']],
     menu: [['Борщ', '100 грн / 300 г']], note: { uk: 'Ціни станом на 24.11.2026.', ru: 'Цены на 24.11.2026.' } };
-const ROUTE = { fn: null };                                        // підміна відповіді сервера маршрутів у окремих перевірках
+const ROUTE = { fn: null };
+const PACKS = { on: false, down: false, rawDown: false, req: [] };      // сховище власних пачок номерів будинків                                        // підміна відповіді сервера маршрутів у окремих перевірках
 // Сторінки, що лишились відкритими після збою попередньої перевірки, гальмують усі наступні (карта малює й далі) — закриваємо.
 const liveCtx = new Set();
 async function newPage(native, opts = {}) {
@@ -165,6 +166,16 @@ async function newPage(native, opts = {}) {
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
   if (!opts.realVp) await page.route('**/data/verified.json', r => json(r, VP_JSON));
+  // Власні пачки номерів будинків (гілка addr сховища): за замовчуванням їх «ще немає» (404) — працює шлях через OpenFreeMap.
+  // PACKS.on — пачки зібрані й лежать на сервері (tests/fixtures/addr, зроблені тим самим tools/build_addr.py); PACKS.down — мережі немає.
+  await page.route(/^https:\/\/(raw\.githubusercontent\.com\/test-owner\/test-repo\/addr|cdn\.jsdelivr\.net\/gh\/test-owner\/test-repo@addr)\/v1\//, async r => {
+    const u = r.request().url(), name = u.slice(u.lastIndexOf('/') + 1), cors = { 'access-control-allow-origin': '*' };
+    if (PACKS.down) return r.abort();
+    PACKS.req.push((/jsdelivr/.test(u) ? 'cdn:' : '') + name);
+    if (!PACKS.on || (PACKS.rawDown && !/jsdelivr/.test(u))) return r.fulfill({ status: 404, headers: cors, body: '' });
+    try { const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'addr', 'v1', name)); r.fulfill({ status: 200, contentType: name.endsWith('.json') ? 'application/json' : 'application/octet-stream', headers: cors, body: b }); }
+    catch (_) { r.fulfill({ status: 404, headers: cors, body: '' }); }
+  });
   await page.route('https://ntfy.sh/**', r => {
     const rq = r.request(), u = new URL(rq.url());
     if (NTFY.fail) return r.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: 'down' });
@@ -201,7 +212,7 @@ async function newPage(native, opts = {}) {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
     window.ReisNative = {
-      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, nativeRev: window.__nativeRev ?? 4 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
+      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, repo: 'test-owner/test-repo', nativeRev: window.__nativeRev ?? 4 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
       speak(text, lang, rate, id) { window.__spoken.push(text); cb('tts', { id, state: 'done' }); }, stopSpeak() {}, listen() { cb('stt', { state: 'final', text: 'Що попереду на дорозі?' }); }, stopListen() {},
       http(id, method, url) {
         let status = 200, body = '';

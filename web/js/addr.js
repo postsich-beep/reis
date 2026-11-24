@@ -7,6 +7,12 @@
 //   • рушили в рейс — заздалегідь зберігаємо номери навколо фінішу й проміжної точки: остання миля — саме там,
 //     де номер будинку потрібен, а мережі може не бути.
 // З квадрата (~100 КБ) зберігаємо один шар номерів (кілька КБ), тож запас на півтори тисячі квадратів — це мегабайти.
+//
+// 1.1.17 — ВЛАСНІ ПАЧКИ: номери всієї України, зібрані з OpenStreetMap (tools/build_addr.py, гілка addr сховища).
+// Пачка — квадрат ≈100×100 км, файл від кількох КБ до пари МБ. Застосунок бере пачку свого району сам, щойно
+// водій наблизив карту з мережею, і кладе в телефон; а в «Налаштуваннях» можна одним дотиком завантажити всю Україну.
+// Є пачка — номери малюються без мережі й без сторонніх серверів. Немає пачок (ще не зібрані, немає мережі) —
+// працює попередній шлях: квадрати OpenFreeMap із запасом.
 import { bus, log } from './core.js';
 import * as P from './platform.js';
 
@@ -15,7 +21,7 @@ const CACHE = 'reis-addr-1', Z = 14, TPL_KEY = 'reis.addrTpl';
 const FRESH_MS = 45 * 864e5;                                // номери будинків змінюються рідко: 45 днів квадрат не перепитуємо
 const TPL_MS = 6 * 3600e3, MAX_TILES = 1500;
 export const HOUSE_Z = 17;                                  // номери — лише зблизька, щоб на ходу не захаращували карту (домовленість 1.1.8)
-export const addr = { net: 0, hits: 0, fails: 0, last: '', prefetched: 0 };
+export const addr = { net: 0, hits: 0, fails: 0, last: '', prefetched: 0, own: 0 };
 
 /* ---------- адреса квадратів (із версією) ---------- */
 let tpl = null, tplAt = 0, tplBusy = null;
@@ -81,6 +87,150 @@ async function cachePut(x, y, data) {
 }
 export async function cacheInfo() { const c = await store(); if (!c) return { tiles: mem.size, mem: true }; try { return { tiles: (await c.keys()).length, mem: false }; } catch (_) { return { tiles: 0, mem: false }; } }
 
+/* ---------- власні пачки номерів: уся Україна без мережі ---------- */
+const PACK_CACHE = 'reis-addr-pack-1', IDX_KEY = 'reis.addrIdx', IDX_MS = 24 * 3600e3, PACK_Z = 8;
+export const packs = { index: null, busy: false, done: 0, total: 0, stop: false, err: '', net: 0, used: 0 };
+const repo = () => { try { return (P.appInfo() || {}).repo || ''; } catch (_) { return ''; } };
+// raw.githubusercontent.com віддає файли гілки з дозволом для вебсторінок (CORS); jsDelivr — запасне дзеркало того самого
+const packBases = () => { const r = repo(); return r ? ['https://raw.githubusercontent.com/' + r + '/addr/v1/', 'https://cdn.jsdelivr.net/gh/' + r + '@addr/v1/'] : []; };
+async function packFetch(name, asJson) {
+  let last = new Error('невідомо, де лежать номери');
+  for (const b of packBases()) {
+    try {
+      const r = await fetch(b + name, { cache: 'no-store' });
+      if (r.ok) return asJson ? await r.json() : new Uint8Array(await r.arrayBuffer());
+      last = new Error('HTTP ' + r.status);
+    } catch (e) { last = e; }
+  }
+  throw last;
+}
+/** Каталог пачок: дата даних, скільки номерів, які квадрати є. Раз на добу — з мережі, решту часу — із пам'яті телефона. */
+let idxBusy = null, idxTried = 0;
+export function packIndex(force = false) {
+  if (packs.index && !force && Date.now() - packs.indexAt < IDX_MS) return Promise.resolve(packs.index);
+  if (idxBusy) return idxBusy;
+  idxBusy = (async () => {
+    let saved = null; try { saved = JSON.parse(localStorage.getItem(IDX_KEY) || 'null'); } catch (_) {}
+    if (saved && saved.i && !force && Date.now() - saved.t < IDX_MS) { packs.index = saved.i; packs.indexAt = saved.t; return saved.i; }
+    if (P.online() && packBases().length && (force || Date.now() - idxTried > 60000)) {
+      idxTried = Date.now();
+      try {
+        const i = await packFetch('index.json', true);
+        if (i && i.packs && i.v === 1) { packs.index = i; packs.indexAt = Date.now(); packs.err = ''; try { localStorage.setItem(IDX_KEY, JSON.stringify({ t: packs.indexAt, i })); } catch (_) {} return i; }
+      } catch (e) { packs.err = String(e && e.message || e).slice(0, 80); }
+    }
+    if (saved && saved.i) { packs.index = saved.i; packs.indexAt = Date.now() - IDX_MS + 600000; return saved.i; }   // старий каталог кращий за жодного; за 10 хв спитаємо знову
+    return null;
+  })().finally(() => { idxBusy = null; });
+  return idxBusy;
+}
+const memPacks = new Map();
+const packUrl = k => location.origin + '/__addrpack/' + k;
+const packStore = async () => { try { return typeof caches !== 'undefined' ? await caches.open(PACK_CACHE) : null; } catch (_) { return null; } };
+async function packStored(k) {
+  const c = await packStore(); if (!c) return memPacks.get(k) || null;
+  try { const r = await c.match(packUrl(k)); return r ? { gz: new Uint8Array(await r.arrayBuffer()), date: r.headers.get('x-reis-date') || '' } : null; } catch (_) { return null; }
+}
+async function packPut(k, gz, date) {
+  const c = await packStore();
+  if (c) { try { await c.put(packUrl(k), new Response(gz, { headers: { 'content-type': 'application/octet-stream', 'x-reis-date': String(date || '') } })); return; } catch (_) {} }
+  memPacks.set(k, { gz, date });
+}
+/** Що вже лежить у телефоні: квадрат → дата даних. */
+export async function packHave() {
+  const out = new Map(), c = await packStore();
+  if (!c) { for (const [k, v] of memPacks) out.set(k, v.date); return out; }
+  try { for (const rq of await c.keys()) { const k = rq.url.slice(rq.url.lastIndexOf('/') + 1), r = await c.match(rq); out.set(k, r ? r.headers.get('x-reis-date') || '' : ''); } } catch (_) {}
+  return out;
+}
+/** Розбір пачки (формат — у tools/build_addr.py): покажчик квадратів масштабу 14 і дані номерів. */
+export function readPack(raw) {
+  if (raw.length < 6 || raw[0] !== 0x52 || raw[1] !== 0x41 || raw[2] !== 0x44 || raw[3] !== 0x31) throw new Error('це не пачка номерів');
+  const dv = new DataView(raw.buffer, raw.byteOffset, raw.byteLength), n = dv.getUint16(4, true), base = 6 + 8 * n, tiles = new Map();
+  for (let i = 0; i < n; i++) { const o = 6 + 8 * i; tiles.set(raw[o] + raw[o + 1] * 64, { count: dv.getUint16(o + 2, true), off: base + dv.getUint32(o + 4, true) }); }
+  return { raw, tiles };
+}
+export function packPoints(pk, tx, ty) {
+  const e = pk.tiles.get(tx + ty * 64); if (!e) return [];
+  const out = [], b = pk.raw, td = new TextDecoder(); let o = e.off;
+  for (let i = 0; i < e.count && o + 4 <= b.length; i++) { const L = b[o + 3]; out.push({ x: (b[o] << 4) | (b[o + 1] >> 4), y: ((b[o + 1] & 15) << 8) | b[o + 2], n: td.decode(b.subarray(o + 4, o + 4 + L)) }); o += 4 + L; }
+  return out;
+}
+/** Точки з номерами → квадрат для карти (MVT, шар «housenumber» — той самий, що в OpenFreeMap, тож шар підписів один). */
+export function mvtHouse(pts) {
+  const out = [], enc = new TextEncoder();
+  const v = (a, n) => { do { let c = n % 128; n = Math.floor(n / 128); if (n > 0) c |= 0x80; a.push(c); } while (n > 0); };
+  const ld = (a, f, bytes) => { v(a, (f << 3) | 2); v(a, bytes.length); for (let i = 0; i < bytes.length; i++) a.push(bytes[i]); };
+  const vals = [], vi = new Map(), body = [];
+  ld(body, 1, enc.encode('housenumber'));
+  for (const p of pts) {
+    let i = vi.get(p.n); if (i == null) { i = vals.length; vals.push(p.n); vi.set(p.n, i); }
+    const tags = [], geom = [], ft = []; v(tags, 0); v(tags, i); v(geom, 9); v(geom, p.x << 1); v(geom, p.y << 1);       // 9 = «перейти до» ×1; місце невід'ємне, тож зигзаг — це просто ×2
+    ld(ft, 2, tags); v(ft, (3 << 3) | 0); v(ft, 1); ld(ft, 4, geom);
+    ld(body, 2, ft);
+  }
+  ld(body, 3, enc.encode('housenumber'));
+  for (const s of vals) { const val = []; ld(val, 1, enc.encode(s)); ld(body, 4, val); }
+  v(body, (5 << 3) | 0); v(body, 4096); v(body, (15 << 3) | 0); v(body, 2);
+  ld(out, 3, body);
+  return new Uint8Array(out);
+}
+const parsed = new Map();                                    // розібрані пачки в пам'яті (кілька останніх)
+async function packOpen(k) {
+  if (parsed.has(k)) { const pk = parsed.get(k); parsed.delete(k); parsed.set(k, pk); return pk; }
+  const idx = await packIndex();
+  let st = await packStored(k);
+  if (!st) {
+    if (!idx) return null;                                   // каталогу немає: пачки ще не зібрані або мережі не було жодного разу
+    if (!idx.packs[k]) return { raw: new Uint8Array(0), tiles: new Map() };       // у цьому районі в OpenStreetMap номерів немає взагалі
+    if (!P.online()) return null;
+    try { const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); st = { gz, date: idx.date }; packs.net++; bus.emit('addrPacks', packs); }
+    catch (e) { packs.err = String(e && e.message || e).slice(0, 80); return null; }
+  } else if (idx && idx.packs[k] && st.date !== idx.date && P.online()) {
+    packFetch(k + '.bin.gz').then(gz => packPut(k, gz, idx.date)).then(() => parsed.delete(k)).catch(() => {});     // є новіші дані — оновимо тихо, а зараз показуємо те, що є
+  }
+  let pk; try { pk = readPack(await gunzipIfNeeded(st.gz)); } catch (e) { packs.err = String(e && e.message || e).slice(0, 80); return null; }
+  parsed.set(k, pk); while (parsed.size > 6) parsed.delete(parsed.keys().next().value);
+  return pk;
+}
+/** Номери одного квадрата масштабу 14 із власної пачки: готовий квадрат для карти; null — пачки тут (поки) немає. */
+async function packTile(x, y) {
+  if (!packBases().length) return null;
+  const sh = Z - PACK_Z, pk = await packOpen((x >> sh) + '_' + (y >> sh)); if (!pk) return null;
+  const pts = packPoints(pk, x & 63, y & 63);
+  packs.used++;
+  return pts.length ? mvtHouse(pts) : new Uint8Array(0);
+}
+/** Завантажити в телефон усю Україну (або докачати те, чого бракує чи що застаріло). Перебіг — у packs і події addrPacks. */
+export async function packDownloadAll() {
+  if (packs.busy) return false;
+  packs.busy = true; packs.stop = false; packs.err = ''; packs.done = 0; packs.total = 0; bus.emit('addrPacks', packs);
+  try {
+    const idx = await packIndex(true); if (!idx) throw new Error(packs.err || 'каталог номерів недоступний');
+    const keys = Object.keys(idx.packs), have = await packHave(), todo = keys.filter(k => have.get(k) !== idx.date);
+    packs.total = keys.length; packs.done = keys.length - todo.length; bus.emit('addrPacks', packs);
+    let i = 0;
+    const worker = async () => { while (i < todo.length && !packs.stop) { const k = todo[i++]; const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); parsed.delete(k); packs.done++; packs.net++; bus.emit('addrPacks', packs); } };
+    await Promise.all([worker(), worker(), worker()]);
+    const c = await packStore(); if (c && !packs.stop) for (const [k] of have) if (!idx.packs[k]) await c.delete(packUrl(k));     // квадратів, яких більше немає в каталозі, не тримаємо
+  } catch (e) { packs.err = String(e && e.message || e).slice(0, 80); }
+  packs.busy = false; bus.emit('addrPacks', packs);
+  return !packs.err && !packs.stop;
+}
+export function packStop() { packs.stop = true; }
+export async function packDeleteAll() {
+  packs.stop = true; parsed.clear(); memPacks.clear();
+  try { if (typeof caches !== 'undefined') await caches.delete(PACK_CACHE); } catch (_) {}
+  bus.emit('addrPacks', packs);
+}
+/** Для «Налаштувань»: що є на сервері й що вже в телефоні. */
+export async function packInfo() {
+  const idx = await packIndex(), have = await packHave();
+  const all = idx ? Object.keys(idx.packs) : [], fresh = all.filter(k => have.get(k) === idx.date).length, old = all.filter(k => have.has(k) && have.get(k) !== idx.date).length;
+  let bytes = 0, nums = 0; if (idx) for (const k of all) if (have.has(k)) { nums += idx.packs[k][0]; bytes += idx.packs[k][1]; }
+  return { index: idx ? { date: idx.date, total: idx.total, bytes: idx.bytes, packs: all.length } : null, have: have.size, fresh, old, nums, bytes, busy: packs.busy, done: packs.done, total: packs.total, err: packs.err };
+}
+
 /* ---------- один квадрат номерів: із запасу або з мережі ---------- */
 // Запит не обриваємо, навіть якщо карта вже «передумала» (водій посунув її далі): квадрат малий, а в запасі знадобиться.
 const flying = new Map();
@@ -90,6 +240,10 @@ function getTile(x, y) {
   return flying.get(k);
 }
 async function loadTile(x, y) {
+  // 1) власна пачка цього району (є в телефоні або щойно взята з мережі) — номери без сторонніх серверів і без мережі
+  const own = await packTile(x, y).catch(() => null);
+  if (own) { addr.own++; return own; }
+  // 2) квадрат OpenFreeMap із запасу або з мережі
   const hit = await cacheGet(x, y);
   if (hit && Date.now() - hit.t < FRESH_MS) { addr.hits++; return hit.data; }
   try {
@@ -133,10 +287,11 @@ export function houseLayer(source, night = false) {
   };
 }
 /** Джерело номерів для офлайн-карти (для онлайн-карти джерело вже є в стилі — «openmaptiles»). */
-export const houseSource = () => ({ type: 'vector', tiles: ['reisaddr://{z}/{x}/{y}'], minzoom: Z, maxzoom: Z, attribution: '© OpenMapTiles © OpenStreetMap' });
+export const houseSource = () => ({ type: 'vector', tiles: ['reisaddr://{z}/{x}/{y}'], minzoom: Z, maxzoom: Z, attribution: '© OpenStreetMap' });
 
 export function init() {
   try { maplibregl.addProtocol('reisaddr', tileLoad); } catch (e) { log('warn', 'номери будинків: ' + e.message); }
+  if (P.online()) packIndex().then(i => { if (i) log('info', 'номери будинків: каталог пачок від ' + i.date + ', номерів ' + i.total); }).catch(() => {});
   // рушили в рейс — номери навколо фінішу й проміжної точки кладемо в запас (один раз на рейс, лише коли є мережа)
   let doneFor = '';
   bus.on('trip', g => {
