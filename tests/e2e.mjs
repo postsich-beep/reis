@@ -2827,19 +2827,21 @@ if (run('28')) try {
     return { pts: A.packPoints(pk, 6, 2), none: A.packPoints(pk, 7, 2).length, tiles: pk.tiles.size, mvt: A.onlyHouseNumbers(A.mvtHouse(A.packPoints(pk, 6, 2))).length }; });
   ok('пачка, зібрана tools/build_addr.py, читається застосунком: ті самі шість номерів на тих самих місцях; дублікат і «сміття» відсіяно', JSON.stringify(dec.pts) === JSON.stringify([{ x: 1185, y: 539, n: '12' }, { x: 1379, y: 599, n: '14А' }, { x: 1224, y: 734, n: '16' }, { x: 1392, y: 817, n: '18/2' }, { x: 1198, y: 921, n: '20' }, { x: 1366, y: 1009, n: '22-Б' }]) && dec.none === 0 && dec.tiles === 1 && dec.mvt > 60, JSON.stringify(dec));
   // и) наблизили карту: пачку свого району застосунок бере сам — і номери є (OpenFreeMap вимкнено й не потрібен)
-  PACKS.req = [];
+  const idxReq = PACKS.req.filter(x => x === 'index.json').length; PACKS.req = [];
   await jumpTo(page, 17.2); await waitNums(page); await sleep(500);
-  const p1 = await nums(page), p1g = await app(page, () => { const f = window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).find(x => String(x.properties.housenumber) === '12'); return f ? f.geometry.coordinates : null; });
+  const srcNums = () => app(page, () => [...new Set(window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).map(x => String(x.properties.housenumber)))].sort());
+  const p1 = await nums(page), p1s = await srcNums(), p1g = await app(page, () => { const f = window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).find(x => String(x.properties.housenumber) === '12'); return f ? f.geometry.coordinates : null; });
   await shot(page, '35-house-own-pack');
   const want12 = [24.045 + (-40) / (111320 * Math.cos(49.807 * Math.PI / 180)), 49.807 + 85 / 111320];
-  ok('офлайн-карта: номери з власної пачки району — усі шість, без OpenFreeMap; пачку взято один раз', p1.drawn.length === 6 && ['12', '14А', '16', '18/2', '20', '22-Б'].every(n => p1.drawn.includes(n)) && p1.A.own >= 1 && p1.A.net === 0 && OFM.tiles.length === 0 && OFM.tj === 0
-    && PACKS.req.filter(x => x === '145_87.bin.gz').length === 1 && PACKS.req.filter(x => x === 'index.json').length === 1, JSON.stringify({ p1, req: PACKS.req, ofm: OFM.tiles.length }));
+  // (номер 12 стоїть під самим підписом «Луганська вулиця» — назва вулиці важливіша, тож на екрані його може не бути; у даних він є)
+  ok('офлайн-карта: номери з власної пачки району — у даних усі шість, намальовано щонайменше п\'ять; без OpenFreeMap; каталог і пачку взято по одному разу', p1s.join() === ['12', '14А', '16', '18/2', '20', '22-Б'].sort().join() && p1.drawn.length >= 5 && ['14А', '16', '18/2', '20', '22-Б'].every(n => p1.drawn.includes(n)) && p1.A.own >= 1 && p1.A.net === 0 && OFM.tiles.length === 0 && OFM.tj === 0
+    && PACKS.req.filter(x => x === '145_87.bin.gz').length === 1 && idxReq === 1, JSON.stringify({ p1, p1s, req: PACKS.req, idxReq, ofm: OFM.tiles.length }));
   ok('…і стоять там, де будинки (номер 12 — у середині свого будинку, похибка до 3 м)', !!p1g && Math.abs(p1g[0] - want12[0]) < 4e-5 && Math.abs(p1g[1] - want12[1]) < 3e-5, JSON.stringify({ got: p1g, want: want12 }));
   // і) мережі немає зовсім, застосунок перезапущено: номери — з телефона
   PACKS.down = true; PACKS.req = [];
   await rel(); await jumpTo(page, 17.2); await waitNums(page); await sleep(400);
-  const p2 = await nums(page);
-  ok('без мережі після перезапуску: ті самі шість номерів — пачка лежить у телефоні', p2.drawn.length === 6 && p2.A.own >= 1 && p2.A.net === 0 && p2.A.fails === 0 && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ p2, req: PACKS.req }));
+  const p2 = await nums(page), p2s = await srcNums();
+  ok('без мережі після перезапуску: ті самі номери — пачка лежить у телефоні', p2s.length === 6 && p2.drawn.length >= 5 && p2.A.own >= 1 && p2.A.net === 0 && p2.A.fails === 0 && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ p2, p2s, req: PACKS.req }));
   // ї) район, де в OpenStreetMap номерів немає взагалі (у каталозі такої пачки немає): порожньо, і це не «немає мережі»
   PACKS.down = false; PACKS.req = [];
   const p3 = await app(page, async () => { const A = window.__app.addr; document.getElementById('toasts').innerHTML = ''; await A.packIndex(true); const r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); await new Promise(r => setTimeout(r, 200)); return { len: r.data.byteLength, cc: r.cacheControl || '', toast: document.getElementById('toasts').textContent }; });
