@@ -217,7 +217,8 @@ export async function packDownloadAll() {
     packs.total = keys.length; packs.done = keys.length - todo.length; bus.emit('addrPacks', packs);
     let i = 0, fail = null;
     // пачка не далась (мережа зникла) — зупиняються всі три «робітники»; те, що вже в телефоні, лишається, наступного разу докачаємо решту
-    const worker = async () => { while (i < todo.length && !packs.stop && !fail) { const k = todo[i++]; try { const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); parsed.delete(k); packs.done++; packs.net++; bus.emit('addrPacks', packs); } catch (e) { fail = e; } } };
+    // водій натиснув «Зупинити» чи «Видалити», поки пачка летіла, — у телефон її вже не кладемо
+    const worker = async () => { while (i < todo.length && !packs.stop && !fail) { const k = todo[i++]; try { const gz = await packFetch(k + '.bin.gz'); if (packs.stop) break; await packPut(k, gz, idx.date); parsed.delete(k); packs.done++; packs.net++; bus.emit('addrPacks', packs); } catch (e) { fail = e; } } };
     await Promise.all([worker(), worker(), worker()]);
     if (fail) throw fail;
     const c = await packStore(); if (c && !packs.stop) for (const [k] of have) if (!idx.packs[k]) await c.delete(packUrl(k));     // квадратів, яких більше немає в каталозі, не тримаємо

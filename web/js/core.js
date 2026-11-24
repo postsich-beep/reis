@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 45, name: '1.1.18' };
+export const VERSION = { web: 46, name: '1.1.19' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -43,6 +43,10 @@ const DEFAULTS = {
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
+  // 1.1.19: тип карти — 'scheme' (звичайна: офлайн-файл або онлайн-схема) чи 'sat' (супутникові знімки, лише з інтернетом)
+  mapType: 'scheme',
+  // звідки брати супутникові знімки (у «Налаштування → Джерела» можна вписати іншу адресу, напр. з ключем ArcGIS)
+  satUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   alertsToken: '',
   channels: [],            // [{name:'channel', region:'kharkiv'|'all', on:true}]
   onboarded: false
