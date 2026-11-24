@@ -31,6 +31,7 @@ import * as uiCalib from './ui_calib.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
+  sensors.gyroAxes(!!S.gyroAlt);            // (1.1.23) порядок осей гіроскопа, якщо калібрування побачило, що на цьому телефоні він інший
   if (S.lang !== 'uk') S.lang = 'uk';        // (1.1.22) мова одна — українська; розділ «Мова» з налаштувань прибрано, колишній вибір «русский» скидаємо
   document.documentElement.lang = S.lang;
   offline.init(); addr.init();

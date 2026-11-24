@@ -47,6 +47,8 @@ const DEFAULTS = {
   mapType: 'scheme',
   // 1.1.22: калібрування телефона (calib.js) — поправка кута повороту гіроскопа саме цього телефона; null — не калібрували
   gyroCal: null,
+  // 1.1.23: осі гіроскопа в подіях руху йдуть у запасному порядку (sensors.js: gyroAxes) — виставляє саме калібрування, якщо побачить
+  gyroAlt: false,
   // звідки брати супутникові знімки (у «Налаштування → Джерела» можна вписати іншу адресу, напр. з ключем ArcGIS)
   satUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   alertsToken: '',

@@ -6,9 +6,11 @@
 // Калібрування перевіряє це на КОНКРЕТНОМУ телефоні й бере його «90°» за основу.
 //
 // Як. Телефон тримають так, як він стоїть у тримачі: вертикально або з нахилом, сторч чи набік — байдуже. Три кроки:
-//   1) тримати нерухомо ~2,5 с — міряємо дрейф гіроскопа (усі три осі) і де для телефона «вгору» (як він стоїть);
-//   2) повернути, як двері на завісах, на 90° в один бік — доки не побачите телефон ребром — і затримати на секунду;
-//   3) повернути через пряме положення на 90° в інший бік — знову «ребром» — і затримати.
+//   1) екран до себе, тримати 2 с — це «нуль»: запам'ятовуємо, де для телефона «вгору» (як він стоїть), а якщо телефон
+//      закріплено — ще й дрейф гіроскопа;
+//   2) повернути, як двері на завісах, на 90° — лівою гранню до себе (видно лише грань телефона) — і затримати на секунду;
+//   3) повернути через пряме положення на 90° в інший бік — правою гранню до себе — і затримати.
+// (Який бік першим — байдуже: зарахуємо той, куди справді повернули.)
 //
 // Що саме міряємо. Не «кутову швидкість навколо вертикалі» (так рахує ведення), а КУДИ ДИВИТЬСЯ ЕКРАН: з показів гіроскопа
 // складаємо повний поворот телефона у просторі й дивимось, на скільки градусів повернувся (у плані, згори) перпендикуляр
@@ -36,26 +38,35 @@
 // Що з цим робить навігація: кут повороту від служби множиться на k (nav.js: calYaw). Дрейф лише показуємо й перевіряємо
 // (Android сам його постійно компенсує; постійна поправка «назавжди» могла б зашкодити).
 //
+// (1.1.23) Чому в 1.1.22 на справжньому телефоні не виходило. По-перше, осі гіроскопа, які телефон віддає екрану, були
+// переплутані (sensors.js) — поворот «як двері» читався як нахил уперед-назад, кут стояв на нулі. По-друге, «нерухомо»
+// міряли миттєвим тремтінням, а жива рука тремтить завжди. Тепер осі правильні (і є самоперевірка за акселерометром — нижче),
+// а «нерухомо» й «затримали» означають «телефон лишається на місці», а не «не тремтить».
+//
 // Тут — лише логіка (без екрана й без датчиків): її легко перевірити. Екран — ui_calib.js.
 import { S, bus, log } from './core.js';
 
 export const CAL = {
-  STILL_S: 2.5,          // крок 1: стільки секунд нерухомо
-  STILL_RATE: 5,         // °/с — «нерухомо» (рука трохи тремтить)
+  // (1.1.23) «Нерухомо» й «затримали» міряємо КУТОМ, а не тремтінням: жива рука на вазі весь час дрібно тремтить (10–20 °/с —
+  // звичайна річ) і трохи погойдується, але телефон при цьому лишається на місці. У 1.1.22 відлік щоразу починався наново
+  // від миттєвого тремтіння (перевіряли на імітації без справжнього тремтіння).
+  STILL_S: 2.0,          // крок 1: стільки секунд телефон лишається на місці
+  STILL_ROT: 8,          // ° — …тобто за цей час не відійшов від теперішнього положення більше ніж на стільки
   HOLD_S: 1.0,           // кроки 2–3: стільки тримати повернутим, щоб зафіксувати
+  HOLD_BAND: 8,          // ° — …і за цей час кут має гуляти не більше ніж на стільки (рука трохи погойдується — це не рух)
   HOLD_NAT_S: 1.5,       // …а коли є кут від служби навігації (раз на секунду) — півтори секунди, щоб у затримку напевно влучив її замір
   NAT_LAG: 0.35,         // с — замір служби беремо не раніше, ніж за стільки від початку затримки (телефон уже напевно стоїть)
   NAT_ALIVE_S: 2.5,      // с — служба «жива», якщо її замір був не давніше
   NAT_MIN: 0.85, NAT_MAX: 1.6,   // служба нарахувала проти екрана в стільки разів: менше/більше — щось не те, службі не віримо
   GAP_BAD: 0.12,         // с — пауза між замірами екрана, довша за яку вважаємо «заїканням»
   LOSS_MAX: 20,          // ° — стільки повороту можна «проковтнути» в заїканнях, якщо звіритись нема з чим (служби немає)
-  HOLD_RATE: 7,          // °/с — «затримали»
   TURN_MIN: 70, TURN_MAX: 124,   // що вважаємо «приблизно 90°» для одного повороту (точність дає розмах, а не цей коридор)
   K_DEAD: 0.04,          // у межах ±4 % гіроскоп «у нормі»: поправка 1 (рука неточніша за датчик)
   K_MIN: 0.86, K_MAX: 1.16,      // розумні межі поправки: далі — повернули не на 90°
   ASYM: 0.22,            // ліворуч і праворуч мають бути схожі (різниця до 22 % від середнього) — інакше десь не довели до «ребром»
   BIAS_BAD: 1.0,         // °/с — дрейф, з яким гіроскопу довіряти не варто
   RIGID_RMS: 0.25,       // °/с — розкид кутової швидкості, нижче якого телефон «закріплено» (тримач, стіл), а не в руці
+  AX_TURN: 50, AX_BAD: 35, AX_OK: 18,   // самоперевірка осей гіроскопа: після повороту на AX_TURN° «угору» за гіроскопом має збігатися з акселерометром (до AX_OK°); розбіжність понад AX_BAD° при тому, що запасний порядок осей збігається, — осі переставлено
   LEAN_MAX: 55,          // ° — екран нахилено від вертикалі більше — це вже «лежить»: напрямок екрана в плані не визначити
   GAP_S: 1.0,            // довша пауза в замірах (програму згорнули?) — кут загублено, починаємо знову; коротші (екран «заїкнувся») — перекриваємо
   GAP_SLOW_S: 2.6,       // те саме, коли заміри йдуть раз на секунду (екран датчиків не віддає — рахуємо лише за службою навігації)
@@ -108,16 +119,20 @@ export function newCal() {
     first: 0,                   // який бік зафіксовано першим (−1 / +1)
     hint: '',                   // підказка: 'hold' | 'upright' | 'more' | 'tooFar' | ''
     bias: 0, pose: null, left: null, right: null, result: null,
-    n: 0, hz: 0
+    n: 0, hz: 0,
+    rate: 0, nat: false,        // для рядка «датчики» на екрані: згладжена кутова швидкість, °/с; чи звітує служба навігації
+    swap: false                 // осі гіроскопа на цьому телефоні переставлено (побачили під час повороту) — екран запам'ятає це для датчиків (sensors.js)
   };
-  let lastT = null, tFirst = null, tStill = null, sw = [0, 0, 0], sw2 = 0, sg = [0, 0, 0], nS = 0, gl = null, drift = 0;
-  let b = [0, 0, 0], u0 = [0, 1, 0], p0 = [0, 0, 1], q = [1, 0, 0, 0], pw = null, tHold = null, sumA = 0, nA = 0, tSlow = null;
+  let lastT = null, tFirst = null, gl = null;
+  let b = [0, 0, 0], u0 = [0, 1, 0], p0 = [0, 0, 1], q = [1, 0, 0, 0], pw = null, hold = [], tSlow = null, aSlow = 0;
+  let qA = [1, 0, 0, 0], pwA = null, perm = false;                  // самоперевірка осей: той самий поворот, якби осі гіроскопа йшли в запасному порядку
+  let buf = [], th = [0, 0, 0], pw1 = null;                         // крок 1: останні заміри й накопичений (малий) поворот телефона за трьома осями
   let yawW = 0, loss = 0, nat = [], natBias = 0, capN = { '-1': null, '1': null };          // кут «навколо вертикалі» з замірів екрана; проковтнуте в заїканнях; заміри служби
   const natAlive = t => nat.length > 0 && t - nat[nat.length - 1].t < CAL.NAT_ALIVE_S;
   const natSince = t0 => { for (let i = nat.length - 1; i >= 0; i--) if (nat[i].t >= t0) return nat[i]; else break; return null; };
   /** Кут від служби навігації (раз на секунду): запам'ятовуємо разом із тим, що цієї ж миті показують заміри екрана. */
   function native(yaw) { if (lastT == null || !isFinite(yaw)) return; nat.push({ t: lastT, yaw: +yaw, Y: yawW, H: st.angle }); if (nat.length > 40) nat.shift(); }
-  const still0 = t => { tStill = t; sw = [0, 0, 0]; sw2 = 0; sg = [0, 0, 0]; nS = 0; st.prog = 0; };
+  const avg = (a, c) => [(a[0] + c[0]) / 2, (a[1] + c[1]) / 2, (a[2] + c[2]) / 2];
   function heading() {                       // на скільки градусів (у плані) повернувся перпендикуляр до екрана; за годинниковою — плюс
     const n = qrot(q, [0, 0, 1]), d = dot(n, u0), p = [n[0] - d * u0[0], n[1] - d * u0[1], n[2] - d * u0[2]];
     if (Math.hypot(p[0], p[1], p[2]) < 0.35) return null;            // екран дивиться майже вгору чи вниз — телефон поклали
@@ -125,77 +140,96 @@ export function newCal() {
     while (a - st.angle > 180) a -= 360; while (a - st.angle < -180) a += 360;       // без стрибка на ±180°
     return a;
   }
+  function restart(t) { st.step = 1; st.left = st.right = null; st.first = 0; st.want = -1; st.angle = 0; st.prog = 0; buf = []; pw1 = null; hold = []; tSlow = null; }
   function feed(s) {
     if (st.step < 1 || st.step > 3 || !s || !isFinite(s.t) || !s.w || !s.g) return st;
-    const w = s.w, g = s.g; if (![...w, ...g].every(isFinite)) return st;
+    const g = s.g; if (![...s.w, ...g].every(isFinite)) return st;
+    const w = perm ? [s.w[1], s.w[2], s.w[0]] : s.w;
     if (tFirst == null) tFirst = s.t;
     st.n++; if (s.t - tFirst > 0.5) st.hz = Math.round(st.n / (s.t - tFirst));
     const dt = lastT == null ? 0 : s.t - lastT, GAP = s.slow ? CAL.GAP_SLOW_S : CAL.GAP_S; lastT = s.t; st.slow = !!s.slow;
     { const al = Math.min(1, dt / 0.24);                    // згладжене «вгору» — з тією самою сталою часу (~0,25 с), що й у служби навігації
       gl = gl ? [gl[0] + al * (g[0] - gl[0]), gl[1] + al * (g[1] - gl[1]), gl[2] + al * (g[2] - gl[2])] : g.slice(); }
+    { const r = Math.hypot(w[0], w[1], w[2]); st.rate = st.rate + Math.min(1, dt / 0.3 || 1) * (r - st.rate); st.nat = natAlive(s.t); }
     if (st.step === 1) {
       st.angle = 0;
-      if (poseOf(gl).kind === 'flat') { still0(s.t); st.hint = 'upright'; return st; }      // лежить — спершу поставити вертикально
-      const quiet = Math.hypot(w[0], w[1], w[2]) < CAL.STILL_RATE;
-      if (!quiet || tStill == null || dt > GAP) { still0(s.t); if (!quiet) { st.hint = 'hold'; return st; } }
-      st.hint = '';
-      sw[0] += w[0]; sw[1] += w[1]; sw[2] += w[2]; sw2 += w[0] * w[0] + w[1] * w[1] + w[2] * w[2]; sg[0] += g[0]; sg[1] += g[1]; sg[2] += g[2]; nS++;
-      st.prog = Math.min(1, (s.t - tStill) / CAL.STILL_S);
-      if (st.prog >= 1 && nS >= (s.slow ? 3 : 5)) {
-        const m = [sw[0] / nS, sw[1] / nS, sw[2] / nS], bm = Math.hypot(m[0], m[1], m[2]), rms = Math.sqrt(Math.max(0, sw2 / nS - bm * bm));
+      if (dt > GAP) { buf = []; pw1 = null; }
+      if (poseOf(gl).kind === 'flat') { buf = []; pw1 = null; st.prog = 0; st.hint = 'upright'; return st; }      // лежить — спершу поставити вертикально
+      // «Нерухомо» — це коли телефон ЛИШАЄТЬСЯ НА МІСЦІ: за останні STILL_S секунд не відійшов від теперішнього положення більше ніж
+      // на STILL_ROT градусів (усі три осі разом). Тремтіння руки сюди не потрапляє: воно швидке, але на місці.
+      const m1 = pw1 && !s.slow ? avg(pw1, w) : w; pw1 = w;
+      th = [th[0] + m1[0] * dt, th[1] + m1[1] * dt, th[2] + m1[2] * dt];
+      buf.push({ t: s.t, th, w, g }); while (s.t - buf[0].t > CAL.STILL_S + 0.7) buf.shift();
+      let i = buf.length - 1; while (i > 0 && Math.hypot(th[0] - buf[i - 1].th[0], th[1] - buf[i - 1].th[1], th[2] - buf[i - 1].th[2]) <= CAL.STILL_ROT) i--;
+      st.prog = Math.min(1, (s.t - buf[i].t) / CAL.STILL_S); st.hint = i > 0 && st.prog < 1 ? 'hold' : '';       // відлік обрізано рухом — «тримайте нерухомо»
+      const nS = buf.length - i;
+      if (st.prog >= 1 && nS >= (s.slow ? 2 : 5)) {
+        const sw = [0, 0, 0], sg = [0, 0, 0]; let sw2 = 0;
+        for (let k = i; k < buf.length; k++) { const x = buf[k].w, y = buf[k].g; sw[0] += x[0]; sw[1] += x[1]; sw[2] += x[2]; sw2 += x[0] * x[0] + x[1] * x[1] + x[2] * x[2]; sg[0] += y[0]; sg[1] += y[1]; sg[2] += y[2]; }
+        const m = [sw[0] / nS, sw[1] / nS, sw[2] / nS], bm = Math.hypot(m[0], m[1], m[2]), rms = Math.sqrt(Math.max(0, sw2 / nS - bm * bm)), tS = buf[i].t;
         u0 = unit(sg);
-        if (bm > CAL.BIAS_BAD && ++drift < 4) { still0(s.t); st.hint = 'hold'; return st; }      // «тихо», але весь час повільно повертається — ще не нерухомо
-        // Середня кутова швидкість у спокої — це дрейф гіроскопа лише тоді, коли телефон справді нерухомий (у тримачі, на столі:
-        // шум датчика — соті частки °/с). У руці це здебільшого сама рука; віднявши її як «дрейф», ми б зіпсували замір розмаху.
+        // Середня кутова швидкість у спокої — це дрейф гіроскопа лише тоді, коли телефон справді закріплено (тримач, стіл: шум
+        // датчика — соті частки °/с). У руці це сама рука: її не віднімаємо й за «дрейф» не сваримо.
         st.rigid = !s.slow && rms < CAL.RIGID_RMS; b = st.rigid ? m : [0, 0, 0];
-        { const a = nat.filter(x => x.t >= tStill), n0 = a[0], n1 = a[a.length - 1];           // …і те саме для кута служби: її дрейф за час спокою
+        { const a = nat.filter(x => x.t >= tS), n0 = a[0], n1 = a[a.length - 1];           // …і те саме для кута служби: її дрейф за час спокою
           natBias = st.rigid && n0 && n1.t - n0.t >= 0.9 ? (n1.yaw - n0.yaw) / (n1.t - n0.t) : 0; }
-        st.bias = -dot(m, u0); st.biasAll = bm; st.pose = s.slow ? null : poseOf(u0);          // за рідкими замірами служби положення телефона невідоме
-        if (bm > CAL.BIAS_BAD) { st.step = 4; st.prog = 1; st.result = judge({ left: 90, right: 90, bias: bm, pose: st.pose, hz: st.hz }); return st; }   // гіроскоп «пливе» й у повному спокої
+        st.bias = st.rigid ? -dot(m, u0) : 0; st.biasAll = st.rigid ? bm : 0; st.pose = s.slow ? null : poseOf(u0);          // за рідкими замірами служби положення телефона невідоме
+        if (st.rigid && bm > CAL.BIAS_BAD) { st.step = 4; st.prog = 1; st.result = judge({ left: 90, right: 90, bias: bm, pose: st.pose, hz: st.hz }); return st; }   // закріплений телефон, а гіроскоп «пливе»
         const d = u0[2]; p0 = unit([-d * u0[0], -d * u0[1], 1 - d * u0[2]]);          // перпендикуляр до екрана — його слід у плані
-        q = [1, 0, 0, 0]; pw = null; yawW = 0; loss = 0; capN = { '-1': null, '1': null }; st.step = 2; st.prog = 0; st.angle = 0; st.want = -1; tHold = null; tSlow = null;
+        q = [1, 0, 0, 0]; pw = null; qA = [1, 0, 0, 0]; pwA = null; yawW = 0; loss = 0; capN = { '-1': null, '1': null }; st.step = 2; st.prog = 0; st.angle = 0; st.want = -1; hold = []; tSlow = null; st.hint = '';
       }
       return st;
     }
-    if (dt > GAP) {                                          // заміри урвались посеред повороту (програму згорнули?) — кут загублено
-      st.step = 1; st.left = st.right = null; st.first = 0; st.want = -1; st.angle = 0; drift = 0; still0(s.t); st.hint = 'hold'; return st;
-    }
+    if (dt > GAP) { restart(s.t); st.hint = 'hold'; return st; }      // заміри урвались посеред повороту (програму згорнули?) — кут загублено
     const wb = [w[0] - b[0], w[1] - b[1], w[2] - b[2]];
     // поворот за крок — за середньою швидкістю між двома замірами (трапеція): пропущений замір чи два кута не псують.
     // Рідкі заміри (slow) — це вже середня швидкість за секунду, тож їх беремо як є.
-    const mid = pw && !s.slow ? [(pw[0] + wb[0]) / 2, (pw[1] + wb[1]) / 2, (pw[2] + wb[2]) / 2] : wb; pw = wb;
+    const mid = pw && !s.slow ? avg(pw, wb) : wb; pw = wb;
     q = qstep(q, mid, dt);
+    // Самоперевірка осей. Гіроскоп каже, як повернувся телефон, — отже, й куди тепер має показувати «вгору»; акселерометр показує
+    // «вгору» напряму. Мають збігатися. Якщо після чималого повороту розходяться, а з осями в запасному порядку — збігаються,
+    // то на цьому телефоні осі гіроскопа переставлено: далі рахуємо з переставленими (і екран це запам'ятає).
+    if (!perm && !s.slow) {
+      const wa = [wb[1], wb[2], wb[0]], midA = pwA ? avg(pwA, wa) : wa; pwA = wa; qA = qstep(qA, midA, dt);
+      if (2 * Math.acos(Math.min(1, Math.abs(q[0]))) * R2D > CAL.AX_TURN) {
+        const up = unit(gl), off = k => Math.acos(Math.max(-1, Math.min(1, dot(qrot([k[0], -k[1], -k[2], -k[3]], u0), up)))) * R2D;
+        if (off(q) > CAL.AX_BAD && off(qA) < CAL.AX_OK) { perm = true; st.swap = true; q = qA; pw = wa; b = [b[1], b[2], b[0]]; }
+      }
+    }
     yawW -= dot(mid, unit(gl)) * dt;                          // те саме, що рахує служба: поворот навколо вертикалі (за годинниковою — плюс)
     if (dt > CAL.GAP_BAD && !s.slow) loss += Math.hypot(mid[0], mid[1], mid[2]) * dt;
     const a = heading();
-    if (a == null) { st.hint = 'upright'; tHold = null; st.prog = 0; return st; }
+    if (a == null) { st.hint = 'upright'; hold = []; st.prog = 0; return st; }
     st.angle = a;
-    const steady = Math.hypot(wb[0], wb[1], wb[2]) < CAL.HOLD_RATE;
     const side = st.step === 2 ? (Math.abs(a) >= 35 ? Math.sign(a) : st.want) : st.want, d = a * side;       // d — поворот у потрібний бік
     if (st.step === 2) st.want = side;
-    if (d >= CAL.TURN_MIN && d <= CAL.TURN_MAX && steady) {
-      if (tHold == null) { tHold = s.t; sumA = 0; nA = 0; }
-      sumA += Math.abs(a); nA++; st.hint = '';
-      st.prog = Math.min(1, (s.t - tHold) / (natAlive(s.t) ? CAL.HOLD_NAT_S : CAL.HOLD_S));
-      if (st.prog >= 1) {
-        const got = sumA / nA;
+    if (d >= CAL.TURN_MIN && d <= CAL.TURN_MAX) {
+      // «Затримали» — за останні need секунд кут гуляв не більше ніж на HOLD_BAND градусів (жива рука трохи погойдується — це не рух;
+      // а поки телефон іще «доїжджає», розмах більший, і відлік чекає, доки він справді стане).
+      const need = natAlive(s.t) ? CAL.HOLD_NAT_S : CAL.HOLD_S;
+      hold.push([s.t, a]); while (s.t - hold[0][0] > need + 0.7) hold.shift();
+      let i = hold.length - 1, lo = a, hi = a;
+      while (i > 0) { const v = hold[i - 1][1], l2 = Math.min(lo, v), h2 = Math.max(hi, v); if (h2 - l2 > CAL.HOLD_BAND) break; lo = l2; hi = h2; i--; }
+      const t0 = hold[i][0]; st.hint = 'hold'; st.prog = Math.min(1, (s.t - t0) / need);
+      if (st.prog >= 1 && hold.length - i >= 2) {
+        // кут — середній за другу половину затримки (на початку телефон ще міг «доїжджати»)
+        const late = hold.filter(h => h[0] >= s.t - need / 2), use = late.length ? late : hold.slice(i), got = use.reduce((x, h) => x + Math.abs(h[1]), 0) / use.length;
         if (side < 0) st.left = got; else st.right = got;
-        capN[side] = natSince(tHold + CAL.NAT_LAG);
-        if (st.step === 2) { st.first = side; st.want = -side; st.step = 3; st.prog = 0; tHold = null; tSlow = null; }
+        capN[side] = natSince(t0 + CAL.NAT_LAG);
+        if (st.step === 2) { st.first = side; st.want = -side; st.step = 3; st.prog = 0; st.hint = ''; hold = []; tSlow = null; }
         else {
           const L = capN[-1], R = capN[1];
-          st.step = 4; st.prog = 1;
+          st.step = 4; st.prog = 1; st.hint = '';
           st.result = judge({ left: st.left, right: st.right, bias: st.biasAll, yawBias: st.bias, rigid: st.rigid, pose: st.pose, hz: st.hz, loss,
             nat: L && R ? { N: R.yaw - L.yaw - natBias * (R.t - L.t), Y: R.Y - L.Y, H: R.H - L.H } : null });
         }
       }
       return st;
     }
-    tHold = null; st.prog = 0;
-    // підказки, коли зупинились не там: замало (ще не «ребром») чи забагато
+    hold = []; st.prog = 0;
+    // підказки, коли зупинились не там: замало (грань іще не до себе) чи забагато
     if (d > CAL.TURN_MAX) st.hint = 'tooFar';
-    else if (d >= CAL.TURN_MIN) st.hint = 'hold';
-    else if (d > 30 && steady) { if (tSlow == null) tSlow = s.t; st.hint = s.t - tSlow > 0.8 ? 'more' : ''; }
+    else if (d > 30) { if (tSlow == null || Math.abs(a - aSlow) > CAL.HOLD_BAND) { tSlow = s.t; aSlow = a; } st.hint = s.t - tSlow > 0.9 ? 'more' : ''; }
     else { tSlow = null; st.hint = ''; }
     return st;
   }

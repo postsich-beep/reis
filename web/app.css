@@ -1005,19 +1005,27 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-head b{flex:1;min-width:0;font:700 19px/1.2 var(--f-ui)}
 .cb-x{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:#eef2f6;background:rgba(255,255,255,.08)}
 .cb-x svg{width:24px;height:24px}
-.cb-steps{flex:none;list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 0;padding:0}
-.cb-steps li{display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:8px;border-top:4px solid rgba(255,255,255,.14);color:#8693a0;font:600 12.5px/1.15 var(--f-ui);text-align:center;min-width:0}
-.cb-steps li b{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.1);font:800 14px/1 var(--f-num);color:#c4ccd4}
-.cb-steps li svg{width:26px;height:26px;padding:4px;border-radius:50%;background:rgba(255,255,255,.1)}
-.cb-steps li.cur{border-color:var(--amber);color:#fff}
+/* (1.1.23) три малюнки з рукою — це три кроки: екран до себе · ліва грань · права грань. Поточний підсвічено, зроблений — із галочкою */
+.cb-steps{list-style:none;display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin:0 0 8px;padding:0;width:100%}
+.cb-steps li{position:relative;display:flex;flex-direction:column;align-items:center;gap:3px;padding:8px 2px 7px;border-radius:14px;border:2px solid rgba(255,255,255,.12);background:rgba(255,255,255,.04);
+  color:#9aa6b2;font:600 12.5px/1.15 var(--f-ui);text-align:center;min-width:0;transition:border-color .15s,background .15s}
+.cb-pose{display:block;height:88px;opacity:.5;transition:opacity .15s} .cb-pose svg{display:block;height:100%;width:auto}
+.cb-hand{fill:#d9dfe6;stroke:#8d99a6;stroke-width:1.6;stroke-linejoin:round}
+.cb-case{fill:#212934;stroke:#e6ebf0;stroke-width:2}
+.cb-scr{fill:#4f8ff7} .cb-key{fill:#9aa5b1} .cb-bar{fill:none;stroke:#e6ebf0;stroke-width:1.6;stroke-linecap:round}
+.cb-steps li b{position:absolute;left:6px;top:6px;display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:rgba(255,255,255,.12);font:800 13px/1 var(--f-num);color:#c4ccd4}
+.cb-steps li b svg{width:14px;height:14px;stroke-width:3}
+.cb-tl{display:block;min-height:15px}
+.cb-steps li.cur{border-color:var(--amber);background:rgba(245,163,0,.12);color:#fff}
+.cb-steps li.cur .cb-pose,.cb-steps li.done .cb-pose{opacity:1}
 .cb-steps li.cur b{background:var(--amber);color:var(--amber-ink)}
 .cb-steps li.done{border-color:#2f9e62;color:#9fdcb9}
-.cb-steps li.done b,.cb-steps li.done svg{background:#2f9e62;color:#fff}
+.cb-steps li.done b{background:#2f9e62;color:#fff}
 /* вміст по центру, а якщо не влазить — від верху й прокручується (нічого ні на що не наїжджає) */
 .cb-body{flex:1;min-height:0;display:flex;overflow-y:auto;padding:8px 0 4px}
 .cb-in{margin:auto;width:100%;display:flex;flex-direction:column;align-items:center;gap:10px;text-align:center}
-.cb-stage{flex:none;width:min(290px,80vw)}
-.cb-gauge{position:relative}
+.cb-stage{flex:none;width:100%;max-width:400px;display:flex;flex-direction:column;align-items:center}
+.cb-gauge{position:relative;width:min(230px,66vw)}
 .cb-dial{display:block;width:100%;height:auto}
 .cb-ring{fill:none;stroke:rgba(255,255,255,.14);stroke-width:10;stroke-linecap:round}
 .cb-goal{fill:none;stroke:#2f9e62;stroke-width:12;stroke-linecap:round}
@@ -1044,7 +1052,8 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-prog i{display:block;width:0;height:100%;border-radius:4px;background:#2f9e62;transition:width .12s linear}
 .cb-hint{min-height:20px;font:600 14.5px/1.35 var(--f-ui);color:#9fb0c0}
 .cb-hint.warn{color:#ffcf5c}
-.cb-foot{flex:none;padding-top:6px;font:400 13px/1.35 var(--f-ui);color:#8693a0;text-align:center}
+.cb-diag{flex:none;min-height:16px;padding-top:4px;font:500 12px/1.3 var(--f-ui);color:#8b97a3;text-align:center}
+.cb-foot{flex:none;padding-top:4px;font:400 13px/1.35 var(--f-ui);color:#8693a0;text-align:center}
 .cb-res{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:480px}
 .cb-rl,.cb-rr{display:flex;flex-direction:column;align-items:center;gap:10px;width:100%}
 .cb-big{width:76px;height:76px;border-radius:50%;display:grid;place-items:center;font:800 46px/1 var(--f-num);color:#fff;background:#2f9e62;box-shadow:0 0 0 9px rgba(47,158,98,.2);margin:6px 0 4px}
@@ -1057,19 +1066,20 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
 .cb-btns .btn{flex:1;min-height:52px;font-size:16.5px}
 .cb-btns .btn.pri{flex:1.5}
 .cb-btns .btn:not(.pri){background:rgba(255,255,255,.1);color:#eef2f6}
-@media (max-height:640px){ .cb-foot{display:none} .cb-stage{width:min(250px,76vw)} .cb-in{gap:8px} .cb-big{width:60px;height:60px} .cb-big svg{width:36px;height:36px} }
+@media (max-height:700px){ .cb-foot{display:none} }
+@media (max-height:640px){ .cb-gauge{width:min(190px,58vw)} .cb-pose{height:62px} .cb-in{gap:6px} .cb-ang{min-height:28px;font-size:24px;line-height:28px} .cb-big{width:60px;height:60px} .cb-big svg{width:36px;height:36px} }
 @media (orientation:landscape) and (max-height:520px){
   .cb-head{min-height:44px} .cb-x{width:42px;height:42px}
-  .cb-steps li{flex-direction:row;justify-content:center;gap:7px;padding-top:6px}
   .cb-in{flex-direction:row;justify-content:center;gap:26px}
-  .cb-stage{width:210px} .cb-ang{font-size:24px;min-height:28px}
+  .cb-stage{width:300px} .cb-steps{margin-bottom:4px;gap:6px} .cb-steps li{padding:5px 2px} .cb-pose{height:50px} .cb-gauge{width:176px} .cb-ang{font-size:22px;min-height:24px;line-height:24px;margin-top:0}
   .cb-info{flex:1;max-width:400px}
   .cb-res{flex-direction:row;max-width:none;gap:22px;align-items:center} .cb-rl{flex:1} .cb-rr{flex:1.1}
   .cb-rows div{padding:7px 12px} .cb-btns .btn{min-height:48px}
 }
 @media (min-width:700px) and (min-height:650px){
-  .cb-head b{font-size:23px} .cb-steps li{font-size:15px}
-  .cb-stage{width:380px} .cb-ang{font-size:38px;min-height:44px}
+  .cb-head b{font-size:23px} .cb-steps li{font-size:15.5px;padding:12px 4px 10px;border-radius:18px} .cb-steps{gap:12px;margin-bottom:14px} .cb-pose{height:120px}
+  .cb-steps li b{width:28px;height:28px;font-size:16px;left:9px;top:9px} .cb-steps li b svg{width:17px;height:17px} .cb-diag{font-size:14px}
+  .cb-stage{max-width:560px} .cb-gauge{width:340px} .cb-ang{font-size:38px;min-height:44px}
   .cb-info,.cb-res{max-width:600px} .cb-title{font-size:27px} .cb-text{font-size:18.5px} .cb-hint{font-size:17px;min-height:24px} .cb-prog{width:380px;height:10px}
   .cb-rows span{font-size:17px} .cb-rows b{font-size:21px} .cb-foot{font-size:15px}
   .cb-phone{border-width:3.5px;border-radius:12px} .cb-phone i{inset:8px 6px 12px}

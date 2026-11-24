@@ -1,20 +1,41 @@
 // Екран «Калібрування телефона» (1.1.22): на весь екран, три кроки й результат. Логіка замірів — calib.js.
-// Телефон тримають так, як у тримачі; на екрані — телефон, що повертається разом зі справжнім, шкала з ціллю 90°
-// і великий підпис, що робити зараз. Коли телефон повернуто «ребром», екрана не видно — тому кожен крок підтверджується
-// звуком, вібрацією й голосом, а якщо зупинились не там — голос підкаже («ще трохи», «забагато»).
-import { bus } from './core.js';
+// (1.1.23) Три малюнки з рукою — це й є три кроки: «екран до себе» (нуль), «ліва грань до себе» (90° в один бік),
+// «права грань до себе» (90° в інший) — як описав Олексій. Поточний крок підсвічено, зроблений — із зеленою галочкою.
+// Нижче — телефон, що повертається разом зі справжнім, шкала з ціллю 90° і короткий підпис, що робити зараз.
+// Коли телефон повернуто гранню, екрана не видно — тому кожен крок підтверджується звуком, вібрацією й голосом,
+// а якщо зупинились не там — голос підкаже («ще трохи», «забагато»). Унизу дрібний рядок «Датчики» — що телефон відчуває
+// цієї миті: якщо щось не вийде, з нього одразу видно чому.
+import { bus, S, log } from './core.js';
 import * as P from './platform.js';
-import { onRaw } from './sensors.js';
+import { onRaw, gyroAxes } from './sensors.js';
 import { newCal, calSave, calGet, calFresh, calBusy, CAL } from './calib.js';
 import { calTone } from './sfx.js';
 import { say } from './guide.js';
 import { $, ICON, esc } from './ui_base.js';
 import { t } from './i18n.js';
 
-let cal = null, raf = 0, off = null, lastStep = 0, view = '', seenN = 0, seenT = 0, hintKey = '', hintT = 0, hintSaid = 0, t0 = 0, rawN = 0, natPrev = null;
+let cal = null, raf = 0, off = null, lastStep = 0, view = '', seenN = 0, seenT = 0, hintKey = '', hintT = 0, hintSaid = 0, t0 = 0, rawN = 0, natPrev = null, diagT = 0;
 const fmt1 = n => String(Math.round(n * 10) / 10).replace('.', ',');
 const speak = text => { try { say(text, { urgent: true, force: true }); } catch (_) {} };      // голос тут — частина дії: екрана «ребром» не видно
-const sideKey = s => s < 0 ? 'cbLeft' : 'cbRight';
+
+/* ---------- три положення телефона в руці (малюнки-кроки). f — екран до себе: долоня ззаду, великий палець ліворуч, пальці праворуч.
+   l — ліва грань до себе: телефон ребром, екран дивиться праворуч (видно його смужку), великий палець спереду.
+   r — права грань до себе: на грані кнопки, екран дивиться ліворуч, пальці спереду. ---------- */
+const HND = 'class="cb-hand"', PHN = 'class="cb-case"';
+const POSE = {
+  f: `<svg viewBox="0 0 72 92" aria-hidden="true"><path d="M20 92V80c-5-5-8-12-8-20 0-7 4-12 10-12h28c6 0 10 5 10 12 0 8-3 15-8 20v12z" ${HND}/>
+      <rect x="20" y="5" width="32" height="62" rx="6" ${PHN}/><rect x="23.5" y="9" width="25" height="52" rx="3" class="cb-scr"/><path d="M32 64h8" class="cb-bar"/>
+      <rect x="12" y="42" width="11" height="25" rx="5.5" transform="rotate(-10 17.5 54)" ${HND}/>
+      <rect x="49" y="38" width="12" height="8" rx="4" ${HND}/><rect x="50" y="47.5" width="12" height="8" rx="4" ${HND}/><rect x="49.5" y="57" width="11.5" height="8" rx="4" ${HND}/></svg>`,
+  l: `<svg viewBox="0 0 72 92" aria-hidden="true"><path d="M18 92V80c-5-5-7-11-7-18 0-8 5-13 12-13h14c7 0 11 5 11 13 0 7-2 13-7 18v12z" ${HND}/>
+      <rect x="41.5" y="9" width="3.2" height="54" rx="1.6" class="cb-scr"/><rect x="31" y="5" width="11" height="62" rx="4.5" ${PHN}/>
+      <rect x="25" y="44" width="11.5" height="27" rx="5.7" transform="rotate(8 30.7 57)" ${HND}/></svg>`,
+  r: `<svg viewBox="0 0 72 92" aria-hidden="true"><path d="M24 92V80c-5-5-7-11-7-18 0-8 4-13 11-13h14c7 0 12 5 12 13 0 7-2 13-7 18v12z" ${HND}/>
+      <rect x="27.3" y="9" width="3.2" height="54" rx="1.6" class="cb-scr"/><rect x="30" y="5" width="11" height="62" rx="4.5" ${PHN}/>
+      <rect x="34" y="17" width="3" height="12" rx="1.5" class="cb-key"/><rect x="34" y="32" width="3" height="6.5" rx="1.5" class="cb-key"/>
+      <rect x="28" y="44" width="17" height="8" rx="4" ${HND}/><rect x="28.5" y="53.5" width="17" height="8" rx="4" ${HND}/><rect x="28" y="63" width="16" height="8" rx="4" ${HND}/></svg>`,
+};
+const poseKey = st => st.step === 1 ? 'f' : st.want < 0 ? 'l' : 'r';
 
 /* ---------- шкала: півколо з поділками, 0° — прямо, по 90° ліворуч і праворуч; ціль зелена; жовта дуга й кулька — куди екран
    повернуто зараз; пунктир — скільки ще лишилось. Усередині півкола — сам телефон, що повертається разом зі справжнім. ---------- */
@@ -35,23 +56,27 @@ function dialSvg(step) {
 }
 
 function shellHtml() {
-  const li = n => `<li data-s="${n}"><b>${n}</b><span></span></li>`;
   return `<div class="cb-head"><b>${t('cbTitle')}</b><button class="cb-x" data-cb="x" aria-label="${t('close')}">${ICON.x}</button></div>
-    <ol class="cb-steps">${li(1)}${li(2)}${li(3)}<li data-s="4" class="fin">${ICON.check}<span>${t('cbS4')}</span></li></ol>
     <div class="cb-body" id="cbBody"></div>
+    <div class="cb-diag" id="cbDiag"></div>
     <div class="cb-foot">${t('cbWhy')}</div>`;
 }
-// Кроки вгорі: 1 — тримати, 2 і 3 — боки в тому порядку, як їх справді повертають (зазвичай ліворуч, потім праворуч)
-function setSteps(step) {
-  const st = cal ? cal.st : null, first = st && st.first ? st.first : -1;
-  const names = { 1: t('cbS1'), 2: t(first < 0 ? 'cbS2' : 'cbS3'), 3: t(first < 0 ? 'cbS3' : 'cbS2') };
+// Малюнки-кроки: поточний підсвічено, зроблений — із зеленою галочкою. На кроці 2 зараховуємо будь-який бік: куди водій
+// справді повертає, той малюнок і світиться.
+let stepsKey = '';
+function setSteps() {
+  const st = cal ? cal.st : null; if (!st) return;
+  const cur = st.step >= 1 && st.step <= 3 ? poseKey(st) : '', done = { f: st.step > 1, l: st.step === 3 && st.first < 0, r: st.step === 3 && st.first > 0 };
+  const key = cur + (done.f ? 'f' : '') + (done.l ? 'l' : '') + (done.r ? 'r' : ''); if (key === stepsKey) return; stepsKey = key;
   for (const li of document.querySelectorAll('#calib .cb-steps li')) {
-    const n = +li.dataset.s; li.classList.toggle('cur', n === step); li.classList.toggle('done', n < step || (step === 4 && n === 4));
-    if (names[n]) li.querySelector('span').textContent = names[n];
+    const k = li.dataset.k; li.classList.toggle('cur', k === cur); li.classList.toggle('done', !!done[k]);
+    li.querySelector('b').innerHTML = done[k] ? ICON.check : li.dataset.n;
   }
 }
 function stageHtml(step) {
+  const tile = (k, n) => `<li data-k="${k}" data-n="${n}"><span class="cb-pose">${POSE[k]}</span><b>${n}</b><span class="cb-tl">${t('cbS_' + k)}</span></li>`;
   return `<div class="cb-in"><div class="cb-stage">
+      <ol class="cb-steps">${tile('f', 1)}${tile('l', 2)}${tile('r', 3)}</ol>
       <div class="cb-gauge">${dialSvg(step)}<div class="cb-ph3d" id="cbPh3d"><div class="cb-phone" id="cbPhone"><i></i><u></u></div></div></div>
       <div class="cb-ang" id="cbAng"></div>
     </div>
@@ -72,12 +97,19 @@ function resultHtml(r) {
 const badHtml = (title, text) => `<div class="cb-in"><div class="cb-res bad"><div class="cb-rl"><div class="cb-big">!</div><div class="cb-title">${title}</div><div class="cb-text">${text}</div></div>
       <div class="cb-rr"><div class="cb-btns"><button class="btn pri" data-cb="again">${t('cbAgain')}</button><button class="btn" data-cb="x">${t('close')}</button></div></div></div></div>`;
 function show(step) {
-  view = 'step' + step; setSteps(step);
+  view = 'step' + step;
   $('cbBody').innerHTML = step === 4 ? resultHtml(cal.st.result) : stageHtml(step);
-  $('calib').dataset.step = step;
+  $('calib').dataset.step = step; stepsKey = ''; setSteps();
+}
+// Рядок «Датчики»: скільки замірів за секунду віддає екран, як швидко телефон зараз обертається, чи звітує служба навігації
+function diag() {
+  const st = cal ? cal.st : null; if (!st) return;
+  const now = Date.now(); if (now - diagT < 300) return; diagT = now;
+  const svc = t(st.nat ? 'cbDgSvcYes' : 'cbDgSvcNo'), ax = gyroAxes() !== !!st.swap ? ' · ' + t('cbDgAxes') : '';
+  set('cbDiag', st.slow ? t('cbDgSlow') : st.n === 0 ? t('cbDgNone', svc) : t('cbDg', st.hz || '…', Math.round(st.rate), svc) + ax);
 }
 function noSensors() {
-  view = 'nosens'; setSteps(0); $('calib').dataset.step = 0;
+  view = 'nosens'; $('calib').dataset.step = 0;
   $('cbBody').innerHTML = badHtml(t('cbNoSensTitle'), t('cbNoSensText'));
 }
 const set = (id, text) => { const e = $(id); if (e && e.textContent !== text) e.textContent = text; };
@@ -87,6 +119,7 @@ function frame() {
   if (!cal) return;
   const st = cal.st, now = Date.now();
   if (st.step < 1) return;
+  diag();
   // датчики мовчать (немає гіроскопа або WebView не віддає події) — чесно кажемо, а не чекаємо вічно
   if (st.n !== seenN) { seenN = st.n; seenT = now; } else if (st.step < 4 && now - seenT > 3500 && view !== 'nosens') { noSensors(); return; }
   if (view === 'nosens') { if (st.n === seenN && now - seenT > 400) return; }
@@ -102,6 +135,7 @@ function frame() {
   }
   if (st.step === 4) return;
   if (view !== 'step' + st.step) show(st.step);
+  setSteps();
   const box = $('calib'), side = st.pose ? st.pose.side : innerWidth > innerHeight * 1.15;
   // телефон на екрані повертається разом зі справжнім; на кроці 1 стоїть рівно
   const a = st.step === 1 ? 0 : Math.max(-135, Math.min(135, st.angle)), A = Math.max(-110, Math.min(110, a)), ph = $('cbPhone');
@@ -114,9 +148,10 @@ function frame() {
     gl.style.display = st.want < 0 ? '' : 'none'; gr.style.display = st.want > 0 ? '' : 'none'; $('cbLbL').classList.toggle('on', st.want < 0); $('cbLbR').classList.toggle('on', st.want > 0);
     rs.setAttribute('d', st.want < 0 ? (A > -GOAL + 1 ? arc(-GOAL, A, RR) : '') : (A < GOAL - 1 ? arc(A, GOAL, RR) : '')); rs.dataset.to = st.want < 0 ? 'l' : 'r';
   }
-  set('cbAng', st.step > 1 ? Math.round(Math.abs(a)) + '°' + (Math.abs(a) < 3 ? '' : ' ' + t(sideKey(a))) : '');
-  set('cbTitle', st.step === 1 ? t('cbT1') : t(st.step === 2 ? 'cbT2' : 'cbT3', t(sideKey(st.want))));
-  set('cbText', t('cbD' + st.step, t(st.want < 0 ? 'cbEdgeL' : 'cbEdgeR')));
+  const pk = poseKey(st);
+  set('cbAng', st.step > 1 ? Math.round(Math.abs(a)) + '°' : '');
+  set('cbTitle', t('cbT_' + pk));
+  set('cbText', t((st.step === 3 ? 'cbD3_' : 'cbD_') + pk));
   const pr = $('cbProg'); if (pr) pr.style.width = Math.round(st.prog * 100) + '%';
   const hint = st.hint ? t('cbHint_' + st.hint) : '';
   set('cbHint', hint); const he = $('cbHint'); if (he) he.classList.toggle('warn', st.hint === 'tooFar' || st.hint === 'upright');
@@ -126,8 +161,15 @@ function frame() {
   box.classList.toggle('holding', st.prog > 0 && st.prog < 1);
 }
 
+// Калібрування побачило, що осі гіроскопа на цьому телефоні йдуть в іншому порядку (calib.js: самоперевірка за акселерометром) —
+// запам'ятовуємо для датчиків: так рахуватиме і ведення без GPS, і наступне калібрування.
+function keepAxes() {
+  if (!cal || !cal.st.swap) return;
+  cal.st.swap = false; gyroAxes(!gyroAxes()); S.gyroAlt = gyroAxes();
+  log('info', 'калібрування: осі гіроскопа на цьому телефоні йдуть у ' + (S.gyroAlt ? 'запасному' : 'звичайному') + ' порядку — запамʼятав');
+}
 function start() {
-  if (off) off();
+  if (off) off(); keepAxes();
   cal = newCal(); lastStep = 0; view = ''; seenN = 0; seenT = Date.now(); hintKey = ''; hintSaid = 0; t0 = performance.now(); rawN = 0; natPrev = null;
   const c = cal; off = onRaw(s => { if (cal === c) { rawN++; c.feed(s); } });
   show(1); lastStep = 1;
@@ -162,7 +204,7 @@ export function calibOpen() {
   start(); cancelAnimationFrame(raf); raf = requestAnimationFrame(frame);
 }
 export function calibClose() {
-  cancelAnimationFrame(raf); raf = 0; if (off) off(); off = null; if (cal) cal.stop(); cal = null; bus.off('sens', onSens); calBusy(false);
+  cancelAnimationFrame(raf); raf = 0; if (off) off(); off = null; keepAxes(); if (cal) cal.stop(); cal = null; bus.off('sens', onSens); calBusy(false);
   const box = $('calib'); box.hidden = true; box.innerHTML = ''; document.body.classList.remove('calib-on');
 }
 export const calibState = () => ({ open: !$('calib').hidden, step: cal ? cal.st.step : 0, st: cal ? { ...cal.st } : null, view, saved: calGet(), fresh: calFresh(), cfg: CAL });
