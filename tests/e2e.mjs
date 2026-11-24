@@ -6,7 +6,8 @@ import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
 import { extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { mkdirSync, existsSync } from 'node:fs';
+import { mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { gunzipSync } from 'node:zlib';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', 'web');
 // ONLY=1,2д node tests/e2e.mjs — лише вибрані проходи (для налагодження)
@@ -147,7 +148,8 @@ const VP_COMPLEX = { id: 'test-complex', kind: 'complex', name: 'Комплек�
     photos: ['verified/bistro-1.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: стоянка, готель і кафе.', ru: 'Советуем: стоянка, гостиница и кафе.' }, tags: { uk: ['Стоянка для фур', 'Готель'], ru: ['Стоянка для фур', 'Гостиница'] },
     services: [[{ uk: 'Стоянка для фури — душ входить у вартість', ru: 'Стоянка для фуры — душ входит в стоимость' }, '100 грн'], [{ uk: 'Готель: одномісний номер', ru: 'Гостиница: одноместный номер' }, '1000 грн']],
     menu: [['Борщ', '100 грн / 300 г']], note: { uk: 'Ціни станом на 24.11.2026.', ru: 'Цены на 24.11.2026.' } };
-const ROUTE = { fn: null };                                        // підміна відповіді сервера маршрутів у окремих перевірках
+const ROUTE = { fn: null };
+const PACKS = { on: false, down: false, rawDown: false, req: [], date: '', failOn: '' };      // сховище власних пачок номерів будинків                                        // підміна відповіді сервера маршрутів у окремих перевірках
 // Сторінки, що лишились відкритими після збою попередньої перевірки, гальмують усі наступні (карта малює й далі) — закриваємо.
 const liveCtx = new Set();
 async function newPage(native, opts = {}) {
@@ -165,6 +167,18 @@ async function newPage(native, opts = {}) {
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
   if (!opts.realVp) await page.route('**/data/verified.json', r => json(r, VP_JSON));
+  // Власні пачки номерів будинків (гілка addr сховища): за замовчуванням їх «ще немає» (404) — працює шлях через OpenFreeMap.
+  // PACKS.on — пачки зібрані й лежать на сервері (tests/fixtures/addr, зроблені тим самим tools/build_addr.py); PACKS.down — мережі немає.
+  await page.route(/^https:\/\/(raw\.githubusercontent\.com\/test-owner\/test-repo\/addr|cdn\.jsdelivr\.net\/gh\/test-owner\/test-repo@addr)\/v1\//, async r => {
+    const u = r.request().url(), name = u.slice(u.lastIndexOf('/') + 1), cors = { 'access-control-allow-origin': '*' };
+    if (PACKS.down) return r.abort();
+    PACKS.req.push((/jsdelivr/.test(u) ? 'cdn:' : '') + name);
+    if (!PACKS.on || (PACKS.rawDown && !/jsdelivr/.test(u))) return r.fulfill({ status: 404, headers: cors, body: '' });
+    if (PACKS.failOn && name === PACKS.failOn) return r.fulfill({ status: 503, headers: cors, body: '' });                 // мережа урвалась саме на цій пачці
+    if (PACKS.date && name === 'index.json') { const j = JSON.parse(await readFile(join(ROOT, '..', 'tests', 'fixtures', 'addr', 'v1', name), 'utf8')); j.date = PACKS.date; return r.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify(j) }); }   // на сервері свіжіші дані
+    try { const b = await readFile(join(process.env.ADDR_DIR || join(ROOT, '..', 'tests', 'fixtures', 'addr'), 'v1', name)); r.fulfill({ status: 200, contentType: name.endsWith('.json') ? 'application/json' : 'application/octet-stream', headers: cors, body: b }); }
+    catch (_) { r.fulfill({ status: 404, headers: cors, body: '' }); }
+  });
   await page.route('https://ntfy.sh/**', r => {
     const rq = r.request(), u = new URL(rq.url());
     if (NTFY.fail) return r.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: 'down' });
@@ -201,7 +215,7 @@ async function newPage(native, opts = {}) {
     const cb = (t, d) => setTimeout(() => window.__reis && window.__reis(t, d), 20);
     window.__spoken = []; window.__nativeCalls = [];
     window.ReisNative = {
-      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, nativeRev: window.__nativeRev ?? 4 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
+      info: () => JSON.stringify({ app: '1.0.0-test', code: 1, native: true, inst: true, repo: 'test-owner/test-repo', nativeRev: window.__nativeRev ?? 4 }), ready() {}, startTracking() { window.__nativeCalls.push('startTracking'); }, stopTracking() {},
       speak(text, lang, rate, id) { window.__spoken.push(text); cb('tts', { id, state: 'done' }); }, stopSpeak() {}, listen() { cb('stt', { state: 'final', text: 'Що попереду на дорозі?' }); }, stopListen() {},
       http(id, method, url) {
         let status = 200, body = '';
@@ -2763,7 +2777,9 @@ if (run('28')) try {
   // ---- б) офлайн-карта (справжній квадрат Львова): номерів у файлі немає — беремо з мережі й кладемо в запас ----
   OFM.tj = 0; OFM.tiles = []; PM.file = 'city';
   const size = (await pmFile('city')).length;
-  const { page, ctx, errors } = await newPage(true, { offline: true, viewport: VP, before: async pg => { await ofmStub(pg); await pg.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n; }, [7, size]); } });
+  const { page, ctx, errors } = await newPage(true, { offline: true, viewport: VP, before: async pg => { await ofmStub(pg); await pg.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n;
+    // тип мережі й «Економія трафіку», як їх каже Android WebView (у настільному Chromium типу немає): test.conn = 'cellular' | 'wifi', test.save = '1'
+    try { const tp = localStorage.getItem('test.conn'); if (tp) { const c = { type: tp, saveData: localStorage.getItem('test.save') === '1', _l: [], addEventListener(n, f) { this._l.push(f); } }; Object.defineProperty(navigator, 'connection', { configurable: true, get: () => c }); window.__conn = c; } } catch (_) {} }, [7, size]); } });
   await page.waitForFunction(() => window.__app.offline.offlineActive() && !!window.__app.map.map.getSource('protomaps'), null, { timeout: 15000 }).catch(() => {});
   const b0 = await app(page, () => ({ active: window.__app.offline.offlineActive(), addrSrc: !!window.__app.map.map.getSource('addr'), A: { ...window.__app.addr.addr } }));
   ok('офлайн-карта: поки не наблизили — по номери в мережу не ходимо', b0.active && b0.addrSrc && OFM.tiles.length === 0 && OFM.tj === 0 && b0.A.net === 0, JSON.stringify({ b0, tiles: OFM.tiles.length, tj: OFM.tj }));
@@ -2789,6 +2805,8 @@ if (run('28')) try {
   ok('без мережі після перезапуску: номери будинків є — із запасу в телефоні', c1.drawn.length >= 5 && c1.A.net === 0 && c1.A.hits >= 1 && OFM.tiles.length === 0, JSON.stringify(c1));
   const c2 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); return { len: r.data.byteLength, cc: r.cacheControl || '', fails: A.addr.fails }; });
   ok('…а де запасу немає — порожньо без помилки, і за 40 с спитаємо знову (мережа може з\'явитись)', c2.len === 0 && /max-age=40/.test(c2.cc) && c2.fails >= 1, JSON.stringify(c2));
+  await sleep(300);
+  ok('…і водієві сказано прямо: номерів тут поки немає, бо вони ще не в телефоні; буде інтернет — застосунок завантажить їх сам', await app(page, () => /Номерів будинків тут поки немає/.test(document.getElementById('toasts').textContent) && /застосунок сам завантажить їх на всю Україну/.test(document.getElementById('toasts').textContent)), await app(page, () => document.getElementById('toasts').textContent.slice(0, 160)));
   // ---- г) дані на сервері оновились (нова тижнева версія): стара адреса квадратів дає 404 — беремо нову з каталогу ----
   OFM.down = false; OFM.ver = 'V2'; OFM.tj = 0; OFM.tiles = [];
   const d1 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9001/5501' }, new AbortController()); return { len: r.data.byteLength, net: A.addr.net, tpl: (JSON.parse(localStorage.getItem('reis.addrTpl') || '{}').u || '') }; });
@@ -2802,9 +2820,143 @@ if (run('28')) try {
     return { pre: A.addr.prefetched, xy: A.tileXY(fin.lat, fin.lon), log: window.__app.core.getLog().filter(l => /номери будинків біля фінішу/.test(l.msg || l.text || '')).length }; }, fin);
   const want = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) want.push('14/' + (got.xy[0] + dx) + '/' + (got.xy[1] + dy));
   ok('рушили в рейс — 9 квадратів номерів навколо фінішу збережено заздалегідь (один раз на рейс)', got.pre === 9 && want.every(k => OFM.tiles.includes(k)) && OFM.tiles.length === 9 && got.log === 1, JSON.stringify({ got, req: OFM.tiles.length }));
+  // ======== 1.1.17: ВЛАСНІ ПАЧКИ — номери всієї України з OpenStreetMap, без сторонніх серверів і без мережі ========
+  // Пачки зібрано тим самим tools/build_addr.py зі зразка (tests/fixtures/addr): шість будинків біля Луганської у Львові й два в Харкові.
+  PACKS.on = true; PACKS.down = false; PACKS.rawDown = false; PACKS.req = []; OFM.down = true; OFM.tiles = []; OFM.tj = 0;
+  // (у перевірках з–й застосунок НЕ качає всю Україну сам — прапорець «водій видалив номери»: так видно, що саме береться за наближенням)
+  await app(page, async () => { await caches.delete('reis-addr-1'); await caches.delete('reis-addr-pack-1'); localStorage.removeItem('reis.addrIdx'); localStorage.setItem('reis.addrAuto', '0'); });
+  const rel = async () => { await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline.offlineActive(), null, { timeout: 20000 }); };
+  await rel();
+  // з) формат: що записав збирач (Python), те й прочитав застосунок (JavaScript)
+  const dec = await app(page, async () => { const A = window.__app.addr, r = await fetch('https://raw.githubusercontent.com/test-owner/test-repo/addr/v1/145_87.bin.gz');
+    const raw = new Uint8Array(await new Response(new Blob([await r.arrayBuffer()]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()), pk = A.readPack(raw);
+    return { pts: A.packPoints(pk, 6, 2), none: A.packPoints(pk, 7, 2).length, tiles: pk.tiles.size, mvt: A.onlyHouseNumbers(A.mvtHouse(A.packPoints(pk, 6, 2))).length }; });
+  ok('пачка, зібрана tools/build_addr.py, читається застосунком: ті самі шість номерів на тих самих місцях; дублікат і «сміття» відсіяно', JSON.stringify(dec.pts) === JSON.stringify([{ x: 1185, y: 539, n: '12' }, { x: 1379, y: 599, n: '14А' }, { x: 1224, y: 734, n: '16' }, { x: 1392, y: 817, n: '18/2' }, { x: 1198, y: 921, n: '20' }, { x: 1366, y: 1009, n: '22-Б' }]) && dec.none === 0 && dec.tiles === 1 && dec.mvt > 60, JSON.stringify(dec));
+  // и) наблизили карту: пачку свого району застосунок бере сам — і номери є (OpenFreeMap вимкнено й не потрібен)
+  const idxReq = PACKS.req.filter(x => x === 'index.json').length; PACKS.req = [];
+  await jumpTo(page, 17.2); await waitNums(page); await sleep(500);
+  const srcNums = () => app(page, () => [...new Set(window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).map(x => String(x.properties.housenumber)))].sort());
+  const p1 = await nums(page), p1s = await srcNums(), p1g = await app(page, () => { const f = window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).find(x => String(x.properties.housenumber) === '12'); return f ? f.geometry.coordinates : null; });
+  await shot(page, '35-house-own-pack');
+  const want12 = [24.045 + (-40) / (111320 * Math.cos(49.807 * Math.PI / 180)), 49.807 + 85 / 111320];
+  // (номер 12 стоїть під самим підписом «Луганська вулиця» — назва вулиці важливіша, тож на екрані його може не бути; у даних він є)
+  ok('офлайн-карта: номери з власної пачки району — у даних усі шість, намальовано щонайменше п\'ять; без OpenFreeMap; каталог і пачку взято по одному разу', p1s.join() === ['12', '14А', '16', '18/2', '20', '22-Б'].sort().join() && p1.drawn.length >= 5 && ['14А', '16', '18/2', '20', '22-Б'].every(n => p1.drawn.includes(n)) && p1.A.own >= 1 && p1.A.net === 0 && OFM.tiles.length === 0 && OFM.tj === 0
+    && PACKS.req.filter(x => x === '145_87.bin.gz').length === 1 && idxReq === 1, JSON.stringify({ p1, p1s, req: PACKS.req, idxReq, ofm: OFM.tiles.length }));
+  ok('…і стоять там, де будинки (номер 12 — у середині свого будинку, похибка до 3 м)', !!p1g && Math.abs(p1g[0] - want12[0]) < 4e-5 && Math.abs(p1g[1] - want12[1]) < 3e-5, JSON.stringify({ got: p1g, want: want12 }));
+  // і) мережі немає зовсім, застосунок перезапущено: номери — з телефона
+  PACKS.down = true; PACKS.req = [];
+  await rel(); await jumpTo(page, 17.2); await waitNums(page); await sleep(400);
+  const p2 = await nums(page), p2s = await srcNums();
+  ok('без мережі після перезапуску: ті самі номери — пачка лежить у телефоні', p2s.length === 6 && p2.drawn.length >= 5 && p2.A.own >= 1 && p2.A.net === 0 && p2.A.fails === 0 && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ p2, p2s, req: PACKS.req }));
+  // ї) район, де в OpenStreetMap номерів немає взагалі (у каталозі такої пачки немає): порожньо, і це не «немає мережі»
+  PACKS.down = false; PACKS.req = [];
+  const p3 = await app(page, async () => { const A = window.__app.addr; document.getElementById('toasts').innerHTML = ''; await A.packIndex(true); const r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); await new Promise(r => setTimeout(r, 200)); return { len: r.data.byteLength, cc: r.cacheControl || '', toast: document.getElementById('toasts').textContent }; });
+  ok('район без номерів у каталозі: порожній квадрат без зайвих запитів і без підказки «немає інтернету»', p3.len === 0 && p3.cc === '' && p3.toast === '' && !PACKS.req.some(x => /140_85/.test(x)) && OFM.tiles.length === 0, JSON.stringify({ p3, req: PACKS.req }));
+  // й) основна адреса сховища недоступна — пачку беремо із запасного дзеркала
+  PACKS.rawDown = true; PACKS.req = [];
+  const p4 = await app(page, async () => { const A = window.__app.addr; await A.packDeleteAll(); await new Promise(r => setTimeout(r, 100)); const r = await A.tileLoad({ url: 'reisaddr://14/9286/5570' }, new AbortController()); return { len: r.data.byteLength, have: [...(await A.packHave()).keys()] }; });
+  ok('основна адреса недоступна — пачку взято із запасного дзеркала й покладено в телефон', p4.len > 60 && PACKS.req.includes('cdn:145_87.bin.gz') && p4.have.includes('145_87'), JSON.stringify({ p4, req: PACKS.req }));
+  PACKS.rawDown = false;
+  // к) «Налаштування» → офлайн-карта → «Номери будинків без мережі»: завантажити всю Україну одним дотиком, видалити
+  await app(page, () => { window.__app.addr.autoSet(true); return window.__app.addr.packDeleteAll(); }); await sleep(200);
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  const card = () => app(page, () => { const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), h: Math.round(r.height) }; }, c = document.getElementById('addrPack');
+    return { title: c.firstElementChild.textContent, state: document.getElementById('addrPackState').textContent, btns: [...document.querySelectorAll('#addrPackBtns button')].map(b => ({ act: b.dataset.act, t: b.textContent.trim(), ...R(b), fit: b.scrollWidth <= b.clientWidth + 1 })), box: R(c), vw: innerWidth }; });
+  const k0 = await card();
+  ok('картка «Номери будинків без мережі»: скільки це (уся Україна — МБ і кількість номерів), що застосунок завантажить їх сам, і кнопка «Завантажити всю Україну»', k0.title === 'Номери будинків без мережі' && /Уся Україна — [\d,]+ МБ, 8 номерів\. Застосунок завантажить їх сам, щойно буде інтернет/.test(k0.state) && k0.btns.length === 1 && k0.btns[0].act === 'addrGet' && /Завантажити всю Україну/.test(k0.btns[0].t) && k0.btns[0].h >= 44 && k0.btns[0].fit && k0.box.r <= k0.vw, JSON.stringify(k0));
+  PACKS.req = [];
+  await page.click('#addrPackBtns [data-act="addrGet"]');
+  await page.waitForFunction(() => /У телефоні вся Україна/.test(document.getElementById('addrPackState').textContent), null, { timeout: 10000 }).catch(() => {});
+  const k1 = await card(), have1 = await app(page, async () => [...(await window.__app.addr.packHave()).entries()].sort());
+  await shot(page, '38-addr-pack-settings');
+  ok('«Завантажити всю Україну»: обидві пачки в телефоні, дата даних і кількість номерів названі, сказано, що оновлюються самі; лишилась кнопка «Видалити номери»', /У телефоні вся Україна: 8 номерів, дані OpenStreetMap від 24\.11\.2026\. Номери видно без інтернету\. Оновлюються самі, раз на місяць\./.test(k1.state) && JSON.stringify(have1) === JSON.stringify([['145_87', '20261124'], ['153_86', '20261124']])
+    && PACKS.req.includes('145_87.bin.gz') && PACKS.req.includes('153_86.bin.gz') && k1.btns.length === 1 && k1.btns[0].act === 'addrDel' && /Номери будинків усієї України — у телефоні/.test(await app(page, () => document.getElementById('toasts').textContent)), JSON.stringify({ k1, have1, req: PACKS.req }));
+  await page.click('#addrPackBtns [data-act="addrDel"]'); await sleep(200);
+  const k2 = await card();
+  await page.click('#addrPackBtns [data-act="addrDel"]');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  const k3 = await card(), have3 = await app(page, async () => (await window.__app.addr.packHave()).size);
+  ok('«Видалити номери» — з підтвердженням («Справді видалити?»); після нього в телефоні пачок немає, і картка каже, що сам застосунок їх більше не завантажує', /Справді видалити/.test(k2.btns[0].t) && have3 === 0 && k3.btns[0].act === 'addrGet' && /Ви видалили номери, тому сам застосунок їх більше не завантажує/.test(k3.state), JSON.stringify({ k2: k2.btns, k3, have3 }));
+  await page.click('#panelClose');
+  // л) каталог недоступний (пачки ще не зібрані): картка каже про це чесно, а номери й далі беруться попереднім шляхом
+  PACKS.on = false;
+  await app(page, () => { localStorage.removeItem('reis.addrIdx'); }); await rel();
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => /Каталог номерів зараз недоступний/.test(document.getElementById('addrPackState').textContent), null, { timeout: 8000 }).catch(() => {});
+  const k4 = await card();
+  ok('каталог номерів недоступний — картка каже це прямо й пояснює, звідки номери беруться поки що; кнопок-обіцянок немає', /Каталог номерів зараз недоступний/.test(k4.state) && /беруться з інтернету/.test(k4.state) && k4.btns.length === 0, JSON.stringify(k4));
+  await page.click('#panelClose');
+  // ======== 1.1.17: УСЯ УКРАЇНА — САМА. Є офлайн-карта й мережа → застосунок кладе в телефон усі пачки без жодного дотику ========
+  const khRaw = gunzipSync(readFileSync(join(ROOT, '..', 'tests', 'fixtures', 'addr', 'v1', '153_86.bin.gz'))), kh = [153 * 64 + khRaw[6], 86 * 64 + khRaw[7]];   // квадрат Харкова з другої пачки
+  const haveAll = async n => { for (let i = 0; i < 60; i++) { if ((await app(page, async () => (await window.__app.addr.packHave()).size)) === n) return true; await sleep(250); } return false; };   // чекаємо до 15 с, доки в телефоні стане n пачок
+  const haveNow = () => app(page, async () => [...(await window.__app.addr.packHave()).entries()].sort());
+  const packReq = () => PACKS.req.filter(x => /\.bin\.gz$/.test(x));
+  // м) перший запуск із мережею: нічого не натискаємо й карту не наближаємо
+  PACKS.on = true; PACKS.req = [];
+  await app(page, async () => { await caches.delete('reis-addr-pack-1'); await caches.delete('reis-addr-1'); localStorage.removeItem('reis.addrIdx'); localStorage.removeItem('reis.addrAuto'); document.getElementById('toasts').innerHTML = ''; });
+  await rel(); await haveAll(2); await sleep(400);
+  const m1 = await app(page, () => ({ toast: document.getElementById('toasts').textContent, log: window.__app.core.getLog().filter(l => /уся Україна в телефоні/.test(l.msg || l.text || '')).length, on: window.__app.addr.autoOn() })), m1h = await haveNow();
+  ok('є офлайн-карта й мережа — уся Україна (обидві пачки) сама лягла в телефон: нічого не натискали й карту не наближали; водієві сказано один раз', JSON.stringify(m1h) === JSON.stringify([['145_87', '20261124'], ['153_86', '20261124']]) && /Номери будинків усієї України тепер у телефоні/.test(m1.toast) && m1.log === 1 && m1.on
+    && packReq().sort().join() === '145_87.bin.gz,153_86.bin.gz', JSON.stringify({ m1, m1h, req: PACKS.req }));
+  // н) мережі немає, застосунок перезапущено; район, де карту ніколи не наближали (Харків)
+  PACKS.down = true; PACKS.req = []; await rel();
+  const m2 = await app(page, async ([x, y]) => { const A = window.__app.addr; document.getElementById('toasts').innerHTML = ''; const r = await A.tileLoad({ url: 'reisaddr://14/' + x + '/' + y }, new AbortController()); await new Promise(r => setTimeout(r, 250));
+    return { len: r.data.byteLength, cc: r.cacheControl || '', own: A.addr.own, fails: A.addr.fails, toast: document.getElementById('toasts').textContent, again: await A.packAuto(true) }; }, kh);
+  ok('без мережі, район, де карту ніколи не наближали (Харків): номери є — з телефона; жодного запиту й жодної підказки; качати нема чого', m2.len > 30 && m2.cc === '' && m2.own >= 1 && m2.fails === 0 && m2.toast === '' && m2.again === 'full' && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ m2, kh, req: PACKS.req }));
+  // о) на сервері свіжіші дані (раз на місяць): оновлює сама й мовчки
+  PACKS.down = false; PACKS.date = '20261224'; PACKS.req = [];
+  await app(page, () => { localStorage.removeItem('reis.addrIdx'); }); await rel();
+  const m3 = await app(page, async () => { const A = window.__app.addr; document.getElementById('toasts').innerHTML = ''; const r = await A.packAuto(true); await new Promise(r => setTimeout(r, 250)); return { r, toast: document.getElementById('toasts').textContent }; }), m3h = await haveNow();
+  ok('на сервері свіжіші дані — пачки оновлено самою, без дотиків і без повідомлень', m3.r === 'done' && JSON.stringify(m3h) === JSON.stringify([['145_87', '20261224'], ['153_86', '20261224']]) && m3.toast === '' && packReq().length === 2, JSON.stringify({ m3, m3h, req: PACKS.req }));
+  PACKS.date = '';
+  // п) мережа урвалась посеред завантаження: що встигли — лишилось у телефоні; наступна спроба докачує лише решту
+  PACKS.failOn = '153_86.bin.gz'; PACKS.req = [];
+  const f1 = await app(page, async () => { const A = window.__app.addr; await A.packDeleteAll(); localStorage.removeItem('reis.addrIdx'); await A.packIndex(true); const r = await A.packAuto(true); return { r, err: A.packs.err, have: [...(await A.packHave()).keys()].sort() }; });
+  PACKS.failOn = ''; PACKS.req = [];
+  const f2 = await app(page, async () => { const A = window.__app.addr; const r = await A.packAuto(true); return { r, have: [...(await A.packHave()).keys()].sort() }; });
+  ok('мережа урвалась посеред завантаження: що встигли — лишилось; наступна спроба докачує лише те, чого бракує', f1.r === 'fail' && f1.have.join() === '145_87' && /503/.test(f1.err) && f2.r === 'done' && f2.have.join() === '145_87,153_86' && packReq().join() === '153_86.bin.gz', JSON.stringify({ f1, f2, req: PACKS.req }));
+  // р) мобільна мережа, перемикач «лише через Wi-Fi» ввімкнено (він про файл карти): номери (кілька МБ) качає сама й мобільною мережею
+  PACKS.req = [];
+  await app(page, async () => { await window.__app.addr.packDeleteAll(); localStorage.setItem('test.conn', 'cellular'); document.getElementById('toasts').innerHTML = ''; }); await rel();
+  const w1 = await app(page, async () => { const A = window.__app.addr; return { r: await A.packAuto(true), have: (await A.packHave()).size, cell: A.cellular(), saver: A.dataSaver(), wifiOnly: window.__app.S.offlineWifi }; });
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  const wifiDesc = await app(page, () => { const r = document.querySelector('[data-tg="offlineWifi"]'); return r ? r.textContent : ''; });
+  await page.click('#panelClose');
+  ok('мобільна мережа, «лише через Wi-Fi» ввімкнено: номери всієї України застосунок завантажив сам (перемикач — про файл карти, і в ньому це сказано)', w1.r === 'done' && w1.have === 2 && w1.cell && !w1.saver && w1.wifiOnly === true && packReq().length === 2 && /Це про файл карти/.test(wifiDesc) && /Номери будинків малі .* завантажуються будь-якою мережею/.test(wifiDesc), JSON.stringify({ w1, wifiDesc, req: PACKS.req }));
+  // с) у телефоні ввімкнено «Економію трафіку» і мережа мобільна: сама не качає — чекає на Wi-Fi; картка каже це прямо й лишає кнопку «не чекати»
+  PACKS.req = [];
+  const w3 = await app(page, async () => { const A = window.__app.addr; await A.packDeleteAll(); localStorage.setItem('test.save', '1'); window.__conn.saveData = true; return { r: await A.packAuto(true), have: (await A.packHave()).size, waits: A.waitsWifi() }; });
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  await app(page, () => document.getElementById('addrPack').scrollIntoView({ block: 'center' })); await sleep(150);
+  const k5 = await card(); await shot(page, '39-addr-pack-wait-wifi');
+  await page.click('#panelClose');
+  ok('«Економія трафіку» в телефоні й мобільна мережа: сама не качає — чекає на Wi-Fi; картка каже це прямо, кнопка «Завантажити всю Україну» лишається', w3.r === 'wifi' && w3.have === 0 && w3.waits && packReq().length === 0 && /ввімкнено економію трафіку/.test(k5.state) && /коли буде Wi-Fi/.test(k5.state) && k5.btns.length === 1 && k5.btns[0].act === 'addrGet' && k5.btns[0].fit && k5.box.r <= k5.vw, JSON.stringify({ w3, k5, req: PACKS.req }));
+  // т) телефон перейшов на Wi-Fi → завантажує сама
+  await app(page, () => { localStorage.setItem('test.conn', 'wifi'); window.__conn.type = 'wifi'; window.__conn._l.forEach(f => f()); }); await haveAll(2);
+  const w4 = await haveNow();
+  ok('телефон перейшов із мобільної мережі на Wi-Fi — номери завантажились самі', w4.length === 2 && packReq().length === 2, JSON.stringify({ w4, req: PACKS.req }));
+  // у) водій сам видалив номери — сама більше не качає (і після перезапуску); «Завантажити» повертає і номери, і самостійне оновлення
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrDel"]'), null, { timeout: 8000 }).catch(() => {});
+  await page.click('#addrPackBtns [data-act="addrDel"]'); await sleep(200); await page.click('#addrPackBtns [data-act="addrDel"]');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  await page.click('#panelClose'); PACKS.req = [];
+  await rel(); await sleep(7000);                                                     // довше, ніж чекає самостійне завантаження після запуску
+  const u1 = await app(page, async () => { const A = window.__app.addr; return { r: await A.packAuto(true), on: A.autoOn(), have: (await A.packHave()).size }; });
+  ok('водій сам видалив номери — застосунок без його дотику їх більше не качає (і після перезапуску)', u1.r === 'skip' && u1.on === false && u1.have === 0 && packReq().length === 0, JSON.stringify({ u1, req: PACKS.req }));
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  await page.click('#addrPackBtns [data-act="addrGet"]');
+  await page.waitForFunction(() => /У телефоні вся Україна/.test(document.getElementById('addrPackState').textContent), null, { timeout: 10000 }).catch(() => {});
+  const u2 = await app(page, async () => ({ on: window.__app.addr.autoOn(), have: (await window.__app.addr.packHave()).size, state: document.getElementById('addrPackState').textContent }));
+  ok('…«Завантажити всю Україну» повертає і номери, і самостійне оновлення', u2.on === true && u2.have === 2 && /Оновлюються самі/.test(u2.state), JSON.stringify(u2));
+  await page.click('#panelClose');
+  await app(page, () => { localStorage.removeItem('test.conn'); localStorage.removeItem('test.save'); });
   ok('номери будинків на офлайн-карті — без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
-} catch (e) { ok('прохід 28 (номери будинків) дійшов до кінця', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; OFM.down = false; OFM.ver = 'V1'; }
+} catch (e) { ok('прохід 28 (номери будинків) дійшов до кінця', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; OFM.down = false; OFM.ver = 'V1'; PACKS.on = false; PACKS.down = false; PACKS.rawDown = false; PACKS.date = ''; PACKS.failOn = ''; }
 
 /* ============ прохід 29 (1.1.16): «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки, стрічки під формою немає ============ */
 if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tablet'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n)))) try {
@@ -2876,7 +3028,9 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const s2 = await lay(), s2b = await app(page, () => { const ts = window.__app.route.getTrips(), last = ts[ts.length - 1]; return { b: last.b && last.b.label, me: !!(last.a && last.a.me), route: !!(last.route && last.route.coords && last.route.coords.length > 2), pick: !document.getElementById('routePick').hidden, finish: (document.getElementById('in_b') || { value: '?' }).value }; });
   ok(`[${T}] фініш уже вписано — «Зберегти рейс» оживає; один дотик: рейс прокладено (від мого місця) і збережено, вікно варіантів не відкривається`, s2a.tools[1].can && routeReqs.length > reqN && s2.count === 15 && s2.tools[0].n === '15' && /Полтава/.test(s2b.b || '') && s2b.me && s2b.route && !s2b.pick && s2b.finish === '' && /Рейс збережено/.test(s2.toast), JSON.stringify({ s2b, n: s2.tools[0].n, toast: s2.toast.slice(-70) }));
   // порожній архів
-  await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); }); await sleep(600);
+  await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); });
+  // форма оновлюється не миттєво (перемальовування раз на 0,4 с), а на завантаженій машині ще пізніше — чекаємо саме на подію, а не «600 мс»
+  await page.waitForFunction(() => { return !document.querySelector('#tripTools [data-act="archive"] > i'); }, null, { timeout: 4000 }).catch(() => {}); await sleep(150);
   const e0 = await lay();
   await page.click('#tripTools [data-act="archive"]'); await sleep(300);
   const e1 = await lay();
@@ -2900,6 +3054,43 @@ if (process.env.REALVP && run('vpreal')) try {
   ok('справжня картка «Автопорт» відкривається без помилок', errors.length === 0 && info.imgs === 10 && info.secs.length >= 2, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('знімки справжньої картотеки', false, String(e.message).split('\n')[0]); }
+
+/* ============ справжні пачки номерів на справжній карті (лише на прохання: ADDR_DIR=тека ONLY=addrreal --shots тека) ============ */
+// ADDR_DIR — тека з v1/index.json і пачками, взятими з гілки addr сховища. Карта — справжній квадрат Львова (city.pmtiles).
+if (process.env.ADDR_DIR && run('addrreal')) try {
+  PM.fonts = true; PM.file = 'city'; PACKS.on = true; PACKS.req = []; OFM.down = true;
+  const size = (await pmFile('city')).length;
+  const { page, ctx, errors } = await newPage(true, { offline: true, viewport: { width: 393, height: 800 }, before: async pg => { await ofmStub(pg); await pg.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n; }, [7, size]); } });
+  await page.waitForFunction(() => window.__app.offline.offlineActive() && !!window.__app.map.map.getSource('protomaps'), null, { timeout: 15000 }).catch(() => {});
+  // 1) нічого не натискаємо: застосунок сам кладе в телефон усі справжні пачки (якщо в теці вони всі)
+  const t0 = Date.now(); let st = null;
+  for (let i = 0; i < 240; i++) { st = await app(page, async () => { const A = window.__app.addr, i = await A.packInfo(); return { have: i.have, fresh: i.fresh, all: i.index ? i.index.packs : 0, total: i.index ? i.index.total : 0, bytes: i.bytes, busy: i.busy, err: i.err }; }); if (st.all && st.fresh === st.all) break; await sleep(500); }
+  console.log('ADDRREAL auto', JSON.stringify(st), 'за', ((Date.now() - t0) / 1000).toFixed(1), 'с; запитів пачок', PACKS.req.filter(x => /\.bin\.gz$/.test(x)).length, '| підказка:', await app(page, () => document.getElementById('toasts').textContent));
+  ok('справжні дані: уся Україна сама лягла в телефон (усі пачки каталогу)', st.all > 20 && st.fresh === st.all && !st.err, JSON.stringify(st));
+  // 2) мережі немає, застосунок перезапущено: далі все — з телефона
+  PACKS.down = true; PACKS.req = [];
+  await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline.offlineActive(), null, { timeout: 20000 });
+  const cities = [['Київ, Хрещатик', 50.4470, 30.5220], ['Харків, центр', 49.9935, 36.2304], ['Одеса, центр', 46.4825, 30.7233], ['Дніпро, центр', 48.4647, 35.0462], ['Вінниця, «Автопорт»', 49.258925, 28.573011], ['Ужгород', 48.6208, 22.2879], ['Чернігів', 51.4982, 31.2893], ['Запоріжжя', 47.8388, 35.1396], ['село Колочава (Закарпаття)', 48.4283, 23.6986]];
+  const got = await app(page, async cities => { const A = window.__app.addr, out = [];
+    for (const [name, lat, lon] of cities) { const [x, y] = A.tileXY(lat, lon), r = await A.tileLoad({ url: 'reisaddr://14/' + x + '/' + y }, new AbortController());
+      const b = new Uint8Array(r.data); let n = 0; for (let i = 0; i + 3 < b.length; i++) if (b[i] === 0x18 && b[i + 1] === 0x01 && b[i + 2] === 0x22) n++;      // «тип = точка, далі геометрія» — по одному на номер
+      out.push([name, x + '/' + y, n, b.length]); }
+    return { out, own: A.addr.own, net: A.addr.net, fails: A.addr.fails }; }, cities);
+  for (const c of got.out) console.log('ADDRREAL без мережі', c[0], '— квадрат 14/' + c[1] + ':', c[2], 'номерів,', c[3], 'байтів');
+  ok('справжні дані без мережі: у містах, де карту ніколи не наближали, номери є — з телефона, без жодного запиту', got.out.filter(c => c[2] > 0).length >= 7 && got.fails === 0 && got.net === 0 && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ got, req: PACKS.req.length }));
+  for (const [name, lat, lon, z] of (process.env.ADDR_AT || 'a,49.8070,24.0450,17.3;b,49.8010,24.0520,17.6;c,49.8010,24.0520,18.6').split(';').map(x => x.split(',').map((v, i) => i ? +v : v))) {
+    await app(page, ([lat, lon, z]) => { const P = window.__app; P.map.view.follow = false; P.map.view.lastTouch = Date.now() + 3600e3; P.map.map.jumpTo({ center: [lon, lat], zoom: z, pitch: 0, bearing: 0 }); }, [lat, lon, z]);
+    await sleep(3500);
+    const r = await app(page, () => { const m = window.__app.map.map, f = m.querySourceFeatures('addr', { sourceLayer: 'housenumber' }), d = m.queryRenderedFeatures({ layers: ['reis-house'] }).map(x => String(x.properties.housenumber));
+      const b = m.getBounds(), seen = new Set(), inView = f.filter(x => { const c = x.geometry.coordinates, k = c[0].toFixed(6) + ',' + c[1].toFixed(6); if (seen.has(k) || !b.contains(c)) return false; seen.add(k); return true; }).map(x => String(x.properties.housenumber));
+      return { inData: f.length, inView: inView.length, inViewList: inView.slice(0, 20), drawn: d.length, sample: [...new Set(d)].slice(0, 14), A: { ...window.__app.addr.addr }, err: window.__app.addr.packs.err }; });
+    console.log('ADDRREAL', name, JSON.stringify(r));
+    await shot(page, 'addr-real-' + name);
+  }
+  console.log('ADDRREAL req', JSON.stringify(PACKS.req), 'ofm', OFM.tiles.length);
+  ok('справжні пачки номерів на справжній карті — без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('справжні пачки номерів', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; PACKS.on = false; OFM.down = false; }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
 if (run('2')) try {

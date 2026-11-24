@@ -16,6 +16,7 @@ import { heatAlong, heatApplies } from './weather.js';
 import * as rough from './rough.js';
 import * as showers from './showers.js';
 import { off, offlineActive } from './offline.js';
+import { autoOn as addrAutoOn, waitsWifi as addrWaitsWifi } from './addr.js';
 import { sdb, TYPES, F, nearbyRows, alongRoute, brandOf } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
@@ -1356,7 +1357,9 @@ export function initUI() {
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
   bus.on('trips', () => { refresh('trip'); refresh('archive'); });
   let addrMissT = 0;
-  bus.on('addrMiss', () => { const z = mapM.map ? mapM.map.getZoom() : 0, now = Date.now(); if (!offlineActive() || z < mapM.HOUSE_Z || now - addrMissT < 600000) return; addrMissT = now; toast(t('addrMissToast'), 'yellow', 9000); });
+  bus.on('addrMiss', () => { const z = mapM.map ? mapM.map.getZoom() : 0, now = Date.now(); if (!offlineActive() || z < mapM.HOUSE_Z || now - addrMissT < 600000) return; addrMissT = now; toast(t(!addrAutoOn() ? 'addrMissOff' : addrWaitsWifi() ? 'addrMissWifi' : 'addrMissToast'), 'yellow', 9000); });
+  // уся Україна вперше лягла в телефон сама — кажемо один раз (щомісячні оновлення — мовчки)
+  bus.on('addrAuto', o => { if (o && o.first) toast(t('addrAutoDone'), 'green', 7000); });
   bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
