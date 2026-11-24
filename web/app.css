@@ -862,8 +862,9 @@ body.kb #bottom{display:none}
    Бічну розкладку для цього випадку скасовуємо: панель — на всю ширину (на планшеті — по центру). */
 body.kb #panel{top:calc(var(--st) + 6px);bottom:0;left:0;right:0;margin-inline:auto;width:min(760px,100%);height:auto;max-height:none;border-radius:16px 16px 0 0;z-index:9}
 body.kb #speed,body.kb #zoom,body.kb #cam,body.kb #rail,body.kb #attr,body.kb #top{visibility:hidden}
-/* планування рейсу (відкрита панель або плашка точок): нижня плашка непрозора — під вкладками не просвічують підписи карти */
-body.panel-open #bottom,body.pts-on #bottom{background:var(--panel)}
+/* складаємо рейс (форма «Рейс» або плашка точок): нижня плашка непрозора — під вкладками не просвічують підписи карти.
+   В інших панелях (зокрема в «Налаштуваннях», де прозорість плашок якраз і вибирають) вона лишається як налаштовано. */
+body.planning #bottom,body.pts-on #bottom{background:var(--panel)}
 body.planning #tripbar{display:none}   /* складаємо рейс: годинник у нижній плашці не забирає місце у форми */
 body.pts-on #pick{z-index:14}   /* картка точки — поверх плашки точок (у телефоні набік вони в одній колонці) */
 /* ---- 1.1.12: ПЛАНШЕТ (і вертикально, і горизонтально) ----

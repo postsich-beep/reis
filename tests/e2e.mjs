@@ -328,7 +328,7 @@ if (run('1')) try {
   ok('позначка душу збережена й намальована на карті; усього душів: OKKO, окремий душ і позначка', shm.n === 1 && shm.f === 1 && shm.all === 3, JSON.stringify(shm));
   await page.click('#tabs button[data-panel="trip"]');
   { const pb = await app(page, () => ({ text: document.getElementById('panelBody').textContent, tags: [...document.querySelectorAll('#panelBody .field .tag')].map(x => (x.querySelector('svg') ? x.className.replace('tag ', '') : '?') + x.textContent.trim()).join(''), ph: [...document.querySelectorAll('#panelBody .field input')].map(x => x.placeholder) }));
-    ok('«Рейс»: лише три точки — старт (звідки), через, фініш (куди): значки замість літер А·Б·С, без душів і зайвого', pb.tags === 'avb' && /Звідки/.test(pb.ph[0]) && /Через/.test(pb.ph[1]) && /Куди/.test(pb.ph[2]) && !/душ/i.test(pb.text), JSON.stringify({ tags: pb.tags, ph: pb.ph, text: pb.text.slice(0, 120) })); }
+    ok('«Рейс»: лише три точки — старт (звідки), через, фініш (куди): значки замість літер А·Б·С, без душів і зайвого', pb.tags === 'avb' && /Моє місце зараз/.test(pb.ph[0]) && /Через/.test(pb.ph[1]) && /Куди/.test(pb.ph[2]) && !/душ/i.test(pb.text), JSON.stringify({ tags: pb.tags, ph: pb.ph, text: pb.text.slice(0, 120) })); }
   await shot(page, '01b-shower');
   await page.click('#panelClose');
   // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
@@ -940,7 +940,12 @@ const FAILS = [
   { n: 'stop', title: 'стоїмо (акселерометр: спокій), вишки ±1,5 км', v: 0, net: 1500, every: 2, steps: 14, still: true, check: r => r.moved60 < 300 && r.kmh === 0 },
   { n: 'behind', title: 'поставили на початок, а машина вже на 5 км далі — вишки підтягують', v: 22.2, net: 1500, every: 2, steps: 36, placeAt: 0, head: 5000, check: r => Math.abs(r.err) < 1500 },
   { n: 'outlier', title: 'одна вишка «стрибнула» на 20 км — позначка не стрибає', v: 22.2, net: 1500, every: 2, steps: 24, outlierAt: 16, check: r => Math.abs(r.err) < 1500 && r.maxJump < 3000 },
-  { n: 'turn', title: 'різкий поворот, гіроскоп живий, поворот не відчув — не «зависає»', v: 11.1, manual: 40, net: 0, steps: 6, placeAt: 1700, yaw: true, check: r => r.rd > 2150 },
+  // «Замок на повороті» (з 1.1.12): гіроскоп живий (щосекунди, як на телефоні), але повороту не відчув — позначка чекає на повороті
+  // й не їде далі сама; водій тисне «Поворот» — рейс іде далі. До 1.1.14 ця перевірка чекала, що позначка проїде сама, і проходила
+  // лише коли крок розрахунку випадково потрапляв у «тишу» гіроскопа між замірами тесту (раз на 10 с) — тобто не перевіряла нічого.
+  { n: 'turn', title: 'різкий поворот, гіроскоп живий, поворот не відчув — позначка чекає на повороті, кнопка «Поворот» пускає далі', v: 11.1, manual: 40, net: 0, steps: 8, placeAt: 1700,
+    yawFn: () => 0, pressAt: 6, check: r => !!r.held && r.held.rd >= 1960 && r.held.rd <= 2010 && r.held.cp === 'wait' && r.held.btn && r.held.tap && r.rd > 2150 && r.kind === 'manual' && r.kmh === 40 },
+  { n: 'turnNoGyro', title: 'різкий поворот, гіроскопа в телефоні немає — поворот проходимо за швидкістю, не «зависає»', v: 11.1, manual: 40, net: 0, steps: 6, placeAt: 1700, check: r => r.rd > 2150 && r.cp !== 'wait' },
   { n: 'manual', title: 'водій сказав 80 км/год — їдемо за нею', v: 22.2, manual: 80, net: 1500, every: 2, steps: 12, placeAt: 0, check: r => r.kind === 'manual' && r.kmh === 80 && r.rd > 2000 },
   { n: 'turn45', title: 'поворот лише на 45° (раніше гіроскоп його не помічав): позначка відстала на 600 м — підтягується до повороту', v: 22.2, manual: 80, net: 0, steps: 12, placeAt: 4400, head: 5000,
     yawFn: tr => tr > 6000 ? 45 : 0, check: r => Math.abs(r.err) < 250 }
@@ -957,15 +962,20 @@ if (run('5')) for (const sc of FAILS.filter(x => !process.env.SCEN || process.en
     await emitN('loc', { prov: 'last', lat: coords[0][0], lon: coords[0][1], acc: 20, age: 7200, t: Date.now() - 7200e3 });
     await app(page, tr => window.__app.guide.startTrip(tr), trip);
     await app(page, () => { window.__realNow = Date.now; window.__off = 0; Date.now = () => window.__realNow() + window.__off; window.__t0 = Date.now(); });
-    const st = () => app(page, v => { const P = window.__app.nav.pos, sv = window.__app.nav.speedView(); return { rd: P.rd == null ? 0 : P.rd, mode: P.mode, kmh: sv.kmh == null ? null : Math.round(sv.kmh), kind: sv.kind, tt: (Date.now() - window.__t0) / 1000 }; }, sc.v);
+    const st = () => app(page, v => { const P = window.__app.nav.pos, sv = window.__app.nav.speedView(), b = document.getElementById('bTurn'); return { rd: P.rd == null ? 0 : P.rd, mode: P.mode, kmh: sv.kmh == null ? null : Math.round(sv.kmh), kind: sv.kind, tt: (Date.now() - window.__t0) / 1000, cp: P.cp ? P.cp.state : null, btn: !!b && !b.hidden && /st-wait/.test(b.className) }; }, sc.v);
     if (sc.placeAt != null) {
       await app(page, d => { window.__app.nav.placeAtD(d); }, sc.placeAt);
       if (sc.manual) await app(page, k => window.__app.nav.setManualSpeed(k), sc.manual);
     }
     let seed = 12345; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5;
     const at = d => app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(Math.max(0, Math.min(d, 26700))); return { lat: p.lat, lon: p.lon }; }, d);
-    let prevRd = null, maxJump = 0, last = null, hist = [];
+    let prevRd = null, maxJump = 0, last = null, hist = [], held = null;
     for (let i = 0; i < sc.steps; i++) {
+      if (sc.pressAt === i) {      // водій тисне «Поворот» — справжній дотик у середину кнопки (вона «дихає», тож page.click чекав би, поки завмре)
+        held = await st(); held.rd = Math.round(held.rd);
+        const hit = await app(page, () => { const b = document.getElementById('bTurn'), q = b.getBoundingClientRect(), x = q.x + q.width / 2, y = q.y + q.height / 2, e = document.elementFromPoint(x, y); return { x, y, on: !b.hidden && !!e && b.contains(e) }; });
+        held.tap = hit.on; await page.mouse.click(hit.x, hit.y); await sleep(300);
+      }
       const truthAt = tt => (sc.head || 0) + (sc.placeAt != null && !sc.head ? sc.placeAt : 0) + sc.v * tt;
       if (sc.yawFn) {      // гіроскоп — як на телефоні, раз на секунду (10 замірів за крок)
         for (let j = 0; j < 10; j++) { const t1 = await app(page, () => { window.__off += 1000; return (Date.now() - window.__t0) / 1000; }); await emitN('sens', { var: 0.08, yaw: sc.yawFn(truthAt(t1)) }); }
@@ -981,7 +991,7 @@ if (run('5')) for (const sc of FAILS.filter(x => !process.env.SCEN || process.en
       if (prevRd != null) maxJump = Math.max(maxJump, Math.abs(last.rd - prevRd) - sc.v * 12);
       prevRd = last.rd; hist.push(last.rd);
     }
-    const r = { ...last, err: Math.round(last.rd - last.truth), maxJump: Math.round(maxJump), moved60: Math.round(Math.abs(hist[hist.length - 1] - hist[Math.max(0, hist.length - 7)])), rd: Math.round(last.rd), truth: Math.round(last.truth) };
+    const r = { ...last, held, err: Math.round(last.rd - last.truth), maxJump: Math.round(maxJump), moved60: Math.round(Math.abs(hist[hist.length - 1] - hist[Math.max(0, hist.length - 7)])), rd: Math.round(last.rd), truth: Math.round(last.truth) };
     if (process.env.DEBUG) console.log(sc.n, JSON.stringify(hist.map(Math.round)), await app(page, () => JSON.stringify({ turns: window.__app.nav.routeTurns(), log: window.__app.core.getLog().slice(-12).map(l => l.msg || l.text || JSON.stringify(l)), st: window.__app.nav.debugState().gyroSeen, yh: window.__app.nav.debugState().yawHist, mv: window.__app.nav.debugState().moving, pf: window.__app.nav.debugState().pf })));
     ok(T, sc.check(r), JSON.stringify(r));
     ok(T + ' — без помилок JS', errors.length === 0, errors.join(' | '));
@@ -2328,7 +2338,7 @@ if (run('27')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land'].i
   const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(300);
   const lay = () => app(page, () => { const R = e => { const r = e.getBoundingClientRect(); return { t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height) }; }; const bt = document.getElementById('bottom'), cs = getComputedStyle(bt);
-    return { kb: document.body.classList.contains('kb'), open: document.body.classList.contains('panel-open'), bottomShown: cs.display !== 'none', bottomBg: cs.backgroundColor, bottom: R(bt), panel: R(document.getElementById('panel')), vh: innerHeight,
+    return { kb: document.body.classList.contains('kb'), open: document.body.classList.contains('planning'), bottomShown: cs.display !== 'none', bottomBg: cs.backgroundColor, bottom: R(bt), panel: R(document.getElementById('panel')), vh: innerHeight,
       sg: [...document.querySelectorAll('#sg_b button')].map(b => { const r = b.getBoundingClientRect(), el = document.elementFromPoint(r.left + r.width / 2, r.top + Math.min(r.height / 2, 20)); return { t: Math.round(r.top), b: Math.round(r.bottom), mine: !!el && (el === b || b.contains(el)) }; }) }; });
   const l0 = await lay();
   ok(`[${T}] карта без панелей: нижня плашка напівпрозора (як у налаштуванні «Прозорість плашок»)`, /rgba\(/.test(l0.bottomBg) && !l0.open && !l0.kb, l0.bottomBg);
@@ -2361,6 +2371,9 @@ if (run('27')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land'].i
   ok(`[${T}] клавіатуру сховано — нижня плашка й звичайна панель на місці`, !l3.kb && l3.bottomShown && l3.bottom.b === l3.vh && l3.panel.b <= l3.bottom.t + 16 && l3.panel.t === l1.panel.t, JSON.stringify({ panel: l3.panel, bottom: l3.bottom }));
   await page.click('#panelClose'); await sleep(300);
   ok(`[${T}] панель закрито — нижня плашка знову напівпрозора`, /rgba\(/.test((await lay()).bottomBg));
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .app-logo'); await sleep(200);
+  ok(`[${T}] у «Налаштуваннях» нижня плашка лишається напівпрозорою — прозорість плашок видно, поки її вибирають`, /rgba\(/.test((await lay()).bottomBg) && await app(page, () => getComputedStyle(document.getElementById('tripbar')).display !== 'none'));
+  await page.click('#panelClose');
   ok(`[${T}] прохід 27 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`прохід 27 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
