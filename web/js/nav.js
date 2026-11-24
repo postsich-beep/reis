@@ -2,6 +2,7 @@
 import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.js';
 import { RouteTracker } from './drpf.js';
 import { motionHint, startMotion } from './sensors.js';
+import { gyroK, calBusy } from './calib.js';
 
 export const pos = {
   mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
@@ -661,9 +662,22 @@ function calibrationCheck(now, before, e) {
     trkCal = { sig: e.sig, t: now, peak: e.sig };
   }
 }
+// Калібрування телефона (calib.js): кут повороту від служби множимо на поправку цього телефона. Кут накопичений, тому
+// поправку застосовуємо до приростів — зміна калібрування посеред поїздки не дає «стрибка» (і хибного повороту).
+let calK = 1, calRaw0 = null, calBase = 0;
+export function calYaw(raw) {
+  const k = gyroK();
+  if (calRaw0 == null) { calRaw0 = raw; calBase = raw; calK = k; }
+  else if (k !== calK) { calBase += (raw - calRaw0) * calK; calRaw0 = raw; calK = k; }
+  return calBase + (raw - calRaw0) * calK;
+}
 function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
-  if (s.yaw != null) { yawNow = s.yaw; onYaw(s.yaw); }
+  if (s.yaw != null) {
+    const y = calYaw(s.yaw); yawNow = y;
+    if (calBusy()) yawHist.length = 0;                   // іде калібрування: телефон крутять у руках — це не повороти фури
+    else onYaw(y);
+  }
   if (s.var == null) return;
   lastVar = s.var;
   // Самокалібрування: запам'ятовуємо рівень вібрації на стоянці й у русі, поки GPS живий.

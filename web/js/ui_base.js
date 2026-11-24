@@ -59,7 +59,10 @@ export const ICON = {
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
   plus: I('<path d="M12 5v14M5 12h14"/>', 'stroke-width="2.6"'),
   // трикутник «позначити подію» в нижній панелі: помаранчевий із білим знаком оклику
-  warnTab: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#f59e0b" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#fff"/></svg>',
+  // «Мітки» (1.1.22): кашкет поліції лінією, без кольору — нижня стрічка не «кричить»; зеленим загоряється, коли на маршруті є позначки
+  repTab: I('<path d="M2.8 10.2C3.4 6.6 7.3 4.5 12 4.5s8.6 2.1 9.2 5.7c.1.6-.2 1.2-.8 1.5L19 12.800H5l-1.400-1.100c-.6-.3-.9-.9-.8-1.500z"/><path d="M5 12.800v3h14v-3"/><path d="M4.200 15.800c1.300 2.600 4.300 4 7.800 4s6.500-1.400 7.800-4z"/><path d="M12 6.900l1.300.7v1.300c0 .9-.6 1.600-1.300 1.900-.7-.3-1.300-1-1.300-1.900V7.600z" fill="currentColor" stroke="none"/>'),
+  // «Калібрування телефона»: телефон і дві стрілки-дуги — «поверни ліворуч-праворуч»
+  calTab: I('<rect x="8.600" y="3.500" width="6.800" height="17" rx="1.700"/><path d="M11 17.800h2"/><path d="M6 8.500C3.900 9.300 2.600 10.500 2.600 12c0 1.500 1.300 2.700 3.400 3.500"/><path d="M18 8.500c2.100.8 3.400 2 3.400 3.500 0 1.500-1.300 2.700-3.400 3.500"/><path d="M3.800 7.200 6 8.500 4.700 10.800"/><path d="M20.200 7.200 18 8.500l1.300 2.300"/>'),
   warnTri: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#fff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#e8890c" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#e8890c"/></svg>',
   cam: I('<rect x="3" y="8" width="13" height="9" rx="2"/><path d="m16 11 5-3v9l-5-3"/>')
 };

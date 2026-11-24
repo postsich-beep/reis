@@ -26,9 +26,12 @@ import * as lab from './lab.js';
 import { resumeTrip } from './ui.js';
 import * as sfx from './sfx.js';
 import * as sensors from './sensors.js';
+import * as calib from './calib.js';
+import * as uiCalib from './ui_calib.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
+  if (S.lang !== 'uk') S.lang = 'uk';        // (1.1.22) мова одна — українська; розділ «Мова» з налаштувань прибрано, колишній вибір «русский» скидаємо
   document.documentElement.lang = S.lang;
   offline.init(); addr.init();
   await offline.whenChecked(1500);        // файл офлайн-карти перевірено — карта одразу стартує з правильним джерелом
@@ -46,5 +49,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, lab, ui: { ptsState } };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, lab, ui: { ptsState } };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

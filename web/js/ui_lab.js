@@ -165,9 +165,6 @@ function settingsHtml() {
   <div class="sec">${t('secNotify')}</div>
   <div class="list">${tog('popups')}${tog('notify')}${tog('repShare')}</div>
 
-  <div class="sec">${t('setLang')}</div>
-  ${seg('lang', [['uk', 'Українська', S.lang === 'uk'], ['ru', 'Русский', S.lang === 'ru']])}
-
   <div class="sec">${t('setTruck')}</div><div class="form">
     ${num('tr_height', t('trHeight'), tr.height)}${num('tr_width', t('trWidth'), tr.width, '0.05')}${num('tr_length', t('trLength'), tr.length)}${num('tr_weight', t('trWeight'), tr.weight, '0.5', TRUCK_MAX_T)}${num('tr_axle', t('trAxle'), tr.axle, '0.5')}${num('tr_vmax', t('trVmax'), tr.vmax, '5')}
     <label>${t('trHazmat')}<select id="tr_hazmat"><option value="0" ${tr.hazmat ? '' : 'selected'}>${t('no')}</option><option value="1" ${tr.hazmat ? 'selected' : ''}>${t('yes')}</option></select></label></div>
