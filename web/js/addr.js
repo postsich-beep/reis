@@ -175,9 +175,14 @@ export function mvtHouse(pts) {
   ld(out, 3, body);
   return new Uint8Array(out);
 }
-const parsed = new Map();                                    // розібрані пачки в пам'яті (кілька останніх)
-async function packOpen(k) {
-  if (parsed.has(k)) { const pk = parsed.get(k); parsed.delete(k); parsed.set(k, pk); return pk; }
+const parsed = new Map(), opening = new Map();               // розібрані пачки в пам'яті (кілька останніх); пачки, які саме зараз відкриваються
+// Кілька квадратів на екрані лежать в одній пачці — відкриваємо (і качаємо) її один раз на всіх
+function packOpen(k) {
+  if (parsed.has(k)) { const pk = parsed.get(k); parsed.delete(k); parsed.set(k, pk); return Promise.resolve(pk); }
+  if (!opening.has(k)) opening.set(k, packOpen1(k).finally(() => opening.delete(k)));
+  return opening.get(k);
+}
+async function packOpen1(k) {
   const idx = await packIndex();
   let st = await packStored(k);
   if (!st) {

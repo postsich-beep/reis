@@ -2800,6 +2800,8 @@ if (run('28')) try {
   ok('без мережі після перезапуску: номери будинків є — із запасу в телефоні', c1.drawn.length >= 5 && c1.A.net === 0 && c1.A.hits >= 1 && OFM.tiles.length === 0, JSON.stringify(c1));
   const c2 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); return { len: r.data.byteLength, cc: r.cacheControl || '', fails: A.addr.fails }; });
   ok('…а де запасу немає — порожньо без помилки, і за 40 с спитаємо знову (мережа може з\'явитись)', c2.len === 0 && /max-age=40/.test(c2.cc) && c2.fails >= 1, JSON.stringify(c2));
+  await sleep(300);
+  ok('…і водієві сказано прямо: номерів тут немає, бо немає інтернету; усю Україну можна завантажити заздалегідь (де саме)', await app(page, () => /Номерів будинків тут немає/.test(document.getElementById('toasts').textContent) && /Номери будинків без мережі/.test(document.getElementById('toasts').textContent)), await app(page, () => document.getElementById('toasts').textContent.slice(0, 160)));
   // ---- г) дані на сервері оновились (нова тижнева версія): стара адреса квадратів дає 404 — беремо нову з каталогу ----
   OFM.down = false; OFM.ver = 'V2'; OFM.tj = 0; OFM.tiles = [];
   const d1 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9001/5501' }, new AbortController()); return { len: r.data.byteLength, net: A.addr.net, tpl: (JSON.parse(localStorage.getItem('reis.addrTpl') || '{}').u || '') }; });
@@ -2813,9 +2815,73 @@ if (run('28')) try {
     return { pre: A.addr.prefetched, xy: A.tileXY(fin.lat, fin.lon), log: window.__app.core.getLog().filter(l => /номери будинків біля фінішу/.test(l.msg || l.text || '')).length }; }, fin);
   const want = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) want.push('14/' + (got.xy[0] + dx) + '/' + (got.xy[1] + dy));
   ok('рушили в рейс — 9 квадратів номерів навколо фінішу збережено заздалегідь (один раз на рейс)', got.pre === 9 && want.every(k => OFM.tiles.includes(k)) && OFM.tiles.length === 9 && got.log === 1, JSON.stringify({ got, req: OFM.tiles.length }));
+  // ======== 1.1.17: ВЛАСНІ ПАЧКИ — номери всієї України з OpenStreetMap, без сторонніх серверів і без мережі ========
+  // Пачки зібрано тим самим tools/build_addr.py зі зразка (tests/fixtures/addr): шість будинків біля Луганської у Львові й два в Харкові.
+  PACKS.on = true; PACKS.down = false; PACKS.rawDown = false; PACKS.req = []; OFM.down = true; OFM.tiles = []; OFM.tj = 0;
+  await app(page, async () => { await caches.delete('reis-addr-1'); await caches.delete('reis-addr-pack-1'); localStorage.removeItem('reis.addrIdx'); });
+  const rel = async () => { await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline.offlineActive(), null, { timeout: 20000 }); };
+  await rel();
+  // з) формат: що записав збирач (Python), те й прочитав застосунок (JavaScript)
+  const dec = await app(page, async () => { const A = window.__app.addr, r = await fetch('https://raw.githubusercontent.com/test-owner/test-repo/addr/v1/145_87.bin.gz');
+    const raw = new Uint8Array(await new Response(new Blob([await r.arrayBuffer()]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()), pk = A.readPack(raw);
+    return { pts: A.packPoints(pk, 6, 2), none: A.packPoints(pk, 7, 2).length, tiles: pk.tiles.size, mvt: A.onlyHouseNumbers(A.mvtHouse(A.packPoints(pk, 6, 2))).length }; });
+  ok('пачка, зібрана tools/build_addr.py, читається застосунком: ті самі шість номерів на тих самих місцях; дублікат і «сміття» відсіяно', JSON.stringify(dec.pts) === JSON.stringify([{ x: 1185, y: 539, n: '12' }, { x: 1379, y: 599, n: '14А' }, { x: 1224, y: 734, n: '16' }, { x: 1392, y: 817, n: '18/2' }, { x: 1198, y: 921, n: '20' }, { x: 1366, y: 1009, n: '22-Б' }]) && dec.none === 0 && dec.tiles === 1 && dec.mvt > 60, JSON.stringify(dec));
+  // и) наблизили карту: пачку свого району застосунок бере сам — і номери є (OpenFreeMap вимкнено й не потрібен)
+  PACKS.req = [];
+  await jumpTo(page, 17.2); await waitNums(page); await sleep(500);
+  const p1 = await nums(page), p1g = await app(page, () => { const f = window.__app.map.map.querySourceFeatures('addr', { sourceLayer: 'housenumber' }).find(x => String(x.properties.housenumber) === '12'); return f ? f.geometry.coordinates : null; });
+  await shot(page, '35-house-own-pack');
+  const want12 = [24.045 + (-40) / (111320 * Math.cos(49.807 * Math.PI / 180)), 49.807 + 85 / 111320];
+  ok('офлайн-карта: номери з власної пачки району — усі шість, без OpenFreeMap; пачку взято один раз', p1.drawn.length === 6 && ['12', '14А', '16', '18/2', '20', '22-Б'].every(n => p1.drawn.includes(n)) && p1.A.own >= 1 && p1.A.net === 0 && OFM.tiles.length === 0 && OFM.tj === 0
+    && PACKS.req.filter(x => x === '145_87.bin.gz').length === 1 && PACKS.req.filter(x => x === 'index.json').length === 1, JSON.stringify({ p1, req: PACKS.req, ofm: OFM.tiles.length }));
+  ok('…і стоять там, де будинки (номер 12 — у середині свого будинку, похибка до 3 м)', !!p1g && Math.abs(p1g[0] - want12[0]) < 4e-5 && Math.abs(p1g[1] - want12[1]) < 3e-5, JSON.stringify({ got: p1g, want: want12 }));
+  // і) мережі немає зовсім, застосунок перезапущено: номери — з телефона
+  PACKS.down = true; PACKS.req = [];
+  await rel(); await jumpTo(page, 17.2); await waitNums(page); await sleep(400);
+  const p2 = await nums(page);
+  ok('без мережі після перезапуску: ті самі шість номерів — пачка лежить у телефоні', p2.drawn.length === 6 && p2.A.own >= 1 && p2.A.net === 0 && p2.A.fails === 0 && PACKS.req.length === 0 && OFM.tiles.length === 0, JSON.stringify({ p2, req: PACKS.req }));
+  // ї) район, де в OpenStreetMap номерів немає взагалі (у каталозі такої пачки немає): порожньо, і це не «немає мережі»
+  PACKS.down = false; PACKS.req = [];
+  const p3 = await app(page, async () => { const A = window.__app.addr; document.getElementById('toasts').innerHTML = ''; await A.packIndex(true); const r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); await new Promise(r => setTimeout(r, 200)); return { len: r.data.byteLength, cc: r.cacheControl || '', toast: document.getElementById('toasts').textContent }; });
+  ok('район без номерів у каталозі: порожній квадрат без зайвих запитів і без підказки «немає інтернету»', p3.len === 0 && p3.cc === '' && p3.toast === '' && !PACKS.req.some(x => /140_85/.test(x)) && OFM.tiles.length === 0, JSON.stringify({ p3, req: PACKS.req }));
+  // й) основна адреса сховища недоступна — пачку беремо із запасного дзеркала
+  PACKS.rawDown = true; PACKS.req = [];
+  const p4 = await app(page, async () => { const A = window.__app.addr; await A.packDeleteAll(); await new Promise(r => setTimeout(r, 100)); const r = await A.tileLoad({ url: 'reisaddr://14/9286/5570' }, new AbortController()); return { len: r.data.byteLength, have: [...(await A.packHave()).keys()] }; });
+  ok('основна адреса недоступна — пачку взято із запасного дзеркала й покладено в телефон', p4.len > 60 && PACKS.req.includes('cdn:145_87.bin.gz') && p4.have.includes('145_87'), JSON.stringify({ p4, req: PACKS.req }));
+  PACKS.rawDown = false;
+  // к) «Налаштування» → офлайн-карта → «Номери будинків без мережі»: завантажити всю Україну одним дотиком, видалити
+  await app(page, () => window.__app.addr.packDeleteAll()); await sleep(200);
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  const card = () => app(page, () => { const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), h: Math.round(r.height) }; }, c = document.getElementById('addrPack');
+    return { title: c.firstElementChild.textContent, state: document.getElementById('addrPackState').textContent, btns: [...document.querySelectorAll('#addrPackBtns button')].map(b => ({ act: b.dataset.act, t: b.textContent.trim(), ...R(b), fit: b.scrollWidth <= b.clientWidth + 1 })), box: R(c), vw: innerWidth }; });
+  const k0 = await card();
+  ok('картка «Номери будинків без мережі»: скільки це (уся Україна — МБ і кількість номерів) і кнопка «Завантажити всю Україну»', k0.title === 'Номери будинків без мережі' && /Уся Україна — [\d,]+ МБ, 8 номерів/.test(k0.state) && k0.btns.length === 1 && k0.btns[0].act === 'addrGet' && /Завантажити всю Україну/.test(k0.btns[0].t) && k0.btns[0].h >= 44 && k0.btns[0].fit && k0.box.r <= k0.vw, JSON.stringify(k0));
+  PACKS.req = [];
+  await page.click('#addrPackBtns [data-act="addrGet"]');
+  await page.waitForFunction(() => /У телефоні вся Україна/.test(document.getElementById('addrPackState').textContent), null, { timeout: 10000 }).catch(() => {});
+  const k1 = await card(), have1 = await app(page, async () => [...(await window.__app.addr.packHave()).entries()].sort());
+  await shot(page, '38-addr-pack-settings');
+  ok('«Завантажити всю Україну»: обидві пачки в телефоні, дата даних і кількість номерів названі; лишилась кнопка «Видалити номери»', /У телефоні вся Україна: 8 номерів, дані OpenStreetMap від 24\.11\.2026/.test(k1.state) && JSON.stringify(have1) === JSON.stringify([['145_87', '20261124'], ['153_86', '20261124']])
+    && PACKS.req.includes('145_87.bin.gz') && PACKS.req.includes('153_86.bin.gz') && k1.btns.length === 1 && k1.btns[0].act === 'addrDel' && /Номери будинків усієї України — у телефоні/.test(await app(page, () => document.getElementById('toasts').textContent)), JSON.stringify({ k1, have1, req: PACKS.req }));
+  await page.click('#addrPackBtns [data-act="addrDel"]'); await sleep(200);
+  const k2 = await card();
+  await page.click('#addrPackBtns [data-act="addrDel"]');
+  await page.waitForFunction(() => !!document.querySelector('#addrPackBtns [data-act="addrGet"]'), null, { timeout: 8000 }).catch(() => {});
+  const k3 = await card(), have3 = await app(page, async () => (await window.__app.addr.packHave()).size);
+  ok('«Видалити номери» — з підтвердженням («Справді видалити?»); після нього в телефоні пачок немає', /Справді видалити/.test(k2.btns[0].t) && have3 === 0 && k3.btns[0].act === 'addrGet', JSON.stringify({ k2: k2.btns, k3: k3.btns, have3 }));
+  await page.click('#panelClose');
+  // л) каталог недоступний (пачки ще не зібрані): картка каже про це чесно, а номери й далі беруться попереднім шляхом
+  PACKS.on = false;
+  await app(page, () => { localStorage.removeItem('reis.addrIdx'); }); await rel();
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#addrPack');
+  await page.waitForFunction(() => /Каталог номерів зараз недоступний/.test(document.getElementById('addrPackState').textContent), null, { timeout: 8000 }).catch(() => {});
+  const k4 = await card();
+  ok('каталог номерів недоступний — картка каже це прямо й пояснює, звідки номери беруться поки що; кнопок-обіцянок немає', /Каталог номерів зараз недоступний/.test(k4.state) && /беруться з інтернету/.test(k4.state) && k4.btns.length === 0, JSON.stringify(k4));
+  await page.click('#panelClose');
   ok('номери будинків на офлайн-карті — без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
-} catch (e) { ok('прохід 28 (номери будинків) дійшов до кінця', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; OFM.down = false; OFM.ver = 'V1'; }
+} catch (e) { ok('прохід 28 (номери будинків) дійшов до кінця', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; OFM.down = false; OFM.ver = 'V1'; PACKS.on = false; PACKS.down = false; PACKS.rawDown = false; }
 
 /* ============ прохід 29 (1.1.16): «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки, стрічки під формою немає ============ */
 if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tablet'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n)))) try {
