@@ -15,15 +15,25 @@ const SHOTS = process.argv.includes('--shots') ? process.argv[process.argv.index
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 let rangeHits = 0;
+const PM = { old: false, rangeBroken: false, failFrom: null, q: 0, range: 0 };   // як поводиться «оболонка» з файлом офлайн-карти
 const server = createServer(async (rq, rs) => {
   try {
     const p = decodeURIComponent(new URL(rq.url, 'http://x').pathname);
-    if (p === '/offline/ukraine.pmtiles') {                     // як оболонка: файл карти шматками за заголовком Range
+    if (p === '/offline/ukraine.pmtiles') {                     // як оболонка: файл карти шматками
       const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'tiny.pmtiles'));
+      const hd = { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' };
+      // оболонка №7+: шматок задано в адресі (?r=початок-кінець) — рівно ці байти, відповідь 200
+      const q = /[?&]r=(\d+)-(\d+)/.exec(rq.url || '');
+      if (q && !PM.old) { const s = +q[1], e = Math.min(+q[2], b.length - 1); PM.q++; if (PM.failFrom != null && s >= PM.failFrom) { rs.writeHead(500); rs.end(); return; }
+        rs.writeHead(200, { ...hd, 'content-length': e - s + 1 }); rs.end(b.subarray(s, e + 1)); return; }
       const m = /bytes=(\d+)-(\d*)/.exec(rq.headers.range || '');
-      if (!m) { rs.writeHead(200, { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' }); rs.end(b); return; }
-      const s = +m[1], e = Math.min(m[2] ? +m[2] : b.length - 1, b.length - 1); rangeHits++;
-      rs.writeHead(206, { 'content-type': 'application/octet-stream', 'content-range': `bytes ${s}-${e}/${b.length}`, 'content-length': e - s + 1, 'accept-ranges': 'bytes' });
+      if (!m) { rs.writeHead(200, { ...hd, 'content-length': b.length }); rs.end(b); return; }
+      const s = +m[1], e = Math.min(m[2] ? +m[2] : b.length - 1, b.length - 1); rangeHits++; PM.range++;
+      // справжній телефон до 1.1.13: WebView сам перемотує потік, а оболонка вже віддала відрізаний шматок —
+      // усе, що не з початку файлу, закінчується «range not satisfiable»
+      if ((PM.old || PM.rangeBroken) && s > 0) { rs.writeHead(416, { 'content-range': `bytes */${b.length}` }); rs.end(); return; }
+      if (PM.failFrom != null && s >= PM.failFrom) { rs.writeHead(500); rs.end(); return; }
+      rs.writeHead(206, { ...hd, 'content-range': `bytes ${s}-${e}/${b.length}`, 'content-length': e - s + 1 });
       rs.end(b.subarray(s, e + 1)); return;
     }
     const f = join(ROOT, p === '/' ? 'index.html' : p);
@@ -2441,7 +2451,42 @@ if (run('3')) try {
   ok('після зміни карти шари маршруту й пит-стопів на місці', await app(page, () => { const m = window.__app.map.map; return !!m.getLayer('route-line') && !!m.getLayer('route-done') && !!m.getSource('route'); }));
   await page.click('[data-seg="mapMode:offline"]'); await sleep(1500);
   ok('і назад на офлайн — шари маршруту на місці', await app(page, () => { const m = window.__app.map.map; return !!m.getSource('protomaps') && !!m.getLayer('route-line'); }));
-  { const er = errors.filter(e => !/офлайн-карта не читається \(short/.test(e)); ok('прохід офлайн-карти без помилок JS (крім очікуваного запису про обірваний файл)', er.length === 0, er.join(' | ')); }
+  // ---- 1.1.13: «карти так і не підтягнулись» — на справжньому телефоні з файлу читався лише початок, тайли — ні ----
+  const offState = () => app(page, () => { const P = window.__app, O = P.offline.off, m = P.map.map; return { ok: O.ok, bad: O.bad, mode: O.mode, reads: O.reads, errs: O.errs, last: O.lastErr, active: P.offline.offlineActive(), src: !!(m && m.getSource && m.getSource('protomaps')),
+    toast: document.getElementById('toasts').textContent, log: P.core.getLog().slice(-30).map(l => l.msg || l.text || '').join(' | ') }; });
+  const boot = async rev => { await page.addInitScript(r => { window.__nativeRev = r; }, rev); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline, null, { timeout: 20000 }); };
+  const o0 = await offState();
+  ok('файл карти перевірено читанням із середини (а не лише заголовка); спосіб читання відомий', o0.ok && o0.mode === 'range' && o0.active && o0.src && o0.reads > 0 && o0.errs === 0, JSON.stringify({ ...o0, log: undefined, toast: undefined }));
+  // а) телефон зі старою оболонкою (до №7): початок файлу читається, усе інше — ні. Раніше це була «сіра карта» мовчки
+  PM.old = true; await boot(6); await sleep(1500);
+  const oa = await offState();
+  ok('стара оболонка (як на телефоні): офлайн-карту НЕ вмикаємо — показуємо онлайн-карту, а не порожнє сіре тло', oa.bad === 'app' && !oa.ok && !oa.active && !oa.src, JSON.stringify({ ...oa, log: undefined }));
+  ok('…і кажемо прямо: потрібне оновлення застосунку, файл карти завантажувати знову НЕ треба', /запрацює після оновлення застосунку/.test(oa.toast) && /завантажувати знову НЕ треба/.test(oa.toast), oa.toast);
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
+  const sa = await app(page, () => ({ bad: (document.getElementById('offBad') || { textContent: '' }).textContent, diag: (document.getElementById('offDiag') || { textContent: '' }).textContent }));
+  ok('у «Налаштуваннях» те саме й рядок діагностики (спосіб читання, шматки, помилки, номер оболонки)', /оновіть застосунок/.test(sa.bad) && /Читання файлу: — · шматків \d+ · помилок \d+/.test(sa.diag) && /оболонка №6/.test(sa.diag), JSON.stringify(sa));
+  // б) нова оболонка №7: шматок задано в адресі — карта читає саме так (Range для цього телефона «зламаний», і це не заважає)
+  PM.old = false; PM.rangeBroken = true; PM.q = 0; await boot(7); await sleep(2500);
+  const ob = await offState();
+  ok('нова оболонка №7: файл читається точними шматками (?r=початок-кінець), офлайн-карта увімкнена', ob.ok && ob.mode === 'q' && ob.active && ob.src && PM.q >= 2 && ob.reads > 0 && ob.errs === 0, JSON.stringify({ ...ob, log: undefined, q: PM.q }));
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
+  ok('…у «Налаштуваннях»: «Читання файлу: точними шматками», оболонка №7, попереджень немає', await app(page, () => /точними шматками · шматків [1-9]\d* · помилок 0/.test(document.getElementById('offDiag').textContent) && /оболонка №7/.test(document.getElementById('offDiag').textContent) && !document.getElementById('offBad')));
+  await page.click('#panelClose');
+  // в) сторож: заголовок читається, а тайли — ні → за ~20 с повертаємо онлайн-карту й кажемо про це (а не лишаємо сіре тло)
+  PM.rangeBroken = false; PM.failFrom = 256; await boot(7); await sleep(1500);
+  const oc0 = await offState();
+  await page.waitForFunction(() => window.__app.offline.off.bad === 'tiles', null, { timeout: 40000 }).catch(() => {});
+  await sleep(1200);
+  const oc = await offState();
+  ok('тайли не читаються (заголовок — так): сторож помічає, що карта порожня, і повертає онлайн-карту з поясненням', oc0.active && oc.bad === 'tiles' && !oc.active && !oc.src && oc.errs > 0 && /Офлайн-карта не малюється/.test(oc.toast), JSON.stringify({ ...oc, log: undefined, was: oc0.active }));
+  PM.failFrom = null; PM.old = false; PM.rangeBroken = false;
+  // г) звичайний випадок: карта малюється — сторож мовчить
+  await boot(7);
+  await page.waitForFunction(() => window.__app.core.getLog().some(l => /офлайн-карта малюється/.test(l.msg || l.text || '')), null, { timeout: 30000 }).catch(() => {});
+  await sleep(21000);
+  const od = await offState();
+  ok('карта малюється — сторож мовчить і через 20 с: офлайн-карта лишається', od.ok && !od.bad && od.active && od.src && od.errs === 0, JSON.stringify({ ...od, log: od.log.slice(-300) }));
+  { const er = errors.filter(e => !/офлайн-карта не (читається|малюється)/.test(e) && !/status of (416|500)/.test(e)); ok('прохід офлайн-карти без помилок JS (крім очікуваних записів про файл, що не читається)', er.length === 0, er.join(' | ')); }
   await ctx.close();
 } catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }
 

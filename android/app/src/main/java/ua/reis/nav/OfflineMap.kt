@@ -101,12 +101,36 @@ object OfflineMap {
         return o.put("dl", dl)
     }
 
-    /** Віддати шматок файлу на запит WebView (pmtiles читає заголовок і тайли через Range). */
-    fun serve(ctx: Context, headers: Map<String, String>?): WebResourceResponse {
+    /**
+     * Віддати шматок файлу карти на запит WebView. Два способи (1.1.13):
+     *  1) ?r=ПОЧАТОК-КІНЕЦЬ в адресі — рівно ці байти, без заголовка Range. Так читає карта: нічого не залежить від WebView.
+     *  2) заголовок Range. WebView обробляє його САМ: питає в нашого потоку available() (чекає розмір УСЬОГО файлу)
+     *     і викликає skip(початок шматка). До 1.1.12 ми віддавали вже відрізаний шматок — WebView шукав початок усередині
+     *     нього й відповідав «range not satisfiable»: з файлу читався лише заголовок (з нуля), а жоден тайл — ні.
+     *     Звідси «сіра карта без доріг». Тепер потік поводиться як увесь файл і обривається на кінці шматка.
+     */
+    fun serve(ctx: Context, headers: Map<String, String>?, query: String? = null): WebResourceResponse {
         val cors = mutableMapOf("Access-Control-Allow-Origin" to "*", "Accept-Ranges" to "bytes", "Cache-Control" to "no-cache")
         val f = file(ctx)
         if (!f.isFile) return WebResourceResponse("text/plain", "utf-8", 404, "Not Found", cors, ByteArrayInputStream(ByteArray(0)))
         val len = f.length()
+        val bin = "application/octet-stream"
+        val unsat = {
+            cors["Content-Range"] = "bytes */$len"
+            WebResourceResponse(bin, null, 416, "Range Not Satisfiable", cors, ByteArrayInputStream(ByteArray(0)))
+        }
+        // 1) шматок задано в адресі
+        val q = if (query != null) Regex("(?:^|&)r=(\\d{1,18})-(\\d{1,18})(?:&|$)").find(query) else null
+        if (q != null) {
+            val s0 = q.groupValues[1].toLong()
+            val e0 = minOf(q.groupValues[2].toLong(), len - 1)
+            if (s0 > e0) return unsat()
+            val n = e0 - s0 + 1
+            cors["Content-Length"] = n.toString()
+            cors["X-Reis-Range"] = "$s0-$e0/$len"
+            return WebResourceResponse(bin, null, 200, "OK", cors, Slice(f, s0, n))
+        }
+        // 2) заголовок Range
         val range = headers?.entries?.firstOrNull { it.key.equals("Range", ignoreCase = true) }?.value
         var start = 0L
         var end = len - 1
@@ -124,17 +148,15 @@ object OfflineMap {
                 partial = true
             }
         }
-        if (start > end || start >= len) {
-            cors["Content-Range"] = "bytes */$len"
-            return WebResourceResponse("application/octet-stream", null, 416, "Range Not Satisfiable", cors, ByteArrayInputStream(ByteArray(0)))
-        }
+        if (start > end || start >= len) return unsat()
         val count = end - start + 1
         cors["Content-Length"] = count.toString()
-        if (partial) cors["Content-Range"] = "bytes $start-$end/$len"
-        return WebResourceResponse("application/octet-stream", null, if (partial) 206 else 200, if (partial) "Partial Content" else "OK", cors, Slice(f, start, count))
+        if (!partial) return WebResourceResponse(bin, null, 200, "OK", cors, Slice(f, 0, len))
+        cors["Content-Range"] = "bytes $start-$end/$len"
+        return WebResourceResponse(bin, null, 206, "Partial Content", cors, Ranged(f, start, end, len))
     }
 
-    /** Потік, що читає count байтів файлу з позиції start. */
+    /** Потік, що читає count байтів файлу з позиції start (для запитів без Range: WebView нічого не перемотує). */
     private class Slice(f: File, start: Long, private var left: Long) : InputStream() {
         private val raf = RandomAccessFile(f, "r").also { it.seek(start) }
         override fun read(): Int {
@@ -150,6 +172,51 @@ object OfflineMap {
             return n
         }
         override fun available(): Int = minOf(left, Int.MAX_VALUE.toLong()).toInt()
+        override fun close() { raf.close() }
+    }
+
+    /**
+     * Потік для запиту з Range. Для WebView це «увесь файл»: available() каже повну довжину, skip() перемотує миттєво
+     * (а не читає й викидає сотні мегабайтів), читання закінчується на кінці шматка. Якщо читання почалось без skip() —
+     * стаємо на початок шматка самі.
+     */
+    private class Ranged(f: File, private val start: Long, private val end: Long, private val total: Long) : InputStream() {
+        private val raf = RandomAccessFile(f, "r")
+        private var pos = 0L
+        private var placed = false
+        private fun place() {
+            if (placed) return
+            placed = true
+            if (pos < start) { pos = start; raf.seek(pos) }
+        }
+        override fun available(): Int {
+            val n = if (!placed) total else (end - pos + 1).coerceAtLeast(0L)
+            return minOf(n, Int.MAX_VALUE.toLong()).toInt()
+        }
+        override fun skip(n: Long): Long {
+            if (n <= 0) return 0
+            val to = minOf(pos + n, total)
+            val d = to - pos
+            pos = to
+            raf.seek(pos)
+            placed = true
+            return d
+        }
+        override fun read(): Int {
+            place()
+            if (pos > end) return -1
+            val v = raf.read()
+            if (v >= 0) pos++
+            return v
+        }
+        override fun read(b: ByteArray, off: Int, len: Int): Int {
+            place()
+            if (pos > end) return -1
+            if (len <= 0) return 0
+            val n = raf.read(b, off, minOf(len.toLong(), end - pos + 1).toInt())
+            if (n > 0) pos += n
+            return n
+        }
         override fun close() { raf.close() }
     }
 }

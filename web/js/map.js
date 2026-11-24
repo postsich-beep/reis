@@ -6,7 +6,7 @@ import { g } from './guide.js';
 import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
-import { offlineActive, offlineStyle } from './offline.js';
+import { off, offlineActive, offlineStyle, tilesBad } from './offline.js';
 import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
 import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
@@ -401,6 +401,7 @@ function addLayers() {
   map.addLayer({ id: 'plan-line-bg', type: 'line', source: 'plan-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.85 } });
   map.addLayer({ id: 'plan-line', type: 'line', source: 'plan-line', paint: { 'line-color': '#13171c', 'line-width': 3, 'line-dasharray': [1.6, 1.4] } });
   doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps(); if (planPts) planPoints(planPts);
+  offlineWatch();
   tuneLabels();
   if (clean) setClean(true);
 }
@@ -780,6 +781,31 @@ export function previewRoute(coords, route = null) {
   if (coords) showRoute(coords);
 }
 // Офлайн-карта України, якщо завантажена; інакше онлайн-стиль, вибраний у налаштуваннях.
+// Сторож офлайн-карти (1.1.13): стиль увімкнувся — за кілька секунд на екрані мають з'явитися суша, вода чи дороги з файлу.
+// Якщо нічого не намалювалось (файл не читається шматками, збій розпакування) — не лишаємо порожнє сіре тло:
+// повертаємо онлайн-карту й кажемо про це. Раніше водій бачив просто «сіру карту» без жодного пояснення.
+let offWatchT = 0, offTiles = { ok: 0, err: 0, msg: '' }, offHooked = false;
+function offlineWatch() {
+  clearTimeout(offWatchT);
+  if (!offHooked) {            // лічильники тайлів офлайн-карти: скільки прийшло, скільки зірвалось
+    offHooked = true;
+    map.on('sourcedata', e => { if (e.sourceId === 'protomaps' && e.tile && e.tile.state === 'loaded') offTiles.ok++; });
+    map.on('error', e => { if (e && e.sourceId === 'protomaps') { offTiles.err++; offTiles.msg = String(e.error && e.error.message || '').slice(0, 100); } });
+  }
+  offTiles = { ok: 0, err: 0, msg: '' };
+  if (!offlineActive()) return;
+  let tries = 0;
+  const check = () => {
+    if (!map || !offlineActive() || !map.getSource('protomaps')) return;
+    // «малюється» — це коли з файлу справді прийшли об'єкти (суша, вода, дороги), або тайли завантажились без жодної помилки
+    let feat = 0; for (const l of ['earth', 'water', 'roads', 'landuse', 'landcover', 'boundaries']) { try { feat += map.querySourceFeatures('protomaps', { sourceLayer: l }).length; } catch (_) {} if (feat) break; }
+    if (feat > 0 || (offTiles.ok > 0 && offTiles.err === 0 && off.errs === 0)) { log('info', 'офлайн-карта малюється (тайлів: ' + offTiles.ok + ', читань файлу: ' + off.reads + ', помилок: ' + off.errs + ')'); return; }
+    if (++tries < 5) { offWatchT = setTimeout(check, 4000); return; }
+    if (offTiles.err === 0 && off.errs === 0) return;                 // тайлів ніхто не просив (карта схована тощо) — це не збій
+    tilesBad('тайлів 0, зірвалось ' + offTiles.err + (offTiles.msg ? ': ' + offTiles.msg : '') + '; читань ' + off.reads + ', помилок читання ' + off.errs + (off.lastErr ? ': ' + off.lastErr : ''));
+  };
+  offWatchT = setTimeout(check, 4000);
+}
 // Офлайн-карта має власну темну раскладку кольорів — «перевертати» її фільтром уночі не треба (body.mapdark вимикає фільтр).
 export const nativeDark = () => offlineActive() && view.night;
 export function currentStyle() { try { if (offlineActive()) return offlineStyle(view.night); } catch (e) { log('warn', 'офлайн-стиль: ' + e.message); } return S.styleUrl; }
