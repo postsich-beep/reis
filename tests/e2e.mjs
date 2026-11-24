@@ -3028,7 +3028,9 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const s2 = await lay(), s2b = await app(page, () => { const ts = window.__app.route.getTrips(), last = ts[ts.length - 1]; return { b: last.b && last.b.label, me: !!(last.a && last.a.me), route: !!(last.route && last.route.coords && last.route.coords.length > 2), pick: !document.getElementById('routePick').hidden, finish: (document.getElementById('in_b') || { value: '?' }).value }; });
   ok(`[${T}] фініш уже вписано — «Зберегти рейс» оживає; один дотик: рейс прокладено (від мого місця) і збережено, вікно варіантів не відкривається`, s2a.tools[1].can && routeReqs.length > reqN && s2.count === 15 && s2.tools[0].n === '15' && /Полтава/.test(s2b.b || '') && s2b.me && s2b.route && !s2b.pick && s2b.finish === '' && /Рейс збережено/.test(s2.toast), JSON.stringify({ s2b, n: s2.tools[0].n, toast: s2.toast.slice(-70) }));
   // порожній архів
-  await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); }); await sleep(600);
+  await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); });
+  // форма оновлюється не миттєво (перемальовування раз на 0,4 с), а на завантаженій машині ще пізніше — чекаємо саме на подію, а не «600 мс»
+  await page.waitForFunction(() => { return !document.querySelector('#tripTools [data-act="archive"] > i'); }, null, { timeout: 4000 }).catch(() => {}); await sleep(150);
   const e0 = await lay();
   await page.click('#tripTools [data-act="archive"]'); await sleep(300);
   const e1 = await lay();
