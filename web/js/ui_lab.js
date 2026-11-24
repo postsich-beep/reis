@@ -16,7 +16,7 @@ import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from 
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
 import { logoHtml } from './lab.js';
-import { packInfo, packDownloadAll, packStop, packDeleteAll } from './addr.js';
+import { packInfo, packDownloadAll, packStop, packDeleteAll, autoSet } from './addr.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
@@ -207,10 +207,12 @@ async function addrPackFill() {
   let txt = '', btns = '', prog = '';
   if (i.busy) { txt = t('addrPackBusy', i.done, i.total); prog = `<div class="prog"><i style="width:${i.total ? Math.round(i.done / i.total * 100) : 0}%"></i></div>`; btns = `<button class="btn sm wide" data-act="addrStop">${t('addrPackStop')}</button>`; }
   else if (!i.index) { txt = t('addrPackNoData'); if (i.have) btns = del; }
-  else if (i.fresh === i.index.packs) { txt = t('addrPackAll', addrNum(i.index.total), addrDate(i.index.date)); btns = del; }
+  else if (i.fresh === i.index.packs) { txt = t('addrPackAll', addrNum(i.index.total), addrDate(i.index.date)) + (i.auto ? ' ' + t('addrPackAutoUpd') : ''); btns = del; }
   else {
     const left = i.index.bytes - (i.old ? 0 : i.bytes);
-    txt = (i.have ? t('addrPackSome', i.have, i.index.packs) + ' ' : '') + (i.old ? t('addrPackOld', addrDate(i.index.date)) + ' ' : '') + t('addrPackNone', addrMB(i.index.bytes), addrNum(i.index.total));
+    // хто й коли завантажить: застосунок сам (щойно буде мережа / Wi-Fi) чи вже тільки водій (сам видалив)
+    const how = !i.auto ? t('addrPackAutoOff') : i.wifi ? t('addrPackAutoWifi') : t('addrPackAutoSoon');
+    txt = (i.have ? t('addrPackSome', i.have, i.index.packs) + ' ' : '') + (i.old ? t('addrPackOld', addrDate(i.index.date)) + ' ' : '') + t('addrPackNone', addrMB(i.index.bytes), addrNum(i.index.total)) + ' ' + how;
     btns = `<button class="btn pri" data-act="addrGet">${i.old ? t('addrPackUpd') : t(i.have ? 'addrPackMore' : 'addrPackGet', addrMB(Math.max(left, 0)))}</button>` + (i.have ? del : '');
   }
   if (i.err && !i.busy) txt += ' ' + t('addrPackErr', i.err);
@@ -262,9 +264,9 @@ definePanel('settings', {
       else if (a === 'about') openPanel('about');
       else if (a === 'offDl') { P.offlineDownload(S.offlineWifi); setTimeout(refreshStatus, 800); toast(t('offStarted'), 'green', 6000); }
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
-      else if (a === 'addrGet') { packDownloadAll().then(okAll => { if (okAll) toast(t('addrPackDone'), 'green', 6000); }); setTimeout(addrPackFill, 100); }
+      else if (a === 'addrGet') { autoSet(true); packDownloadAll().then(okAll => { if (okAll) toast(t('addrPackDone'), 'green', 6000); }); setTimeout(addrPackFill, 100); }   // дотик водія — це й дозвіл надалі оновлювати самій
       else if (a === 'addrStop') { packStop(); }
-      else if (a === 'addrDel') { if (b.dataset.sure) packDeleteAll().then(addrPackFill); else { b.dataset.sure = '1'; b.textContent = t('addrPackDelSure'); } }
+      else if (a === 'addrDel') { if (b.dataset.sure) { autoSet(false); packDeleteAll().then(addrPackFill); } else { b.dataset.sure = '1'; b.textContent = t('addrPackDelSure'); } }   // видалив сам — сама більше не качає
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
     };
     body.onchange = e => {

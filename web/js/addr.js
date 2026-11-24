@@ -9,8 +9,9 @@
 // З квадрата (~100 КБ) зберігаємо один шар номерів (кілька КБ), тож запас на півтори тисячі квадратів — це мегабайти.
 //
 // 1.1.17 — ВЛАСНІ ПАЧКИ: номери всієї України, зібрані з OpenStreetMap (tools/build_addr.py, гілка addr сховища).
-// Пачка — квадрат ≈100×100 км, файл від кількох КБ до пари МБ. Застосунок бере пачку свого району сам, щойно
-// водій наблизив карту з мережею, і кладе в телефон; а в «Налаштуваннях» можна одним дотиком завантажити всю Україну.
+// Пачка — квадрат ≈100×100 км, файл від кількох КБ до сотень КБ; уся Україна — близько 9 МБ. Тому застосунок кладе
+// в телефон УСІ пачки сам, щойно є офлайн-карта й мережа (packAuto), і раз на місяць оновлює їх: водієві нічого
+// натискати не треба. Доки це не сталося — пачку свого району бере, щойно водій наблизив карту з мережею.
 // Є пачка — номери малюються без мережі й без сторонніх серверів. Немає пачок (ще не зібрані, немає мережі) —
 // працює попередній шлях: квадрати OpenFreeMap із запасом.
 import { bus, log } from './core.js';
@@ -189,7 +190,7 @@ async function packOpen1(k) {
     if (!idx) return null;                                   // каталогу немає: пачки ще не зібрані або мережі не було жодного разу
     if (!idx.packs[k]) return { raw: new Uint8Array(0), tiles: new Map() };       // у цьому районі в OpenStreetMap номерів немає взагалі
     if (!P.online()) return null;
-    try { const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); st = { gz, date: idx.date }; packs.net++; bus.emit('addrPacks', packs); }
+    try { const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); st = { gz, date: idx.date }; packs.net++; bus.emit('addrPacks', packs); setTimeout(() => { packAuto().catch(() => {}); }, 3000); }   // мережа щойно спрацювала — добрий час докласти й решту України
     catch (e) { packs.err = String(e && e.message || e).slice(0, 80); return null; }
   } else if (idx && idx.packs[k] && st.date !== idx.date && P.online()) {
     packFetch(k + '.bin.gz').then(gz => packPut(k, gz, idx.date)).then(() => parsed.delete(k)).catch(() => {});     // є новіші дані — оновимо тихо, а зараз показуємо те, що є
@@ -214,26 +215,75 @@ export async function packDownloadAll() {
     const idx = await packIndex(true); if (!idx) throw new Error(packs.err || 'каталог номерів недоступний');
     const keys = Object.keys(idx.packs), have = await packHave(), todo = keys.filter(k => have.get(k) !== idx.date);
     packs.total = keys.length; packs.done = keys.length - todo.length; bus.emit('addrPacks', packs);
-    let i = 0;
-    const worker = async () => { while (i < todo.length && !packs.stop) { const k = todo[i++]; const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); parsed.delete(k); packs.done++; packs.net++; bus.emit('addrPacks', packs); } };
+    let i = 0, fail = null;
+    // пачка не далась (мережа зникла) — зупиняються всі три «робітники»; те, що вже в телефоні, лишається, наступного разу докачаємо решту
+    const worker = async () => { while (i < todo.length && !packs.stop && !fail) { const k = todo[i++]; try { const gz = await packFetch(k + '.bin.gz'); await packPut(k, gz, idx.date); parsed.delete(k); packs.done++; packs.net++; bus.emit('addrPacks', packs); } catch (e) { fail = e; } } };
     await Promise.all([worker(), worker(), worker()]);
+    if (fail) throw fail;
     const c = await packStore(); if (c && !packs.stop) for (const [k] of have) if (!idx.packs[k]) await c.delete(packUrl(k));     // квадратів, яких більше немає в каталозі, не тримаємо
+    if (!packs.stop) fullFor = idx.date;
   } catch (e) { packs.err = String(e && e.message || e).slice(0, 80); }
   packs.busy = false; bus.emit('addrPacks', packs);
   return !packs.err && !packs.stop;
 }
-export function packStop() { packs.stop = true; }
+export function packStop() { packs.stop = true; autoHold = true; }      // водій натиснув «Зупинити» — до перезапуску чи його дотику сама не поновлюємо
 export async function packDeleteAll() {
-  packs.stop = true; parsed.clear(); memPacks.clear();
+  packs.stop = true; parsed.clear(); memPacks.clear(); fullFor = '';
   try { if (typeof caches !== 'undefined') await caches.delete(PACK_CACHE); } catch (_) {}
   bus.emit('addrPacks', packs);
+}
+
+/* ---------- сама, без дотиків: уся Україна в телефоні ---------- */
+// Уся Україна — близько 9 МБ (як кілька фотографій). Тож щойно в телефоні є офлайн-карта й з'явилась мережа, застосунок
+// сам кладе в телефон усі пачки, а коли на сервері свіжіші дані (раз на місяць) — сам оновлює. Водієві нічого не треба
+// натискати: поїхав туди, де мережі немає, — номери вже є.
+//   • качаємо будь-якою мережею, і мобільною теж: водій тижнями в рейсі без Wi-Fi, а 9 МБ — це не файл карти на 1,9 ГБ
+//     (перемикач «лише через Wi-Fi» в «Налаштуваннях» — саме про файл карти, і там це сказано);
+//   • виняток — у телефоні ввімкнено «Економію трафіку» (navigator.connection.saveData) і мережа мобільна: чекаємо на Wi-Fi
+//     (пачку СВОГО району беремо однаково, коли водій наблизив карту: це десятки–сотні КБ);
+//   • водій сам видалив номери в «Налаштуваннях» — без його дотику більше не качаємо (AUTO_KEY = '0');
+//   • не вдалося (мережа зникла) — те, що встигли, лишається; наступна спроба за кілька хвилин докачає решту.
+const AUTO_KEY = 'reis.addrAuto', AUTO_GAP_MS = 5 * 60e3, AUTO_START_MS = 6000, AUTO_TICK_MS = 10 * 60e3;
+let autoAt = 0, autoRun = null, mapHere = false, fullFor = '', autoHold = false;
+export const autoOn = () => { try { return localStorage.getItem(AUTO_KEY) !== '0'; } catch (_) { return true; } };
+export function autoSet(on) { try { if (on) localStorage.removeItem(AUTO_KEY); else localStorage.setItem(AUTO_KEY, '0'); } catch (_) {} autoAt = 0; autoHold = false; }
+// Мобільна мережа з «Економією трафіку»? Android WebView каже тип мережі (navigator.connection.type) і чи ввімкнено економію
+// (saveData); якщо не каже — не вгадуємо й не чекаємо.
+const conn = () => { try { return navigator.connection || null; } catch (_) { return null; } };
+export const cellular = () => { const c = conn(); return !!c && c.type === 'cellular'; };
+export const dataSaver = () => { const c = conn(); return !!c && c.saveData === true; };
+export const waitsWifi = () => autoOn() && cellular() && dataSaver();
+/** Спроба покласти в телефон усю Україну без участі водія. Повертає, чим скінчилось (для журналу й перевірок). */
+export function packAuto(force = false) {
+  if (!autoRun) autoRun = packAuto1(force).catch(() => 'fail').finally(() => { autoRun = null; });
+  return autoRun;
+}
+async function packAuto1(force) {
+  if (packs.busy || autoHold || !autoOn() || !mapHere || !packBases().length) return 'skip';
+  if (!P.online()) return 'offline';
+  if (!force && Date.now() - autoAt < AUTO_GAP_MS) return 'later';
+  if (waitsWifi()) return 'wifi';
+  const idx = await packIndex(); if (!idx) { autoAt = Date.now(); return 'noindex'; }
+  if (fullFor === idx.date) return 'full';
+  const have = await packHave();
+  if (Object.keys(idx.packs).every(k => have.get(k) === idx.date)) { fullFor = idx.date; return 'full'; }
+  autoAt = Date.now();
+  const first = have.size === 0;
+  log('info', 'номери будинків: кладу в телефон усю Україну (' + (first ? 'вперше' : 'оновлення') + ', дані від ' + idx.date + ')');
+  const ok = await packDownloadAll();
+  if (!ok) { log('warn', 'номери будинків: завантажити не вдалося' + (packs.err ? ' — ' + packs.err : '') + '; спробую згодом'); return packs.stop ? 'stopped' : 'fail'; }
+  autoAt = 0;
+  log('info', 'номери будинків: уся Україна в телефоні — ' + (packs.index ? packs.index.total : '?') + ' номерів');
+  bus.emit('addrAuto', { first, total: packs.index ? packs.index.total : 0, date: packs.index ? packs.index.date : '' });
+  return 'done';
 }
 /** Для «Налаштувань»: що є на сервері й що вже в телефоні. */
 export async function packInfo() {
   const idx = await packIndex(), have = await packHave();
   const all = idx ? Object.keys(idx.packs) : [], fresh = all.filter(k => have.get(k) === idx.date).length, old = all.filter(k => have.has(k) && have.get(k) !== idx.date).length;
   let bytes = 0, nums = 0; if (idx) for (const k of all) if (have.has(k)) { nums += idx.packs[k][0]; bytes += idx.packs[k][1]; }
-  return { index: idx ? { date: idx.date, total: idx.total, bytes: idx.bytes, packs: all.length } : null, have: have.size, fresh, old, nums, bytes, busy: packs.busy, done: packs.done, total: packs.total, err: packs.err };
+  return { index: idx ? { date: idx.date, total: idx.total, bytes: idx.bytes, packs: all.length } : null, have: have.size, fresh, old, nums, bytes, busy: packs.busy, done: packs.done, total: packs.total, err: packs.err,
+    auto: autoOn(), wifi: waitsWifi(), online: P.online() };
 }
 
 /* ---------- один квадрат номерів: із запасу або з мережі ---------- */
@@ -297,12 +347,23 @@ export const houseSource = () => ({ type: 'vector', tiles: ['reisaddr://{z}/{x}/
 export function init() {
   try { maplibregl.addProtocol('reisaddr', tileLoad); } catch (e) { log('warn', 'номери будинків: ' + e.message); }
   if (P.online()) packIndex().then(i => { if (i) log('info', 'номери будинків: каталог пачок від ' + i.date + ', номерів ' + i.total); }).catch(() => {});
+  // уся Україна — сама: після запуску (не заважаючи йому), коли з'явилась мережа чи Wi-Fi, коли встановилась офлайн-карта, і зрідка — на випадок довгого рейсу
+  try { const s = P.offlineStatus(); mapHere = !!(s && s.installed); } catch (_) {}
+  const tryAuto = () => { packAuto().catch(() => {}); };
+  bus.on('offline', o => { const was = mapHere; mapHere = !!(o && o.installed); if (mapHere && !was) tryAuto(); });
+  setTimeout(tryAuto, AUTO_START_MS); setInterval(tryAuto, AUTO_TICK_MS);
+  try { window.addEventListener('online', tryAuto); } catch (_) {}
+  try { document.addEventListener('visibilitychange', () => { if (!document.hidden) tryAuto(); }); } catch (_) {}
+  try { const c = conn(); if (c && c.addEventListener) c.addEventListener('change', () => { bus.emit('addrPacks', packs); tryAuto(); }); } catch (_) {}
+  // просимо систему не чистити наш запас, коли в телефоні мало місця (якщо все ж почистить — packAuto докачає знову)
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {}); } catch (_) {}
   // рушили в рейс — номери навколо фінішу й проміжної точки кладемо в запас (один раз на рейс, лише коли є мережа)
   let doneFor = '';
   bus.on('trip', g => {
     const tr = g && g.active && g.trip; if (!tr || !tr.b || !P.online()) return;
     const key = (tr.id || '') + '|' + tr.b.lat + ',' + tr.b.lon + '|' + (tr.v ? tr.v.lat + ',' + tr.v.lon : '');
     if (key === doneFor) return; doneFor = key;
+    tryAuto();                                                // рейс щойно прокладено — мережа є: якщо всієї України ще немає в телефоні, саме час
     (async () => {
       let n = await prefetch(tr.b.lat, tr.b.lon, 1);
       if (tr.v) n += await prefetch(tr.v.lat, tr.v.lon, 0);
