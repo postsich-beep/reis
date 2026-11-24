@@ -106,7 +106,9 @@ function diag() {
   const st = cal ? cal.st : null; if (!st) return;
   const now = Date.now(); if (now - diagT < 300) return; diagT = now;
   const svc = t(st.nat ? 'cbDgSvcYes' : 'cbDgSvcNo'), ax = gyroAxes() !== !!st.swap ? ' · ' + t('cbDgAxes') : '';
-  set('cbDiag', st.slow ? t('cbDgSlow') : st.n === 0 ? t('cbDgNone', svc) : t('cbDg', st.hz || '…', Math.round(st.rate), svc) + ax);
+  const low = !st.slow && st.hz > 0 && st.hz < 20;                 // екран віддає заміри надто рідко (телефон зайнятий) — кут рахується грубо, кроки можуть іти довше
+  set('cbDiag', st.slow ? t('cbDgSlow') : st.n === 0 ? t('cbDgNone', svc) : t('cbDg', (st.hz || '…') + (low ? ' — ' + t('cbDgLow') : ''), Math.round(st.rate), svc) + ax);
+  const de = $('cbDiag'); if (de) de.classList.toggle('warn', low);
 }
 function noSensors() {
   view = 'nosens'; $('calib').dataset.step = 0;

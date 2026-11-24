@@ -35,6 +35,10 @@ function layoutVars() {
   const r = document.documentElement.style;
   r.setProperty('--th', Math.round($('top').getBoundingClientRect().height) + 'px');
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
+  // (1.1.23) рядок над кнопками прозорий: ліворуч у ньому плашка часу прибуття, а праворуч вільно (якщо немає кнопок «без GPS» і
+  // плашок на всю ширину над ним) — туди опускаються «Моє місце» й ⓘ: карті більше місця
+  const tb = $('tripbar'), th = tb.getBoundingClientRect().height;
+  r.setProperty('--bf', (th > 0 && $('nudge').hidden && $('updBar').hidden && $('bAcceptGps').hidden ? Math.round(th) : 0) + 'px');
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:

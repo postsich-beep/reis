@@ -67,6 +67,7 @@ export const CAL = {
   BIAS_BAD: 1.0,         // °/с — дрейф, з яким гіроскопу довіряти не варто
   RIGID_RMS: 0.25,       // °/с — розкид кутової швидкості, нижче якого телефон «закріплено» (тримач, стіл), а не в руці
   AX_TURN: 50, AX_BAD: 35, AX_OK: 18,   // самоперевірка осей гіроскопа: після повороту на AX_TURN° «угору» за гіроскопом має збігатися з акселерометром (до AX_OK°); розбіжність понад AX_BAD° при тому, що запасний порядок осей збігається, — осі переставлено
+  LEVEL_RATE: 45, LEVEL_S: 0.4,          // вирівнювання нахилу за акселерометром: лише коли телефон стоїть (обертається повільніше, °/с), зі сталою часу (с)
   LEAN_MAX: 55,          // ° — екран нахилено від вертикалі більше — це вже «лежить»: напрямок екрана в плані не визначити
   GAP_S: 1.0,            // довша пауза в замірах (програму згорнули?) — кут загублено, починаємо знову; коротші (екран «заїкнувся») — перекриваємо
   GAP_SLOW_S: 2.6,       // те саме, коли заміри йдуть раз на секунду (екран датчиків не віддає — рахуємо лише за службою навігації)
@@ -125,7 +126,7 @@ export function newCal() {
   };
   let lastT = null, tFirst = null, gl = null;
   let b = [0, 0, 0], u0 = [0, 1, 0], p0 = [0, 0, 1], q = [1, 0, 0, 0], pw = null, hold = [], tSlow = null, aSlow = 0;
-  let qA = [1, 0, 0, 0], pwA = null, perm = false;                  // самоперевірка осей: той самий поворот, якби осі гіроскопа йшли в запасному порядку
+  let qR = [1, 0, 0, 0], qA = [1, 0, 0, 0], pwA = null, perm = false;   // самоперевірка осей: той самий поворот без вирівнювання (qR) і якби осі гіроскопа йшли в запасному порядку (qA)
   let buf = [], th = [0, 0, 0], pw1 = null;                         // крок 1: останні заміри й накопичений (малий) поворот телефона за трьома осями
   let yawW = 0, loss = 0, nat = [], natBias = 0, capN = { '-1': null, '1': null };          // кут «навколо вертикалі» з замірів екрана; проковтнуте в заїканнях; заміри служби
   const natAlive = t => nat.length > 0 && t - nat[nat.length - 1].t < CAL.NAT_ALIVE_S;
@@ -176,7 +177,7 @@ export function newCal() {
         st.bias = st.rigid ? -dot(m, u0) : 0; st.biasAll = st.rigid ? bm : 0; st.pose = s.slow ? null : poseOf(u0);          // за рідкими замірами служби положення телефона невідоме
         if (st.rigid && bm > CAL.BIAS_BAD) { st.step = 4; st.prog = 1; st.result = judge({ left: 90, right: 90, bias: bm, pose: st.pose, hz: st.hz }); return st; }   // закріплений телефон, а гіроскоп «пливе»
         const d = u0[2]; p0 = unit([-d * u0[0], -d * u0[1], 1 - d * u0[2]]);          // перпендикуляр до екрана — його слід у плані
-        q = [1, 0, 0, 0]; pw = null; qA = [1, 0, 0, 0]; pwA = null; yawW = 0; loss = 0; capN = { '-1': null, '1': null }; st.step = 2; st.prog = 0; st.angle = 0; st.want = -1; hold = []; tSlow = null; st.hint = '';
+        q = [1, 0, 0, 0]; pw = null; qR = [1, 0, 0, 0]; qA = [1, 0, 0, 0]; pwA = null; yawW = 0; loss = 0; capN = { '-1': null, '1': null }; st.step = 2; st.prog = 0; st.angle = 0; st.want = -1; hold = []; tSlow = null; st.hint = '';
       }
       return st;
     }
@@ -186,14 +187,21 @@ export function newCal() {
     // Рідкі заміри (slow) — це вже середня швидкість за секунду, тож їх беремо як є.
     const mid = pw && !s.slow ? avg(pw, wb) : wb; pw = wb;
     q = qstep(q, mid, dt);
+    // Вирівнювання за акселерометром. Коли телефон стоїть (між поворотами, у затримці), акселерометр точно знає, де «вгору».
+    // Якщо за гіроскопом вийшло інакше — нахил «наплив» (заміри губились, рука тремтіла) — потроху повертаємо його на місце.
+    // Напрямок екрана в плані це не чіпає (його акселерометр не бачить), зате нахил не накопичує похибку й не псує кут.
+    if (!s.slow && st.rate < CAL.LEVEL_RATE) {
+      const up = unit(gl), v = qrot([q[0], -q[1], -q[2], -q[3]], u0), ax = cross(up, v), sn = Math.hypot(ax[0], ax[1], ax[2]);
+      if (sn > 1e-4) { const e = Math.asin(Math.min(1, sn)) * R2D * Math.min(1, dt / CAL.LEVEL_S); q = qstep(q, [ax[0] / sn * e, ax[1] / sn * e, ax[2] / sn * e], 1); }
+    }
     // Самоперевірка осей. Гіроскоп каже, як повернувся телефон, — отже, й куди тепер має показувати «вгору»; акселерометр показує
     // «вгору» напряму. Мають збігатися. Якщо після чималого повороту розходяться, а з осями в запасному порядку — збігаються,
     // то на цьому телефоні осі гіроскопа переставлено: далі рахуємо з переставленими (і екран це запам'ятає).
     if (!perm && !s.slow) {
-      const wa = [wb[1], wb[2], wb[0]], midA = pwA ? avg(pwA, wa) : wa; pwA = wa; qA = qstep(qA, midA, dt);
-      if (2 * Math.acos(Math.min(1, Math.abs(q[0]))) * R2D > CAL.AX_TURN) {
+      const wa = [wb[1], wb[2], wb[0]], midA = pwA ? avg(pwA, wa) : wa; pwA = wa; qR = qstep(qR, mid, dt); qA = qstep(qA, midA, dt);
+      if (2 * Math.acos(Math.min(1, Math.abs(qR[0]))) * R2D > CAL.AX_TURN) {
         const up = unit(gl), off = k => Math.acos(Math.max(-1, Math.min(1, dot(qrot([k[0], -k[1], -k[2], -k[3]], u0), up)))) * R2D;
-        if (off(q) > CAL.AX_BAD && off(qA) < CAL.AX_OK) { perm = true; st.swap = true; q = qA; pw = wa; b = [b[1], b[2], b[0]]; }
+        if (off(qR) > CAL.AX_BAD && off(qA) < CAL.AX_OK) { perm = true; st.swap = true; q = qA; pw = wa; b = [b[1], b[2], b[0]]; }
       }
     }
     yawW -= dot(mid, unit(gl)) * dt;                          // те саме, що рахує служба: поворот навколо вертикалі (за годинниковою — плюс)
