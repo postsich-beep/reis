@@ -5,7 +5,7 @@
 Тут з усіх об'єктів OSM із тегом addr:housenumber робимо власні маленькі файли, які застосунок кладе в телефон.
 
 Вхід — GeoJSON-рядки від osmium (робочий процес «Номери будинків»):
-  osmium tags-filter ukraine.osm.pbf nw/addr:housenumber -o addr.osm.pbf
+  osmium tags-filter ukraine.osm.pbf nwr/addr:housenumber -o addr.osm.pbf
   osmium export addr.osm.pbf -f geojsonseq -x print_record_separator=false -o addr.geojsonseq
   python3 tools/build_addr.py addr.geojsonseq out_dir [YYYYMMDD]
 

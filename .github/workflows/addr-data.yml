@@ -58,7 +58,8 @@ jobs:
 
       - name: Об'єкти з номером будинку
         run: |
-          osmium tags-filter ukraine.osm.pbf nw/addr:housenumber -o addr.osm.pbf --overwrite
+          # nwr: і точки, і контури будинків, і будинки-«мультиполігони» (великі багатоповерхівки з двором часто саме такі)
+          osmium tags-filter ukraine.osm.pbf nwr/addr:housenumber -o addr.osm.pbf --overwrite
           rm -f ukraine.osm.pbf
           osmium export addr.osm.pbf -f geojsonseq -x print_record_separator=false -o addr.geojsonseq --overwrite
           ls -la addr.osm.pbf addr.geojsonseq
