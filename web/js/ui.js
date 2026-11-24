@@ -469,11 +469,16 @@ function savedHtml() {
 }
 // Поле точки рейсу: значок (старт / через / фініш), текст — або кнопка «на карті»: поставити точку пальцем
 function fieldHtml(k, ph) {
-  const v = plan[k];
+  const v = k === 'a' && startIsMe() ? null : plan[k];
+  // Старт: поле + два явні способи під ним — «З мого місця» (за замовчуванням) або «Вказати на карті».
+  // Через і фініш: текст або кнопка «на карті» в полі.
   return `<div class="field"><div class="tag ${k}" title="${t(PT_NAME[k])}">${PT_SVG[k]}</div><input id="in_${k}" data-f="${k}" placeholder="${esc(ph)}" value="${esc(v ? v.label : '')}" autocomplete="off" enterkeyhint="search">
-    <button class="onmap" data-onmap="${k}" aria-label="${t('ptOnMap')}: ${t(PT_NAME[k])}">${ICON.pin}</button>
-    ${k === 'a' ? `<button data-here="1" aria-label="${t('myPlace')}">${ICON.here}</button>` : `<button data-clear="${k}" aria-label="${t('clear')}">${ICON.x}</button>`}</div><div class="sugg" id="sg_${k}" hidden></div>`;
+    ${k === 'a' ? '' : `<button class="onmap" data-onmap="${k}" aria-label="${t('ptOnMap')}: ${t(PT_NAME[k])}">${ICON.pin}</button>`}
+    <button data-clear="${k}" aria-label="${t('clear')}">${ICON.x}</button></div><div class="sugg" id="sg_${k}" hidden></div>
+    ${k === 'a' ? `<div class="pt-two" id="startTwo">${startTwoHtml()}</div>` : ''}`;
 }
+const startTwoHtml = () => `<button class="${startIsMe() ? 'on' : ''}" data-here="1">${ICON.here}<span>${t('ptFromMeBtn')}</span></button><button class="${startIsMe() ? '' : 'on'}" data-onmap="a">${ICON.pin}<span>${t('ptOnMapBtn')}</span></button>`;
+const startTwoSync = () => { const e = $('startTwo'); if (e) e.innerHTML = startTwoHtml(); };
 function planHtml() {
   // Лише три точки: старт — звідки, через (проміжна, необов'язково), фініш — куди. Нічого зайвого (душі тощо — на карті й у дорозі).
   return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec">${t('newTrip')}</div>
@@ -629,74 +634,87 @@ function aimClick(e) {
   aimPlace(mapM.screenToGeo(aim.x - mc.left, aim.y - mc.top));
 }
 
-/* ---------- точки рейсу просто на карті (1.1.12) ----------
-   Поставили старт — одразу можна ставити фініш (і «через»), не заходячи в «Рейс»: видно пряму між точками й відстань.
-   Точку ставить дотик до карти або кнопка «Сюди» (під приціл). «Маршрут» — будує рейс за цими точками. */
+/* ---------- точки рейсу на карті (1.1.14: без прицілу) ----------
+   Правила, зведені з двох побажань водія:
+   • СТАРТ — «моє місце», доки не вказано інше. У старту завжди два способи: «З мого місця» або «Вказати на карті».
+   • ФІНІШ — адресою або пальцем на карті. «Через» — за бажанням.
+   • На карті точку ставить палець: затримали — картка «Їхати сюди · Старт тут · Через». Прицілу немає.
+     «Їхати сюди» — фініш тут, а старт — місце телефона. Якщо старт уже вказано вручну, кнопка зветься «Фініш тут» (старт не чіпаємо).
+   • Плашка з трьома точками лишається на карті: відстань по прямій і «Маршрут».
+   • Пересунути точку: торкнутись її на плашці (вона «чекає дотику»), потім торкнутись карти. Поки жодна точка
+     не чекає, дотики до карти нічого не пересувають — випадково рейс не зіпсуєш. */
 const PT_NAME = { a: 'ptStart', v: 'ptVia', b: 'ptFinish' };
-let pm = null;
-const ptBtnsHtml = () => ['a', 'v', 'b'].map(k => `<button class="btn pt-b" data-k="${k}">${ptTag(k, 'rp-t')}${t(PT_NAME[k])}</button>`).join('');
-const ptsMe = () => !plan.a && pos.lat != null ? { lat: pos.lat, lon: pos.lon } : null;
+let pm = null;                                   // { arm: 'a'|'v'|'b'|null — яка точка чекає дотику до карти, form: відкрили з «Рейсу» }
+const startIsMe = () => !plan.a || !!plan.a.me;  // старт — моє місце (живий GPS), а не вказана точка
+// «Їхати сюди» — завжди від мого місця. Якщо старт уже вказано на карті чи адресою, кнопка чесно зветься «Фініш тут»: старт лишається.
+const ptBtnsHtml = () => `<button class="btn pri pt-b pt-go" data-k="b">${ptTag('b', 'rp-t')}${t(startIsMe() ? 'ptGoHere' : 'ptFinishHere')}</button>
+  <button class="btn pt-b" data-k="a">${ptTag('a', 'rp-t')}${t('ptStartHere')}</button><button class="btn pt-b" data-k="v">${ptTag('v', 'rp-t')}${t('ptVia')}</button>`;
+const ptsMe = () => startIsMe() && pos.lat != null ? { lat: pos.lat, lon: pos.lon } : null;
 function ptsDist() {
-  const pts = [plan.a || ptsMe(), plan.v, plan.b].filter(Boolean); if (pts.length < 2) return null;
+  const pts = [startIsMe() ? ptsMe() : plan.a, plan.v, plan.b].filter(Boolean); if (pts.length < 2) return null;
   const legs = []; for (let i = 1; i < pts.length; i++) legs.push(hav(pts[i - 1], pts[i]));
-  return { legs, total: legs.reduce((a, b) => a + b, 0), fromMe: !plan.a };
+  return { legs, total: legs.reduce((a, b) => a + b, 0), fromMe: startIsMe() };
 }
-function ptsNextKey() { return !plan.a && pos.lat == null ? 'a' : !plan.b ? 'b' : !plan.a ? 'a' : null; }
-function ptsStart(k) {
+function ptsOpen(arm, form) {
   if (g.active) return;
   closePanel(); $('pick').hidden = true; showPick(null); quickOpen(false); if (aim) aimEnd();
   if (plan.trip) { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); }
-  pm = { k: k || ptsNextKey() || 'b' };
-  $('pts').hidden = false; ptsRender(); ptsCross();
-  mapM.setTapHook(p => ptsPlace(p)); setFollow(false);
+  pm = { arm: arm || null, form: !!form || !!(pm && pm.form) };
+  $('pts').hidden = false; document.body.classList.add('pts-on'); ptsRender(); setFollow(false);
 }
 function ptsRender() {
   if (!pm) return;
-  const box = $('pts'), d = ptsDist(), me = ptsMe();
-  const chip = k => { const p = plan[k], txt = p ? p.label : k === 'a' && me ? t('myPlace') : t(k === 'v' ? 'ptViaNo' : 'ptNotSet');
-    return `<button class="pt-chip${pm.k === k ? ' on' : ''}${p ? ' set' : ''}" data-pt="${k}" aria-label="${t(PT_NAME[k])}">${ptTag(k, 'rp-t')}<span><small>${t(PT_NAME[k])}</small><b>${esc(txt)}</b></span></button>`; };
-  const sum = d ? (d.legs.length > 1 ? d.legs.map(x => fmtDist(x)).join(' + ') + ' = ' : '') + `<b>${fmtDist(d.total)}</b> ${t('ptStraight')}` + (d.fromMe ? ' · ' + t('ptFromMe') : '') : t('ptHint', t(PT_NAME[pm.k]).toLowerCase());
-  const any = plan.a || plan.v || plan.b;
-  box.innerHTML = `<div class="aim-cross pt-cross ${pm.k}" aria-hidden="true"></div><div class="aim-bar pt-bar">
+  const box = $('pts'), d = ptsDist(), me = ptsMe(), arm = pm.arm, isMe = startIsMe();
+  const chip = k => { const p = k === 'a' && isMe ? null : plan[k], txt = p ? p.label : k === 'a' ? t(me ? 'myPlace' : 'ptNoGps') : t(k === 'v' ? 'ptViaNo' : 'ptNotSet');
+    return `<button class="pt-chip${arm === k ? ' on' : ''}${p || (k === 'a' && me) ? ' set' : ''}" data-pt="${k}" aria-label="${t(PT_NAME[k])}" aria-pressed="${arm === k}">${ptTag(k, 'rp-t')}<span><small>${t(PT_NAME[k])}</small><b>${esc(txt)}</b></span></button>`; };
+  const sum = d ? (d.legs.length > 1 ? d.legs.map(x => fmtDist(x)).join(' + ') + ' = ' : '') + `<b>${fmtDist(d.total)}</b> ${t('ptStraight')}` + (d.fromMe ? ' · ' + t('ptFromMe') : '') : t('ptIdleHint');
+  const any = !isMe || plan.v || plan.b;
+  // що зробить наступний дотик до карти — і (для старту) другий спосіб: «з мого місця»
+  const armLine = arm ? `<div class="pt-arm ${arm}" id="ptArm">${ICON.pin}<span>${t('ptArmHint', t(PT_NAME[arm]).toLowerCase())}</span></div>` : '';
+  // та сама пара, що й у формі «Рейс»: «З мого місця» (зелена, коли вибрано) — або дотик до карти
+  const ctx = arm === 'a' ? `<button class="btn pt-ctx${isMe ? ' on' : ''}" data-pt="me" aria-pressed="${isMe}">${ICON.here}<span>${t('ptFromMeBtn')}</span></button>`
+    : arm === 'v' && plan.v ? `<button class="btn pt-ctx" data-pt="del">${ICON.x}<span>${t('ptViaDel')}</span></button>` : '';
+  box.innerHTML = `<div class="aim-bar pt-bar">
     <div class="pt-chips">${chip('a')}${chip('v')}${chip('b')}</div>
     <div class="pt-mid"><div class="pt-sum" id="ptSum">${sum}</div>
       ${any ? `<button class="pt-ic" data-pt="reset" aria-label="${t('ptReset')}">${ICON.trash}</button>` : ''}<button class="pt-ic" data-pt="x" aria-label="${t('close')}">${ICON.x}</button></div>
-    <div class="row"><button class="btn pri" data-pt="put">${ICON.center}<span>${t('ptPut', t(PT_NAME[pm.k]).toLowerCase())}</span></button>
-      <button class="btn dark" data-pt="route" ${plan.b ? '' : 'disabled'}>${ICON.route}${t('ptRoute')}</button></div></div>`;
-  mapM.planPoints({ a: plan.a, v: plan.v, b: plan.b, me });
+    ${armLine}
+    <div class="row">${ctx}<button class="btn dark" data-pt="route" ${plan.b ? '' : 'disabled'}>${ICON.route}${t('ptRoute')}</button></div></div>`;
+  mapM.planPoints({ a: isMe ? null : plan.a, v: plan.v, b: plan.b, me });
+  mapM.setTapHook(arm ? p => ptsPlace(p) : null);            // дотик до карти ставить точку лише тоді, коли вона цього чекає
+  requestAnimationFrame(layoutVars);
 }
-function ptsCross() {
-  if (!pm) return;
-  const c = $('pts').querySelector('.aim-cross'), bar = $('pts').querySelector('.aim-bar'), mc = document.getElementById('map').getBoundingClientRect(), bt = $('bottom');
-  const land = sideLayout(), br = bar.getBoundingClientRect();
-  const top = land ? mc.top : br.bottom, bot = bt && !bt.hidden && !land ? bt.getBoundingClientRect().top : mc.bottom, right = land ? br.left : mc.right;
-  pm.x = Math.round((mc.left + right) / 2); pm.y = Math.round((top + bot) / 2);
-  c.style.left = pm.x + 'px'; c.style.top = pm.y + 'px';
+function ptsPut(k, p) {
+  const pt = { lat: p.lat, lon: p.lon, label: p.label || p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
+  plan[k] = pt; plan.trip = null; plan.routes = [];
+  if (!p.label) reverse(p.lat, p.lon).then(r => { if (r && plan[k] === pt) { pt.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || pt.label; const i = $('in_' + k); if (i) i.value = pt.label; ptsRender(); } }).catch(() => {});
+  return pt;
 }
+// після старту логічно одразу вказати фініш; без GPS після фінішу — старт. В інших випадках ніщо не чекає дотику.
+const ptsNextArm = k => k === 'a' && !plan.b ? 'b' : k === 'b' && startIsMe() && pos.lat == null ? 'a' : null;
 function ptsPlace(p) {
-  if (!pm || !p) return;
-  const k = pm.k, pt = { lat: p.lat, lon: p.lon, label: p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
-  plan[k] = pt; P.vibrate(40);
-  reverse(p.lat, p.lon).then(r => { if (r && plan[k] === pt) { pt.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || pt.label; const i = $('in_' + k); if (i) i.value = pt.label; ptsRender(); ptsCross(); } }).catch(() => {});
-  pm.k = ptsNextKey() || k;                      // після старту — фініш; усе поставлено — лишаємось на останній (можна пересунути)
-  ptsRender(); ptsCross();
+  if (!pm || !pm.arm || !p) return;
+  const k = pm.arm; ptsPut(k, p); P.vibrate(40);
+  pm.arm = ptsNextArm(k); ptsRender();
 }
-/** Точку вибрано з картки на карті (піт-стоп, позначка, довге натискання): ставимо й лишаємось на карті — можна одразу ставити наступну. */
-function ptsSet(k, p) {
-  plan[k] = p; plan.trip = null; plan.routes = [];
-  ptsStart(ptsNextKey() || k);
+/** Точку вибрано з картки на карті (довге натискання, піт-стоп, позначка): ставимо й лишаємось на карті з плашкою точок. */
+function ptsSet(k, p) { ptsPut(k, p); ptsOpen(ptsNextArm(k)); }
+function ptsEnd(back) {
+  if (!pm) return;
+  const form = pm.form; pm = null; $('pts').hidden = true; $('pts').innerHTML = ''; document.body.classList.remove('pts-on'); mapM.setTapHook(null); mapM.planPoints(null);
+  if (back && form) openPanel('trip');                       // прийшли з «Рейсу» — туди й повертаємось
 }
-function ptsEnd() { if (!pm) return; pm = null; $('pts').hidden = true; $('pts').innerHTML = ''; mapM.setTapHook(null); mapM.planPoints(null); }
 function ptsClick(e) {
   const b = e.target.closest('[data-pt]'); if (!b || !pm) return;
   const k = b.dataset.pt;
-  if (k === 'x') { ptsEnd(); return; }
-  if (k === 'a' || k === 'v' || k === 'b') { pm.k = k; ptsRender(); ptsCross(); if (plan[k]) flyTo(plan[k], Math.max(13, mapM.map ? mapM.map.getZoom() : 13)); return; }
-  if (k === 'reset') { plan.a = plan.v = plan.b = null; pm.k = ptsNextKey() || 'b'; ptsRender(); ptsCross(); return; }
-  if (k === 'put') { const mc = document.getElementById('map').getBoundingClientRect(); ptsPlace(mapM.screenToGeo(pm.x - mc.left, pm.y - mc.top)); return; }
-  if (k === 'route') { if (!plan.b) return; ptsEnd(); openPanel('trip'); doBuild(); }
+  if (k === 'x') { ptsEnd(true); return; }
+  if (k === 'a' || k === 'v' || k === 'b') { pm.arm = pm.arm === k ? null : k; ptsRender(); return; }
+  if (k === 'me') { plan.a = null; pm.arm = ptsNextArm('a'); ptsRender(); return; }
+  if (k === 'del') { plan.v = null; pm.arm = null; ptsRender(); return; }
+  if (k === 'reset') { plan.a = plan.v = plan.b = null; pm.arm = null; ptsRender(); return; }
+  if (k === 'route') { if (!plan.b) return; ptsEnd(false); openPanel('trip'); doBuild(); }
 }
-export const ptsState = () => pm ? { k: pm.k, x: pm.x, y: pm.y, dist: ptsDist() } : null;
+export const ptsState = () => pm ? { arm: pm.arm, form: pm.form, me: startIsMe(), dist: ptsDist() } : null;
 // Проїжджаємо чужу позначку — «Поліція ще тут?» над самою позначкою
 let askRep = null;
 function onRepAsk(r) {
@@ -814,13 +832,13 @@ async function doBuild() {
   plan.err = '';
   // текст у полі без вибраної підказки — беремо перший результат пошуку
   for (const k of ['a', 'v', 'b']) {
-    const inp = $('in_' + k), txt = inp ? inp.value.trim() : '';
+    const inp = $('in_' + k), txt = inp ? inp.value.trim() : k === 'a' && startIsMe() ? '' : plan[k] ? plan[k].label : '';
     if (txt && (!plan[k] || plan[k].label !== txt)) {
       const r = await findPlaces(txt);
       if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); refresh('trip'); return; }
     } else if (!txt) plan[k] = null;
   }
-  if (!plan.a && pos.lat != null) plan.a = { lat: pos.lat, lon: pos.lon, label: t('myPlace') };
+  if (startIsMe()) plan.a = pos.lat != null ? { lat: pos.lat, lon: pos.lon, label: t('myPlace'), me: true } : null;   // «моє місце» — щоразу свіже
   if (!plan.a || !plan.b) { plan.err = t('needAB'); refresh('trip'); return; }
   plan.busy = true; plan.trip = null; plan.off = null; refresh('trip');
   try {
@@ -881,13 +899,13 @@ function tripClicks(e) {
   else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
   else if (d.del) { deleteTrip(d.del); refresh('trip'); }
   else if (d.here) {
-    if (pos.lat == null) { toast(t('gpsWait')); return; }
-    plan.a = { lat: pos.lat, lon: pos.lon, label: t('myPlace') }; $('in_a').value = plan.a.label;
-    reverse(pos.lat, pos.lon).then(r => { if (r && plan.a && plan.a.label === t('myPlace')) { plan.a.label = [r.name || r.city, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || plan.a.label; const i = $('in_a'); if (i) i.value = plan.a.label; } }).catch(() => {});
+    // «З мого місця»: старт — там, де телефон у мить побудови рейсу (не знімок координат, зроблений зараз)
+    plan.a = null; const i = $('in_a'); if (i) i.value = ''; showSugg('a', []); startTwoSync();
+    if (pos.lat == null) toast(t('ptNoGpsHint'), 'yellow', 6000);
   }
-  else if (d.onmap) ptsStart(d.onmap);
-  else if (d.clear) { plan[d.clear] = null; const i = $('in_' + d.clear); if (i) { i.value = ''; i.focus(); } showSugg(d.clear, []); }
-  else if (d.sg) { clearTimeout(geoTimer); const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); places.remember(s); } }
+  else if (d.onmap) ptsOpen(d.onmap, true);
+  else if (d.clear) { plan[d.clear] = null; const i = $('in_' + d.clear); if (i) { i.value = ''; i.focus(); } showSugg(d.clear, []); if (d.clear === 'a') startTwoSync(); }
+  else if (d.sg) { clearTimeout(geoTimer); const [k, i] = d.sg.split(':'); const s = plan.sugg[+i]; if (s) { plan[k] = s; $('in_' + k).value = s.label; showSugg(k, []); showPick(s); places.remember(s); if (k === 'a') startTwoSync(); } }
 }
 function tripInput(e) {
   const k = e.target.dataset && e.target.dataset.f; if (!k) return;
@@ -1074,9 +1092,7 @@ function onMapPick(p) {
     const k = b.dataset.k; if (k === 'x') { showPick(null); return; }
     if (k === 'shower') { showPick(null); showers.toggleShower(p, ''); toast(t('showerMarked'), 'green', 4000); return; }
     if (k === 'here') { showPick(null); setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return; }
-    const pt = { lat: p.lat, lon: p.lon, label: p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
-    showPick(null); ptsSet(k, pt);
-    reverse(p.lat, p.lon).then(r => { if (r && plan[k] === pt) { pt.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || pt.label; const i = $('in_' + k); if (i) i.value = pt.label; ptsRender(); ptsCross(); } }).catch(() => {});
+    showPick(null); ptsSet(k, { lat: p.lat, lon: p.lon });
   };
 }
 
@@ -1290,7 +1306,7 @@ export function initUI() {
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
-  bus.on('mapPick', p => { if (pm) { ptsPlace(p); return; } if (!aim) onMapPick(p); });
+  bus.on('mapPick', p => { if (pm && pm.arm) { ptsPlace(p); return; } if (!aim) onMapPick(p); });
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
   bus.on('panel', name => { if (name) { if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
@@ -1370,7 +1386,7 @@ export function initUI() {
     if (!$('quick').hidden) { quickOpen(false); return true; }
     if (!$('repSheet').hidden) { repOpen(false); return true; }
     if (aim) { aimEnd(); return true; }
-    if (pm) { ptsEnd(); return true; }
+    if (pm) { ptsEnd(true); return true; }
     if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
@@ -1405,7 +1421,40 @@ export function initUI() {
   if (off.bad) setTimeout(() => offBadSay(off.bad), 1500);      // файл перевіряється ще до запуску інтерфейсу — кажемо про результат тепер
   $('aim').onclick = aimClick;
   $('pts').onclick = ptsClick;
-  window.addEventListener('resize', () => { if (aim) aimPlaceCross(); if (pm) ptsCross(); });
+  /* ---------- клавіатура й нижня плашка (1.1.14) ----------
+     Коли відкрита екранна клавіатура, вікно стає нижчим, і нижня плашка (час, вкладки) опинялась одразу над клавіатурою —
+     поверх підказок адрес. Поки водій набирає текст, нижню плашку ховаємо, а панель розтягуємо на всю висоту над клавіатурою. */
+  let kbW = 0, kbMaxH = 0, kbT = 0, kbEl = null;
+  const kbWant = () => {
+    const w = window.innerWidth, h = window.innerHeight;
+    if (kbW !== w) { kbW = w; kbMaxH = h; }                 // повернули екран — нова «повна» висота
+    kbMaxH = Math.max(kbMaxH, h);
+    const el = document.activeElement, typing = !!el && ((el.tagName === 'INPUT' && !/^(checkbox|radio|range|button|file|color)$/.test(el.type)) || el.tagName === 'TEXTAREA');
+    return typing && h < kbMaxH - 120 ? el : null;
+  };
+  const kbApply = el => {
+    const on = !!el;
+    if (document.body.classList.contains('kb') !== on) { document.body.classList.toggle('kb', on); layoutVars(); }
+    // поле, в яке набирають, — угорі панелі: підказки під ним видно цілком, а не десь під клавіатурою
+    if (on && el !== kbEl) { const body = $('panelBody'), f = el.closest('.field') || el; if (body && body.contains(el)) body.scrollTop += f.getBoundingClientRect().top - body.getBoundingClientRect().top - 6; }
+    kbEl = on ? el : null;
+  };
+  // Вмикаємо одразу, вимикаємо із затримкою: дотик до підказки чи кнопки спершу знімає фокус із поля,
+  // і якби екран перебудувався в ту ж мить, кнопка «втекла» б з-під пальця й натискання пропало б.
+  const kbSync = () => { clearTimeout(kbT); const el = kbWant(); if (el) kbApply(el); else kbT = setTimeout(() => kbApply(kbWant()), 300); };
+  document.addEventListener('focusin', kbSync);
+  document.addEventListener('focusout', kbSync);
+  window.addEventListener('resize', kbSync);
+  if (window.visualViewport) window.visualViewport.addEventListener('resize', kbSync);
+  kbSync();
+  // поки відкрита панель чи плашка точок, нижня плашка непрозора: під нею не просвічують підписи карти
+  bus.on('panel', name => {
+    document.body.classList.toggle('panel-open', !!name);
+    // складаємо рейс (форма «Рейс», рейс ще не їде): рядок із годинником у нижній плашці ховаємо — формі більше місця, кнопка «Побудувати» не ховається під плашку
+    document.body.classList.toggle('planning', name === 'trip' && !g.active && !g.arrived);
+    requestAnimationFrame(layoutVars);
+  });
+  window.addEventListener('resize', () => { if (aim) aimPlaceCross(); });
   // ±100: дотик — 100 м; утримання — повтор із більшим кроком (500 м, далі 1 км), як у BlindDriver
   for (const [id, sign] of [['bFwd100', 1], ['bBack100', -1]]) {
     const b = $(id); let timer = null, t0 = 0, held = false;
