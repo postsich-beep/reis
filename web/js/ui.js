@@ -43,10 +43,20 @@ function layoutVars() {
 const TILT_H = 176, TILT_MIN = 112, TILT_THUMB = 36;
 function tiltFit() {
   const el = $('tilt'); if (!el) return;
-  const z = $('zoom').getBoundingClientRect(), x1 = z.right, x0 = x1 - 50;
-  let top = Math.max(8, $('rail').getBoundingClientRect().top);
-  for (const id of ['top', 'rail']) { const o = $(id), r = o.getBoundingClientRect(); if (r.width && getComputedStyle(o).visibility !== 'hidden' && r.right > x0 + 1 && r.left < x1 - 1) top = Math.max(top, r.bottom + 10); }
-  const room = Math.floor(z.bottom - 50 - 9 - top), h = Math.min(TILT_H, room), show = h >= TILT_MIN;
+  const rail = $('rail').getBoundingClientRect(), side = sideLayout();
+  let top, room;
+  if (side) {
+    // телефон набік: «Моє місце» стоїть посеред екрана (біля краю нижньої плашки), і повзунок над ним закривав би стрілку машини —
+    // тому тут повзунок окремо: біля правого краю екрана, між кнопками справа і нижньою плашкою
+    top = Math.round(rail.bottom + 10); room = Math.floor($('bottom').getBoundingClientRect().top - 10 - top);
+  } else {
+    const z = $('zoom').getBoundingClientRect(), x1 = z.right, x0 = x1 - 50;
+    top = Math.max(8, rail.top);
+    for (const id of ['top', 'rail']) { const o = $(id), r = o.getBoundingClientRect(); if (r.width && getComputedStyle(o).visibility !== 'hidden' && r.right > x0 + 1 && r.left < x1 - 1) top = Math.max(top, r.bottom + 10); }
+    room = Math.floor(z.bottom - 50 - 9 - top);
+  }
+  const h = Math.min(TILT_H, room), show = h >= TILT_MIN;
+  el.classList.toggle('side', side); el.style.top = side ? top + 'px' : '';
   if (el.hidden === show) el.hidden = !show;
   if (show) el.style.height = h + 'px';
 }
@@ -131,7 +141,8 @@ let quickTimer = null;
 const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
 /* ---------- тип карти: кнопка справа вгорі, як у Google Maps ----------
    1.1.19 — віконце з вибором і посиланнями в Google Maps; 1.1.20 (прохання Олексія) — ОДИН ДОТИК, як «2D / 3D»:
-   клац — супутник, ще клац — схема. Без віконець і без виходу з програми.
+   клац — супутник, ще клац — схема. Без віконець і без виходу з програми. Повідомлень про перемикання теж немає
+   (1.1.21): карта змінилась на очах — це й так видно.
    На кнопці — мініатюра ТІЄЇ карти, на яку перейдемо дотиком: на схемі — знімок, на супутнику — схема.
    Без інтернету супутника немає: дотик лише пояснює це (карта лишається завантаженою). */
 const MT_PIC = {
@@ -143,7 +154,6 @@ function mapTypeTap() {
   if (!$('quick').hidden) quickOpen(false);
   if (mtShown() === 'scheme' && !P.online()) { toast(t('mtSatOffline'), 'yellow', 5000); return; }   // супутник без інтернету — неможливо: пояснюємо, карту не чіпаємо
   S.mapType = mtShown() === 'sat' ? 'scheme' : 'sat';                                                   // settings → map.applySat
-  toast(t(S.mapType === 'sat' ? 'mtToSat' : 'mtToScheme'), '', 1500);
   railState();
 }
 function quickHtml() {
