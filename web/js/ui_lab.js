@@ -199,12 +199,12 @@ function settingsHtml() {
 // «Номери будинків без мережі»: що є на сервері, що вже в телефоні, кнопки «завантажити / зупинити / видалити»
 const addrMB = b => (b / 1e6).toFixed(b < 1e7 ? 1 : 0).replace('.', ','), addrNum = n => String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ' ');
 const addrDate = d => /^\d{8}$/.test(d || '') ? d.slice(6) + '.' + d.slice(4, 6) + '.' + d.slice(0, 4) : (d || '');
-let addrFillN = 0;
+let addrFillN = 0, addrDelSure = 0;                     // «Справді видалити?» тримається 6 с, навіть якщо картка тим часом перемалювалась (перебіг завантаження)
 async function addrPackFill() {
   if (!$('addrPack')) return;
   const my = ++addrFillN, i = await packInfo(); if (my !== addrFillN) return;
   const st = $('addrPackState'), bt = $('addrPackBtns'), pr = $('addrPackProg'); if (!st || !bt) return;
-  const del = `<button class="btn" data-act="addrDel">${t('addrPackDel')}</button>`;
+  const sure = Date.now() - addrDelSure < 6000, del = `<button class="btn" data-act="addrDel"${sure ? ' data-sure="1"' : ''}>${t(sure ? 'addrPackDelSure' : 'addrPackDel')}</button>`;
   let txt = '', btns = '', prog = '';
   if (i.busy) { txt = t('addrPackBusy', i.done, i.total); prog = `<div class="prog"><i style="width:${i.total ? Math.round(i.done / i.total * 100) : 0}%"></i></div>`; btns = `<button class="btn sm wide" data-act="addrStop">${t('addrPackStop')}</button>`; }
   else if (!i.index) { txt = t('addrPackNoData'); if (i.have) btns = del; }
@@ -267,7 +267,7 @@ definePanel('settings', {
       else if (a === 'offCancel') { P.offlineCancel(); refreshStatus(); }
       else if (a === 'addrGet') { autoSet(true); packDownloadAll().then(okAll => { if (okAll) toast(t('addrPackDone'), 'green', 6000); }); setTimeout(addrPackFill, 100); }   // дотик водія — це й дозвіл надалі оновлювати самій
       else if (a === 'addrStop') { packStop(); }
-      else if (a === 'addrDel') { if (b.dataset.sure) { autoSet(false); packDeleteAll().then(addrPackFill); } else { b.dataset.sure = '1'; b.textContent = t('addrPackDelSure'); } }   // видалив сам — сама більше не качає
+      else if (a === 'addrDel') { if (b.dataset.sure && Date.now() - addrDelSure < 6000) { addrDelSure = 0; autoSet(false); packDeleteAll().then(addrPackFill); } else { addrDelSure = Date.now(); b.dataset.sure = '1'; b.textContent = t('addrPackDelSure'); setTimeout(addrPackFill, 6100); } }   // видалив сам — сама більше не качає
       else if (a === 'offDel') { if (b.dataset.sure) { P.offlineDelete(); refreshStatus(); applyMapSource(); } else { b.dataset.sure = '1'; b.textContent = t('offDelSure'); } }
     };
     body.onchange = e => {
