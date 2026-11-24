@@ -59,7 +59,10 @@ export const ICON = {
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
   plus: I('<path d="M12 5v14M5 12h14"/>', 'stroke-width="2.6"'),
   // трикутник «позначити подію» в нижній панелі: помаранчевий із білим знаком оклику
-  warnTab: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#f59e0b" stroke="#f59e0b" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#fff" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#fff"/></svg>',
+  // «Мітки» (1.1.22): кашкет поліції лінією, без кольору — нижня стрічка не «кричить»; зеленим загоряється, коли на маршруті є позначки
+  repTab: I('<path d="M3.6 11.2c0-3.6 3.8-6.2 8.4-6.2s8.4 2.6 8.4 6.2l-1.7 2.8H5.3z"/><path d="M5.3 14h13.4l-1.1 3.4H6.4z"/><path d="M12 7.3l1.3.7v1.5c0 .9-.6 1.6-1.3 1.9-.7-.3-1.3-1-1.3-1.9V8z" fill="currentColor" stroke="none"/><path d="M6.4 17.4c1.5 1.4 3.5 2.1 5.6 2.1s4.1-.7 5.6-2.1"/>'),
+  // «Калібрування телефона»: телефон і дві стрілки-дуги — «поверни ліворуч-праворуч»
+  calTab: I('<rect x="8.5" y="4.5" width="7" height="13" rx="1.6"/><path d="M11 15.2h2"/><path d="M5.2 9.2A8.2 8.2 0 0 0 5.2 15"/><path d="M3.3 10.3 5.2 9l1.3 1.9"/><path d="M18.8 9.2a8.2 8.2 0 0 1 0 5.8"/><path d="M20.7 13.9 18.8 15.2l-1.3-1.9"/><path d="M8 21h8"/>'),
   warnTri: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3.2 22 20.2H2z" fill="#fff" stroke="#fff" stroke-width="1.6" stroke-linejoin="round"/><path d="M12 9.2v5.4" stroke="#e8890c" stroke-width="2.6" stroke-linecap="round"/><circle cx="12" cy="17.4" r="1.45" fill="#e8890c"/></svg>',
   cam: I('<rect x="3" y="8" width="13" height="9" rx="2"/><path d="m16 11 5-3v9l-5-3"/>')
 };

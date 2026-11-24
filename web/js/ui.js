@@ -25,7 +25,9 @@ import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, c
 import { t } from './i18n.js';
 import { PT_SVG, ptTag } from './pticons.js';
 import { labOpen, closeLab } from './lab.js';
-import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp } from './reports.js';
+import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp, repsAhead } from './reports.js';
+import { calibOpen } from './ui_calib.js';
+import { calFresh, calGet } from './calib.js';
 import { limitNow, overLimit } from './limits.js';
 
 /* =====================  ГОЛОВНИЙ ЕКРАН  ===================== */
@@ -94,11 +96,15 @@ function staticLabels() {
   $('camLbl').textContent = t('camera');
   $('manThenLbl').textContent = t('then');
   const tabs = document.querySelectorAll('#tabs button[data-panel]');
-  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces', gps: 'tabGps' };
-  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places, gps: ICON.gpsSig };
-  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : p === 'gps' ? `<span class="gc">${icons[p]}</span>` : icons[p]) + `<span${p === 'gps' ? ' id="tabGpsL"' : ''}>` + t(names[p]) + '</span>'; });
-  // 1.1.7: GPS — крайній ліворуч у нижній панелі, трикутник «Мітки» — крайній праворуч
-  $('tabRep').innerHTML = ICON.warnTab + '<span>' + t('tabRep') + '</span>'; $('tabRep').setAttribute('aria-label', t('repBtn'));
+  const names = { trip: 'tabTrip', feed: 'tabFeed', places: 'tabPlaces' };
+  const icons = { trip: ICON.route, feed: ICON.feed, places: ICON.places };
+  tabs.forEach(b => { const p = b.dataset.panel; b.innerHTML = (p === 'trip' ? `<span class="mc">${icons[p]}</span>` : icons[p]) + '<span>' + t(names[p]) + '</span>'; });
+  // 1.1.22: нижня стрічка спокійна, без кольорових плям. Крайня ліворуч — «Калібрування телефона» (зелена, коли відкалібровано);
+  // крайня праворуч — «Мітки» кашкетом поліції (зелена, коли на маршруті є позначки). Кружечок GPS переїхав до круга швидкості.
+  $('tabCal').innerHTML = `<span class="tc">${ICON.calTab}</span><span>${t('tabCal')}</span>`;
+  $('tabRep').innerHTML = `<span class="tc">${ICON.repTab}</span><span>${t('tabRep')}</span>`;
+  $('spdGps').innerHTML = ICON.gpsSig;
+  tabCalSync(); repTabSync();
   $('panelClose').innerHTML = ICON.x; $('panelBack').innerHTML = ICON.back;
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
@@ -283,11 +289,12 @@ function hud() {
   else if (pos.mode === 'gps') { const weak = pos.acc != null && pos.acc > 30; chip.className = 'chip' + (weak ? ' weak' : ''); $('gpsText').textContent = pos.acc != null ? '±' + accText(pos.acc) : 'GPS'; }
   else if (pos.mode === 'approx') { chip.className = 'chip weak'; $('gpsText').textContent = '≈ ±' + accText(pos.acc); }
   else { chip.className = 'chip none'; $('gpsText').textContent = t('gpsWait'); }
-  // кружечок GPS у нижній панелі (крайній ліворуч): є справжній GPS — зелений, немає — червоний; під ним — коротко, що з сигналом
-  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('tabGps');
+  // кружечок GPS біля круга швидкості, праворуч унизу (1.1.22; до того — у нижній стрічці): є справжній GPS — зелений, немає — червоний
+  const gOk = pos.mode === 'gps' && !off && !spoofNow, tg = $('spdGps');
   tg.classList.toggle('g-ok', gOk); tg.classList.toggle('g-bad', !gOk);
   const gShort = gOk ? (pos.acc != null ? '±' + accText(pos.acc) : 'GPS') : pos.mode === 'dr' ? 'GPS ✕' : off ? t('locOffChip') : t('tabNoGps');
-  { const l = $('tabGpsL'); if (l && l.textContent !== gShort) l.textContent = gShort; }
+  if (tg.dataset.s !== gShort) tg.dataset.s = gShort;
+  if (Date.now() - repTabT > 4000) repTabSync();
   let gLbl = gOk ? 'GPS' + (pos.acc != null ? ' ±' + accText(pos.acc) : '') : gShort;
   // GPS шукає вже хвилину, а геолокація ввімкнена — швидше за все, телефон у приміщенні
   if (pos.mode === 'gps' || pos.mode === 'dr' || pos.sim) searchSince = Date.now();
@@ -690,13 +697,34 @@ function repOpen(open) {
   const box = $('repSheet');
   if (open) {
     aimEnd();
-    box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>
+    // (1.1.22) значок «Мітки» горить зеленим — отже, є позначки попереду: показуємо їх тут же, найближчі перші; дотик — показати на карті
+    const near = repsAhead().slice(0, 4), trip = g.active && g.idx && pos.rd != null;
+    const nearHtml = near.length ? `<div class="rep-near"><div class="rep-sub">${t(trip ? 'repAheadTitle' : 'repNearTitle')}</div>${near.map(x => `<button class="rep-row" data-repgo="${esc(x.r.id)}"><span class="rep-ri">${REP_SVG[x.r.t]}</span><span class="grow"><b>${esc(repName(x.r))}</b><small>${esc(repAgo(x.r))}</small></span><span class="rep-d">${esc(x.ahead != null ? (x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead))) : fmtDist(x.dist))}</span></button>`).join('')}</div>` : '';
+    box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>${nearHtml}
       <div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}</div>
       <div class="muted rep-hint">${t('repHint')}</div>`;
     box.hidden = false;
   } else box.hidden = true;
 }
+// «Мітки» в нижній стрічці: блідий кашкет — позначок попереду немає; зелений із числом — є, можна перевірити
+let repTabT = 0;
+function repTabSync() {
+  repTabT = Date.now();
+  const b = $('tabRep'); if (!b) return; const n = repsAhead().length;
+  b.classList.toggle('has', n > 0);
+  let bd = b.querySelector('.badge'); if (n && !bd) { bd = document.createElement('i'); bd.className = 'badge rep'; b.appendChild(bd); } else if (!n && bd) { bd.remove(); bd = null; }
+  if (bd && bd.textContent !== String(n)) bd.textContent = String(n);
+  b.setAttribute('aria-label', n ? t('repBtnHas', n) : t('repBtn'));
+}
+// «Калібрування телефона» в нижній стрічці: зелений — відкалібровано (і не давніше ніж 90 днів), блідий — ні
+function tabCalSync() {
+  const b = $('tabCal'); if (!b) return; const ok = calFresh();
+  b.classList.toggle('cal-ok', ok);
+  b.setAttribute('aria-label', t(ok ? 'tabCalOk' : calGet() ? 'tabCalOld' : 'tabCalNo'));
+}
 function repClick(e) {
+  const go = e.target.closest('[data-repgo]');
+  if (go) { const r = reps.list.find(x => String(x.id) === go.dataset.repgo); repOpen(false); if (r) flyTo({ lat: r.lat, lon: r.lon }, 15); return; }
   const b = e.target.closest('[data-rep]'); if (!b) return;
   const k = b.dataset.rep;
   if (k === 'x') { repOpen(false); return; }
@@ -1547,6 +1575,12 @@ export function initUI() {
     currentPanel() === b.dataset.panel ? closePanel() : openPanel(b.dataset.panel);
   }; });
   $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden); };
+  // кружечок GPS біля круга швидкості — подробиці про сигнал (як раніше з нижньої стрічки)
+  $('spdGps').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); currentPanel() === 'gps' ? closePanel() : openPanel('gps'); };
+  // калібрування телефона — на весь екран
+  $('tabCal').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); closePanel(); calibOpen(); };
+  bus.on('calib', tabCalSync); bus.on('calibSaved', () => { tabCalSync(); toast(t('cbSaved'), 'green', 5000); });
+  bus.on('reports', repTabSync); bus.on('trip', repTabSync);
   $('bMap').onclick = e => { e.stopPropagation(); mapTypeTap(); };
   // мережа зникла / повернулась: мініатюра на кнопці і — якщо вибрано супутник — коротко водієві
   const netChanged = () => railState();

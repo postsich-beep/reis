@@ -45,6 +45,8 @@ const DEFAULTS = {
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
   // 1.1.19: тип карти — 'scheme' (звичайна: офлайн-файл або онлайн-схема) чи 'sat' (супутникові знімки, лише з інтернетом)
   mapType: 'scheme',
+  // 1.1.22: калібрування телефона (calib.js) — поправка кута повороту гіроскопа саме цього телефона; null — не калібрували
+  gyroCal: null,
   // звідки брати супутникові знімки (у «Налаштування → Джерела» можна вписати іншу адресу, напр. з ключем ArcGIS)
   satUrl: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   alertsToken: '',

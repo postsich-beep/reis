@@ -46,13 +46,16 @@
   <button class="rb" id="bCenter" hidden></button>
 </div>
 
-<div id="speed"><b id="spdVal">0</b><span id="spdUnit"></span><i id="spdLim" hidden></i></div>
+<!-- круг швидкості: праворуч угорі — знак обмеження, праворуч унизу (1.1.22) — кружечок GPS: зелений — сигнал є, червоний — немає; дотик — подробиці -->
+<div id="speed"><b id="spdVal">0</b><span id="spdUnit"></span><i id="spdLim" hidden></i><button id="spdGps" type="button"></button></div>
 <div id="spdPop" hidden></div>
 <div id="wherePop" hidden></div>
 <div id="photoView" hidden></div>
 <!-- вибір варіанта маршруту: карта з обома варіантами зверху, дві карточки й кнопки внизу -->
 <section id="routePick" hidden></section>
 <section id="repSheet" role="dialog" hidden></section>
+<!-- калібрування телефона: на весь екран -->
+<section id="calib" role="dialog" aria-modal="true" hidden></section>
 <!-- 1.1.9: приціл для позначки — дотик до карти ставить позначку туди, де водій бачив -->
 <div id="aim" hidden></div>
 <!-- 1.1.12: точки рейсу просто на карті — старт, через, фініш; пряма між ними й відстань -->
@@ -74,8 +77,8 @@
   <!-- 1.1.7: GPS · Події · Рейс · Місця · Мітки. «Рейс» — головна кнопка посередині.
        «Параметри» на головному екрані більше немає — вони в швидких налаштуваннях (кнопка вгорі праворуч). -->
   <div id="tabs">
-    <!-- GPS: зелений — сигнал є, червоний — немає; торкнутись — подробиці -->
-    <button data-panel="gps" id="tabGps"></button>
+    <!-- калібрування телефона (1.1.22): блідий — не калібрували (або давно), зелений — відкалібровано; дотик — три кроки на весь екран -->
+    <button id="tabCal"></button>
     <button data-panel="feed"></button>
     <button data-panel="trip" class="main"></button>
     <button data-panel="places"></button>

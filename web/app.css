@@ -752,8 +752,6 @@ body:has(#routePick:not([hidden])) :is(#speed,#cam,#zoom,#spdPop,#rail){visibili
 /* ---- 1.1.6 ---- */
 /* GPS і трикутник помінялись місцями: кружечок GPS — справа над картою (зелений — сигнал є, червоний — немає),
    трикутник «позначити подію» — у нижній панелі */
-#tabs #tabRep svg{width:30px;height:30px;filter:none}
-#tabRep span:last-child{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
 /* екрани маршруту: карта без допоміжних позначок; кнопка над «+» їх повертає */
 body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .rp-zoom .rp-mk{position:relative}
@@ -783,14 +781,22 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .vlog div{padding:2px 0;line-height:1.35}
 .vlog i{font-style:normal;font-variant-numeric:tabular-nums;color:var(--ink)}
 /* ---- 1.1.7: нижня панель GPS · Події · Рейс · Місця · Мітки ---- */
-#tabs .gc{width:32px;height:32px;border-radius:50%;display:grid;place-items:center;border:2.5px solid currentColor}
-#tabs .gc svg{width:20px;height:20px}
-#tabGps.g-ok{color:#2f9e62}
-#tabGps.g-bad{color:var(--red)}
-#tabGps.g-ok .gc{background:rgba(47,158,98,.16)}
-#tabGps.g-bad .gc{background:var(--red);border-color:var(--red);color:#fff}
-#tabGps.g-bad .gc svg{filter:none}
-#tabGps span:last-child{font-weight:700;white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+/* ---- 1.1.22: кружечок GPS — біля круга швидкості, праворуч унизу (як знак обмеження праворуч угорі) ---- */
+#spdGps{position:absolute;right:-28px;bottom:-8px;width:42px;height:42px;border-radius:50%;display:grid;place-items:center;padding:0;border:3px solid currentColor;background:var(--panel);
+  box-shadow:0 2px 6px rgba(0,0,0,.28);text-shadow:none;color:var(--ink-2)}
+#spdGps svg{width:22px;height:22px;filter:none}
+#spdGps.g-ok{color:#2f9e62}
+#spdGps.g-bad{color:#fff;background:var(--red);border-color:var(--red)}
+#spdGps:active{transform:scale(.93)}
+#cam{left:146px}                                    /* попередження про камеру — правіше, щоб не лягало на кружечок GPS */
+/* ---- 1.1.22: нижня стрічка спокійна — значки лінією, без кольорових плям; зеленим світиться лише те, що «є що подивитись» ---- */
+#tabs .tc{display:grid;place-items:center;width:34px;height:30px;border-radius:10px;transition:background .2s,color .2s}
+#tabs .tc svg{width:27px;height:27px}
+#tabCal.cal-ok,#tabRep.has{color:#2f9e62}
+#tabCal.cal-ok .tc,#tabRep.has .tc{background:rgba(47,158,98,.16)}
+#tabCal span:last-child,#tabRep span:last-child{white-space:nowrap;max-width:100%;overflow:hidden;text-overflow:ellipsis}
+#tabCal.cal-ok span:last-child,#tabRep.has span:last-child{font-weight:700}
+#tabs .badge.rep{background:#2f9e62}
 
 /* ---------- 1.1.9: позначки водіїв — час під значком, «Ще тут?», приціл, прозора шторка ---------- */
 #repSheet{background:rgba(var(--glass-rgb),var(--gs));color:var(--ink);border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px)}
@@ -966,3 +972,69 @@ body:has(#pick:not([hidden])) #tilt{visibility:hidden}
 .tl-thumb svg{width:22px;height:22px;display:block}
 .tl-plane{fill:rgba(245,163,0,.28);stroke:currentColor;stroke-width:1.7;stroke-linejoin:round}
 .tl-road{fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round;stroke-dasharray:2.4 2.2}
+
+/* ---- 1.1.22: «Мітки» — позначки попереду на маршруті (список у вікні) ---- */
+.rep-near{margin:2px 0 10px}
+.rep-sub{margin:0 2px 6px;font:600 12.5px/1.2 var(--f-ui);color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
+.rep-row{display:flex;align-items:center;gap:10px;width:100%;min-height:50px;margin-top:5px;padding:5px 12px 5px 8px;border-radius:14px;background:rgba(var(--glass2-rgb),.6);color:var(--ink);text-align:left}
+.rep-ri{flex:none;width:36px;height:36px;display:grid;place-items:center}
+.rep-ri svg{width:34px;height:34px}
+.rep-row .grow{flex:1;min-width:0}
+.rep-row b{display:block;font:700 15.5px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rep-row small{display:block;font-size:12.5px;color:var(--ink-2)}
+.rep-d{flex:none;font:800 15.5px var(--f-num)}
+
+/* ---- 1.1.22: калібрування телефона — на весь екран ---- */
+#calib{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;padding:calc(var(--st) + 6px) 16px calc(var(--sb) + 12px);
+  background:radial-gradient(120% 70% at 50% 28%,#1c2733 0%,#11161c 62%,#0b0e12 100%);color:#eef2f6;overflow:auto;-webkit-user-select:none;user-select:none}
+#calib[hidden]{display:none}
+.cb-head{flex:none;display:flex;align-items:center;gap:8px;min-height:52px}
+.cb-head b{flex:1;min-width:0;font:700 19px/1.2 var(--f-ui)}
+.cb-x{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;color:#eef2f6;background:rgba(255,255,255,.08)}
+.cb-x svg{width:24px;height:24px}
+.cb-steps{flex:none;list-style:none;display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin:4px 0 0;padding:0}
+.cb-steps li{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;padding-top:8px;border-top:4px solid rgba(255,255,255,.14);color:#8693a0;font:600 12.5px/1.15 var(--f-ui);text-align:center;min-width:0}
+.cb-steps li b{display:grid;place-items:center;width:26px;height:26px;border-radius:50%;background:rgba(255,255,255,.1);font:800 14px/1 var(--f-num);color:#c4ccd4}
+.cb-steps li svg{width:26px;height:26px;padding:4px;border-radius:50%;background:rgba(255,255,255,.1)}
+.cb-steps li.cur{border-color:var(--amber);color:#fff}
+.cb-steps li.cur b{background:var(--amber);color:var(--amber-ink)}
+.cb-steps li.done{border-color:#2f9e62;color:#9fdcb9}
+.cb-steps li.done b,.cb-steps li.done svg{background:#2f9e62;color:#fff}
+.cb-body{flex:1;min-height:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;padding:8px 0;text-align:center}
+.cb-stage{position:relative;width:min(300px,84vw);flex:none}
+.cb-ph3d{position:relative;height:150px;perspective:560px;display:grid;place-items:center}
+.cb-phone{position:relative;width:74px;height:138px;border-radius:15px;background:linear-gradient(160deg,#2b3340,#151a21);border:3px solid #d5dbe2;box-shadow:0 14px 30px rgba(0,0,0,.5);transform:rotateX(7deg);transform-style:preserve-3d;will-change:transform}
+.cb-phone i{position:absolute;inset:9px 6px 13px;border-radius:7px;background:linear-gradient(180deg,#3b82f6,#1d4ed8);opacity:.9}
+.cb-phone u{position:absolute;left:50%;bottom:4px;width:22px;height:3px;margin-left:-11px;border-radius:2px;background:#d5dbe2;opacity:.7}
+.cb-ghost{position:absolute;left:50%;top:50%;width:74px;height:138px;margin:-69px 0 0 -37px;border-radius:15px;border:2px dashed #2f9e62;opacity:.75}
+.cb-ghost.l{transform:rotateX(7deg) rotateY(82deg)} .cb-ghost.r{transform:rotateX(7deg) rotateY(-82deg)}
+.cb-dial{display:block;width:100%;height:auto;margin-top:-6px}
+.cb-ring{fill:none;stroke:rgba(255,255,255,.16);stroke-width:10;stroke-linecap:round}
+.cb-goal{fill:none;stroke:#2f9e62;stroke-width:12;stroke-linecap:round}
+#calib.holding .cb-goal{stroke:#5fe39a}
+.cb-tk{stroke:rgba(255,255,255,.35);stroke-width:1.6} .cb-tk.big{stroke:rgba(255,255,255,.7);stroke-width:2.4}
+.cb-lb{fill:#8e9aa6;font:700 13px var(--f-num);text-anchor:middle;dominant-baseline:middle} .cb-lb.on{fill:#7be3a8}
+.cb-nd{stroke:var(--amber);stroke-width:4;stroke-linecap:round} .cb-nh{fill:var(--amber)} .cb-hub{fill:#eef2f6}
+.cb-ang{min-height:34px;margin-top:-2px;font:800 30px/34px var(--f-num);color:#fff}
+.cb-title{font:800 21px/1.2 var(--f-ui);color:#fff;max-width:520px}
+.cb-text{font:400 15.5px/1.4 var(--f-ui);color:#c3ccd5;max-width:480px}
+.cb-prog{width:min(300px,84vw);height:8px;border-radius:4px;background:rgba(255,255,255,.14);overflow:hidden;flex:none}
+.cb-prog i{display:block;width:0;height:100%;border-radius:4px;background:#2f9e62;transition:width .12s linear}
+.cb-hint{min-height:20px;font:600 14.5px/1.35 var(--f-ui);color:#9fb0c0}
+.cb-hint.warn{color:#ffcf5c}
+.cb-foot{flex:none;margin-top:6px;font:400 13px/1.35 var(--f-ui);color:#8693a0;text-align:center}
+.cb-res{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%;max-width:480px}
+.cb-big{width:92px;height:92px;border-radius:50%;display:grid;place-items:center;font:800 54px/1 var(--f-num);color:#fff;background:#2f9e62;box-shadow:0 0 0 10px rgba(47,158,98,.2)}
+.cb-big svg{width:54px;height:54px;stroke-width:2.6}
+.cb-res.bad .cb-big{background:#d99a00;box-shadow:0 0 0 10px rgba(217,154,0,.2)}
+.cb-rows{width:100%;display:grid;gap:6px}
+.cb-rows div{display:flex;align-items:baseline;justify-content:space-between;gap:12px;padding:10px 14px;border-radius:12px;background:rgba(255,255,255,.07);text-align:left}
+.cb-rows span{color:#b6c0ca;font-size:14.5px} .cb-rows b{flex:none;font:800 18px var(--f-num);color:#fff}
+.cb-btns{display:flex;flex-direction:column;gap:8px;width:100%;margin-top:4px}
+.cb-btns .btn{min-height:54px;font-size:17px}
+.cb-btns .btn:not(.pri){background:rgba(255,255,255,.1);color:#eef2f6}
+@media (orientation:landscape) and (max-height:520px){
+  .cb-body{flex-direction:row;flex-wrap:wrap;align-content:center;column-gap:20px}
+  .cb-stage{width:220px} .cb-ph3d{height:108px} .cb-phone,.cb-ghost{width:54px;height:100px} .cb-ghost{margin:-50px 0 0 -27px}
+  .cb-steps li span{display:none} .cb-foot{display:none}
+}
