@@ -1,5 +1,5 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
-import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex, sideLayout } from './core.js';
+import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
 import { chime, initSfx } from './sfx.js';
@@ -37,52 +37,29 @@ function layoutVars() {
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
   tiltFit();
 }
-/* ---------- повзунок нахилу карти (1.1.21) ----------
-   Стоїть справа над «Моїм місцем». Угору — дивимось збоку (3D, до 60°), униз — згори (2D): те саме, що провести двома
-   пальцями вгору-вниз по карті. Повзунок завжди показує справжній кут карти, хоч би хто його змінив.
-   Висота — скільки є місця між «Моїм місцем» і тим, що вище в тій самій колонці (кнопки справа, верхня плашка); якщо
-   на зручний повзунок місця немає (низький екран) — його не показуємо: лишаються плитка «2D / 3D» і жест. */
-const TILT_H = 176, TILT_MIN = 112, TILT_THUMB = 36;
-function tiltFit() {
-  const el = $('tilt'); if (!el) return;
-  const rail = $('rail').getBoundingClientRect(), side = sideLayout();
-  let top, room;
-  if (side) {
-    // телефон набік: «Моє місце» стоїть посеред екрана (біля краю нижньої плашки), і повзунок над ним закривав би стрілку машини —
-    // тому тут повзунок окремо: біля правого краю екрана, між кнопками справа і нижньою плашкою
-    top = Math.round(rail.bottom + 10); room = Math.floor($('bottom').getBoundingClientRect().top - 10 - top);
-  } else {
-    const z = $('zoom').getBoundingClientRect(), x1 = z.right, x0 = x1 - 50;
-    top = Math.max(8, rail.top);
-    for (const id of ['top', 'rail']) { const o = $(id), r = o.getBoundingClientRect(); if (r.width && getComputedStyle(o).visibility !== 'hidden' && r.right > x0 + 1 && r.left < x1 - 1) top = Math.max(top, r.bottom + 10); }
-    room = Math.floor(z.bottom - 50 - 9 - top);
-  }
-  const h = Math.min(TILT_H, room), show = h >= TILT_MIN;
-  el.classList.toggle('side', side); el.style.top = side ? top + 'px' : '';
-  if (el.hidden === show) el.hidden = !show;
-  if (show) el.style.height = h + 'px';
-}
+// Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:
+// унизу — вид згори (2D), угорі — збоку (до 60°). Те саме, що двома пальцями вгору-вниз по карті: стрілка йде за жестом, жест — за нею.
+const TILT_THUMB = 34;
+function tiltFit() {}                      // місце й висоту дає сама плашка (CSS); лишено для layoutVars
 function tiltDraw(v) {
   const el = $('tilt'); if (!el) return;
   v = Math.max(0, Math.min(mapM.PITCH_MAX, Math.round(v))); const k = v / mapM.PITCH_MAX;
   if (el.dataset.v === String(v)) return; el.dataset.v = String(v);
   el.style.setProperty('--tv', k.toFixed(3));
   el.setAttribute('aria-valuenow', String(v)); el.setAttribute('aria-valuetext', v < 3 ? t('tiltTop') : t('tiltDeg', v));
-  el.classList.toggle('flat', v < 3);
-  // маленька «карта» на бігунці сама нахиляється: квадрат (згори) → приплюснута трапеція (збоку)
-  const h = 13 - 7 * k, ins = 3.4 * k, y1 = (12 + h / 2).toFixed(1), y0 = (12 - h / 2).toFixed(1);
-  el.querySelector('.tl-plane').setAttribute('points', `5,${y1} 19,${y1} ${(19 - ins).toFixed(1)},${y0} ${(5 + ins).toFixed(1)},${y0}`);
-  el.querySelector('.tl-road').setAttribute('d', `M12 ${y1}V${y0}`);
+  el.classList.toggle('flat', v < 3); el.classList.toggle('max', v >= mapM.PITCH_MAX - 2);       // на краях одна зі стрілок блідне: далі нікуди
 }
 function tiltInit() {
   const el = $('tilt'); if (!el) return;
   el.setAttribute('aria-label', t('tiltAria'));
-  const tr = el.querySelector('.tl-track'); let drag = false, val = 0;
-  const fromY = y => { const r = tr.getBoundingClientRect(), f = 1 - Math.min(1, Math.max(0, (y - r.top - TILT_THUMB / 2) / Math.max(1, r.height - TILT_THUMB)));
-    let v = Math.round(f * mapM.PITCH_MAX); if (v <= 3) v = 0; else if (v >= mapM.PITCH_MAX - 2) v = mapM.PITCH_MAX; return v; };
-  el.addEventListener('pointerdown', e => { drag = true; try { el.setPointerCapture(e.pointerId); } catch (_) {} el.classList.add('drag'); val = fromY(e.clientY); mapM.setTilt(val, true); e.preventDefault(); });
-  el.addEventListener('pointermove', e => { if (!drag) return; const v = fromY(e.clientY); if (v !== val) { val = v; mapM.setTilt(v, true); } });
-  const end = () => { if (!drag) return; drag = false; el.classList.remove('drag'); mapM.setTilt(val, false); };
+  // Стрілку ТЯГНУТЬ: палець униз чи вгору — нахил змінюється на стільки ж (де б не взялися). Самий лише дотик нічого не міняє —
+  // стрілка стоїть поруч із «Мітками», і випадковий дотик не має перекидати карту.
+  const tr = el.querySelector('.tl-track'); let drag = false, y0 = 0, v0 = 0, val = 0, moved = false;
+  const snap = v => { v = Math.round(Math.max(0, Math.min(mapM.PITCH_MAX, v))); return v <= 3 ? 0 : v >= mapM.PITCH_MAX - 2 ? mapM.PITCH_MAX : v; };
+  const gain = () => mapM.PITCH_MAX / Math.max(60, tr.getBoundingClientRect().height - TILT_THUMB);          // на всю шкалу — весь хід стрілки (а на низькій плашці — 60 пікселів)
+  el.addEventListener('pointerdown', e => { drag = true; moved = false; y0 = e.clientY; v0 = val = mapM.tiltShown(); try { el.setPointerCapture(e.pointerId); } catch (_) {} el.classList.add('drag'); e.preventDefault(); });
+  el.addEventListener('pointermove', e => { if (!drag) return; if (!moved && Math.abs(e.clientY - y0) < 4) return; moved = true; const v = snap(v0 + (y0 - e.clientY) * gain()); if (v !== val) { val = v; mapM.setTilt(v, true); } });
+  const end = () => { if (!drag) return; drag = false; el.classList.remove('drag'); if (moved) mapM.setTilt(val, false); };
   el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); el.addEventListener('lostpointercapture', end);
   el.addEventListener('keydown', e => { const d = e.key === 'ArrowUp' ? 5 : e.key === 'ArrowDown' ? -5 : 0; if (d) { e.preventDefault(); mapM.setTilt(mapM.tiltShown() + d, false); } });
   bus.on('tilt', tiltDraw); tiltDraw(mapM.tiltShown());
@@ -151,7 +128,9 @@ const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
    (1.1.21): карта змінилась на очах — це й так видно.
    1.1.22: кругла мініатюра була незрозуміла («що це за кружок?»). Тепер це перемикач із двох зрозумілих значків —
    складена карта (схема) і супутник над Землею (знімки); той, що ввімкнений, підсвічено. Дотик будь-де — перемкнути.
-   Без інтернету супутника немає: його значок блідий, дотик лише пояснює (карта лишається завантаженою). */
+   Без інтернету супутника немає: його значок блідий, дотик лише пояснює (карта лишається завантаженою).
+   1.1.22 (на прохання Олексія): два значки одразу — зайве на екрані. Тепер це одна кругла кнопка зі значком того виду,
+   який працює ЗАРАЗ: схема — складена карта, супутник — супутник над Землею. Дотик — вид міняється, значок разом із ним. */
 const MT_PIC = {
   scheme: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M3.5 7.4 10.4 4.6l7.2 2.8 6.9-2.8v16L17.6 23.4l-7.2-2.8-6.9 2.8z" fill="#f7f3e6" stroke="#6b7280" stroke-width="1.5" stroke-linejoin="round"/><path d="M10.4 4.6v16M17.6 7.4v16" stroke="#b9bec7" stroke-width="1.2"/><path d="M5 16.8c2.6-.6 3.9-3.6 6.6-4.2 2.6-.6 3.4 1.9 6 1.2 2-.5 3.2-2.2 5.4-3.2" fill="none" stroke="#f5a300" stroke-width="2.2" stroke-linecap="round"/><circle cx="20.3" cy="17.8" r="1.7" fill="#2f6bff"/></svg>',
   sat: '<svg viewBox="0 0 28 28" aria-hidden="true"><path d="M2.5 28a11.5 11.5 0 0 1 23 0z" fill="#2f7fd6"/><path d="M6.3 24.2c1.7-1.5 4-1.3 5 .2.8 1.3-.3 2.3.3 3.6H4.8c.1-1.5.6-2.8 1.5-3.8zM16.4 22.3c1.5-.9 3.6-.5 4.7.9.9 1.2 1.9 2.9 2.2 4.8h-5.4c-.8-1.8-2.9-3.8-1.5-5.7z" fill="#3fa650"/><g transform="rotate(-38 14 10)"><rect x="11.3" y="6.4" width="5.4" height="7.2" rx="1.1" fill="#e5e7eb" stroke="#374151" stroke-width="1.3"/><rect x="3.3" y="7.7" width="6.2" height="4.6" rx=".7" fill="#2f6bff" stroke="#1e3a8a" stroke-width="1.1"/><rect x="18.5" y="7.7" width="6.2" height="4.6" rx=".7" fill="#2f6bff" stroke="#1e3a8a" stroke-width="1.1"/><path d="M9.5 10h1.8M16.7 10h1.8M6.4 7.7v4.6M21.6 7.7v4.6" stroke="#1e3a8a" stroke-width="1"/><path d="M14 13.6v2.2" stroke="#374151" stroke-width="1.3" stroke-linecap="round"/></g></svg>'
@@ -218,7 +197,7 @@ function railState() {
   qb.classList.toggle('muted', !S.voice);
   const mb = $('bMap'), cur = mtShown(), key = cur + (P.online() ? '' : '-nonet');
   if (mb.dataset.k !== key) { mb.dataset.k = key; mb.classList.toggle('nonet', !P.online());
-    mb.innerHTML = ['scheme', 'sat'].map(k => `<span class="mt-seg${k === cur ? ' on' : ''}" data-k="${k}">${MT_PIC[k]}</span>`).join('');
+    mb.innerHTML = `<span class="mt-seg on" data-k="${cur}">${MT_PIC[cur]}</span>`;
     mb.setAttribute('aria-pressed', String(cur === 'sat')); mb.setAttribute('aria-label', t(cur === 'sat' ? 'mtBtnSat' : 'mtBtnScheme')); }
   const c = $('bCenter'), need = !view.follow;
   if (c.hidden === need) { c.hidden = !need; c.classList.toggle('need', need); }

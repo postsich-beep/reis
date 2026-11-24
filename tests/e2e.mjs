@@ -1136,7 +1136,7 @@ const layoutCheck = () => {
   const R = el => el.getBoundingClientRect();
   const nm = el => el.id ? '#' + el.id : (el.getAttribute('data-panel') ? 'tab:' + el.getAttribute('data-panel') : el.className ? '.' + String(el.className).split(' ')[0] : el.tagName);
   const inter = (a, b) => Math.min(a.right, b.right) - Math.max(a.left, b.left) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
-  const top = ['#top', '#rail', '#tilt', '#bCenter', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
+  const top = ['#top', '#rail', '#bCenter', '#speed', '#cam', '#bottom', '#attr', '#spdPop', '#pick'].map(s => document.querySelector(s)).filter(vis);
   for (const el of top) { const r = R(el); if (r.left < -1 || r.top < -1 || r.right > W + 1 || r.bottom > H + 1) out.push('за межами екрана: ' + nm(el) + ' [' + [r.left, r.top, r.right, r.bottom].map(Math.round) + ']'); }
   for (let i = 0; i < top.length; i++) for (let j = i + 1; j < top.length; j++) if (inter(R(top[i]), R(top[j]))) out.push('накладаються: ' + nm(top[i]) + ' і ' + nm(top[j]));
   for (const sel of ['#tripbar > *', '#tripbar .tb-main > *', '#tabs > button', '#man > *', '#nudge > button', '#bottom > *', '#updBar > *']) {
@@ -3133,23 +3133,22 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
   // а) кнопка справа вгорі — під швидкими налаштуваннями (кнопки «Шари» з 1.1.20 немає)
   const order = await app(page, () => [...document.querySelectorAll('#rail > button')].map(b => b.id)), bm = await R('#bMap'), s0 = await st();
-  const mtLong = Math.max(bm.w, bm.h), mtShort = Math.min(bm.w, bm.h);
-  ok(`[${T}] справа вгорі — перемикач типу карти під швидкими налаштуваннями: два зрозумілі значки (складена карта — схема, супутник над Землею — знімки), увімкнений підсвічено — зараз «схема»; нічого його не перекриває`, order.join() === 'bQuick,bMap' && bm.seen && mtShort === 50 && mtLong === 98 && bm.r <= bm.vw && bm.b <= bm.vh
-    && /^scheme:28:\d+,sat:28:\d+$/.test(s0.segs) && s0.segs.split(',').every(x => +x.split(':')[2] >= 40) && s0.cur === 'scheme' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && /зараз схема/.test(s0.label), JSON.stringify({ order, bm, s0 }));
+  ok(`[${T}] справа вгорі — одна кругла кнопка типу карти (50×50) під швидкими налаштуваннями: на ній значок того виду, що зараз, — складена карта (схема); другого значка немає; нічого її не перекриває`, order.join() === 'bQuick,bMap' && bm.seen && bm.w === 50 && bm.h === 50 && bm.r <= bm.vw && bm.b <= bm.vh
+    && s0.segs.split(',').length === 1 && /^scheme:30:\d+$/.test(s0.segs) && s0.cur === 'scheme' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && /зараз схема/.test(s0.label), JSON.stringify({ order, bm, s0 }));
   // б) один дотик — супутник: жодного віконця, знімки під лініями рейсу й нашими значками, напряму (не в наш кеш), джерело підписано
   const net0 = s0.net; await clearToasts();
   await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
   for (let i = 0; i < 40 && !SAT.req.length; i++) await sleep(150); await sleep(500);
   const s1 = await st();
   await shot(page, '41-sat-' + sc.n);
-  ok(`[${T}] один дотик — одразу супутник (як «2D / 3D»): жодного віконця з вибором і жодного повідомлення (карта змінилась — і так видно); на перемикачі підсвічено супутник`, s1.want === 'sat' && s1.sat && !s1.popup && s1.toast.trim() === '' && s1.cur === 'sat' && s1.pressed === 'true' && /зараз супутник/.test(s1.label), JSON.stringify(s1));
+  ok(`[${T}] один дотик — одразу супутник (як «2D / 3D»): жодного віконця з вибором і жодного повідомлення (карта змінилась — і так видно); значок на кнопці змінився — тепер супутник над Землею (один)`, s1.want === 'sat' && s1.sat && !s1.popup && s1.toast.trim() === '' && s1.cur === 'sat' && /^sat:30:\d+$/.test(s1.segs) && s1.pressed === 'true' && /зараз супутник/.test(s1.label), JSON.stringify(s1));
   ok(`[${T}] знімки є (квадрати з сервера знімків), лежать ПІД лініями рейсу й нашими значками; джерело знімків підписано; у власний кеш карти не осідають`, s1.iSat >= 0 && s1.iSat < s1.iRough && s1.iRough < s1.iRoute && SAT.req.length > 0 && /\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/.test(SAT.req[0]) && s1.body && /Esri/.test(s1.attr) && s1.net === net0, JSON.stringify({ s1, req: SAT.req.slice(0, 2), n: SAT.req.length, net0 }));
   // в) ще дотик — схема: знімки прибрано, сервер знімків більше не питаємо
   await clearToasts(); await page.click('#bMap'); await sleep(250);
   const s2t = (await st()).toast;                                         // одразу після дотику: повідомлень немає
   SAT.req = []; await app(page, () => window.__app.map.map.panBy([300, 200], { duration: 0 })); await sleep(900);
   const s2 = await st();
-  ok(`[${T}] ще дотик — назад схема: знімки прибрано, нових запитів немає; теж без повідомлень; на перемикачі знову підсвічено схему`, s2.want === 'scheme' && !s2.sat && !s2.body && !s2.popup && SAT.req.length === 0 && s2t.trim() === '' && s2.cur === 'scheme', JSON.stringify({ s2, s2t, n: SAT.req.length }));
+  ok(`[${T}] ще дотик — назад схема: знімки прибрано, нових запитів немає; теж без повідомлень; на кнопці знову складена карта`, s2.want === 'scheme' && !s2.sat && !s2.body && !s2.popup && SAT.req.length === 0 && s2t.trim() === '' && s2.cur === 'scheme' && /^scheme:30:\d+$/.test(s2.segs), JSON.stringify({ s2, s2t, n: SAT.req.length }));
   if (main) {
     await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
     // г) уночі знімок не «перевертається» фільтром нічної карти
@@ -3160,7 +3159,7 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
     // д) зникла мережа: сам показує завантажену карту й каже про це; вибір «супутник» запам'ятовано
     await clearToasts(); await ctx.setOffline(true); await sleep(500);
     const o1 = await st();
-    ok(`[${T}] немає інтернету: знімки прибрано, видно звичайну карту; водієві сказано, що супутник повернеться сам; на перемикачі підсвічено схему, значок супутника блідий`, !o1.sat && !o1.body && o1.want === 'sat' && /Немає інтернету — показую завантажену карту/.test(o1.toast) && o1.nonet && o1.cur === 'scheme' && o1.satDim < 0.5, JSON.stringify(o1));
+    ok(`[${T}] немає інтернету: знімки прибрано, видно звичайну карту; водієві сказано, що супутник повернеться сам; на кнопці — складена карта (те, що видно зараз)`, !o1.sat && !o1.body && o1.want === 'sat' && /Немає інтернету — показую завантажену карту/.test(o1.toast) && o1.nonet && o1.cur === 'scheme' && /^scheme:30:\d+$/.test(o1.segs), JSON.stringify(o1));
     await clearToasts(); await page.click('#bMap'); await sleep(300);
     const o2 = await st(); await shot(page, '42-sat-offline-tap-S10');
     ok(`[${T}] без інтернету дотик до кнопки — лише підказка «супутник лише з інтернетом», карта лишається завантаженою (не сіра), жодних віконець`, /Супутник працює лише з інтернетом/.test(o2.toast) && !o2.sat && !o2.popup && o2.want === 'sat', JSON.stringify(o2));
@@ -3198,7 +3197,7 @@ if (run('30') && (!process.env.SCR || process.env.SCR.split(',').includes('S10')
   await ctx.close();
 } catch (e) { ok('прохід 30 (офлайн-карта + супутник) дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
-/* ============ прохід 31 (1.1.21): повзунок нахилу карти справа над «Моїм місцем»; на широкому планшеті «Моє місце» — вище ============ */
+/* ============ прохід 31 (1.1.21 → 1.1.22): нахил карти — стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла; вкладки посунуто ліворуч ============ */
 if (run('31')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 'tablet', 'xiaomi'].includes(x.n)), { n: 'tabland', w: 1272, h: 702, dpr: 1, title: 'планшет набік 1272×702 (як на знімку Олексія)' }].filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
   const T = sc.title, main = sc.n === 'S10' || sc.n === 'tabland', emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
@@ -3206,75 +3205,86 @@ if (run('31')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   await gps(); await sleep(900);
   const st = () => app(page, () => { const R = e => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
     const vis = e => !!e && !e.hidden && getComputedStyle(e).display !== 'none' && getComputedStyle(e).visibility !== 'hidden' && e.getBoundingClientRect().width > 0;
-    const tl = document.getElementById('tilt'), c = document.getElementById('bCenter'), m = window.__app.map.map, S = window.__app.S, th = tl.querySelector('.tl-thumb'), tr = tl.querySelector('.tl-track');
+    const tl = document.getElementById('tilt'), c = document.getElementById('bCenter'), m = window.__app.map.map, S = window.__app.S, th = tl.querySelector('.tl-thumb'), tr = tl.querySelector('.tl-track'), cs = getComputedStyle(tl), tcs = getComputedStyle(th);
     const seen = e => { const r = e.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && (h === e || e.contains(h)); };
-    return { shown: vis(tl), tilt: R(tl), track: R(tr), thumb: R(th), seen: vis(tl) && seen(tl), center: { hidden: c.hidden, vis: vis(c), box: R(c) }, rail: R(document.getElementById('rail')), top: R(document.getElementById('top')), bottom: R(document.getElementById('bottom')), attr: R(document.getElementById('attr')),
-      vw: innerWidth, vh: innerHeight, pitch: Math.round(m.getPitch()), S: { pitch: S.pitch, view3d: S.view3d }, now: +tl.getAttribute('aria-valuenow'), text: tl.getAttribute('aria-valuetext'), label: tl.getAttribute('aria-label'), flat: tl.classList.contains('flat'), follow: window.__app.map.view.follow,
-      caps: [...tl.querySelectorAll('.tl-cap')].map(x => x.textContent).join('/'), plane: tl.querySelector('.tl-plane').getAttribute('points') }; });
+    const tabs = [...document.querySelectorAll('#tabs > button')].map(b => { const r = R(b), sp = b.querySelector('span:last-child'); return { id: b.dataset.panel || b.id, l: r.l, r: r.r, w: r.w, cut: !!sp && sp.scrollWidth > sp.clientWidth + 1 }; });
+    return { shown: vis(tl), inBar: tl.parentElement.id, tilt: R(tl), track: R(tr), thumb: R(th), seen: vis(tl) && seen(tl), bg: [cs.backgroundColor, cs.borderTopWidth, cs.boxShadow, tcs.backgroundColor, tcs.borderTopWidth].join('|'), caps: tl.querySelectorAll('.tl-cap').length, arrows: tl.querySelectorAll('.tl-thumb svg path').length,
+      dim: [getComputedStyle(tl.querySelector('.tl-up')).opacity, getComputedStyle(tl.querySelector('.tl-dn')).opacity].join(), center: { hidden: c.hidden, vis: vis(c), box: R(c) }, rail: R(document.getElementById('rail')), bottom: R(document.getElementById('bottom')), tabs, tripbar: R(document.getElementById('tripbar')), attr: R(document.getElementById('attr')),
+      vw: innerWidth, vh: innerHeight, pitch: Math.round(m.getPitch()), S: { pitch: S.pitch, view3d: S.view3d }, now: +tl.getAttribute('aria-valuenow'), text: tl.getAttribute('aria-valuetext'), label: tl.getAttribute('aria-label'), flat: tl.classList.contains('flat'), max: tl.classList.contains('max'), follow: window.__app.map.view.follow }; });
   const s0 = await st();
   await shot(page, '44-tilt-' + sc.n);
-  const side = sc.n === 'land';      // телефон набік: повзунок окремо, біля правого краю екрана між кнопками справа й нижньою плашкою
-  const room = side ? s0.bottom.t - 10 - (s0.rail.b + 10) : s0.center.box.t - 9 - Math.max(...[s0.rail, s0.top].filter(o => o.r > s0.center.box.l + 1 && o.l < s0.center.box.r - 1).map(o => o.b + 10), 8);
-  if (!s0.shown) {
-    ok(`[${T}] на повзунок нахилу тут місця немає (${room} пікселів, треба 112) — його не показано, нічого не накладається; лишаються плитка «2D / 3D» і жест`, room < 112 && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ room, s0: { rail: s0.rail, center: s0.center } }));
-  } else {
-    // а) де стоїть і як виглядає
-    ok(`[${T}] повзунок нахилу — справа, ${side ? 'між кнопками справа й нижньою плашкою (не посеред екрана, де стрілка машини)' : 'над місцем кнопки «Моє місце», під кнопками справа'}; у межах екрана, нічого не перекриває й не перекритий`, s0.tilt.r <= s0.vw - 6 && s0.vw - s0.tilt.r <= 16 && (side ? s0.tilt.b <= s0.bottom.t - 6 && s0.tilt.t >= s0.rail.b + 6 : s0.tilt.b <= s0.center.box.t - 6 && s0.center.box.t - s0.tilt.b <= 12) && s0.tilt.t >= 4 && s0.seen
-      && (s0.rail.r <= s0.tilt.l || s0.rail.l >= s0.tilt.r || s0.rail.b <= s0.tilt.t - 6) && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ tilt: s0.tilt, center: s0.center.box, rail: s0.rail, lay: await page.evaluate(layoutCheck) }));
-    ok(`[${T}] повзунок зручний для пальця: ширина 50, висота ${s0.tilt.h} (112…176), бігунок 36; підписано «3D» згори і «2D» знизу; для озвучення — «Нахил карти»`, s0.tilt.w === 50 && s0.tilt.h >= 112 && s0.tilt.h <= 176 && s0.thumb.w === 36 && s0.caps === '3D/2D' && /Нахил карти/.test(s0.label), JSON.stringify({ tilt: s0.tilt, thumb: s0.thumb, caps: s0.caps, label: s0.label }));
-    // б) карта стежить за машиною з нахилом «3D» (52°) — бігунок показує саме його
-    ok(`[${T}] карта стежить за машиною під кутом 52° — бігунок стоїть на тому самому місці шкали`, s0.follow && s0.pitch === 52 && s0.now === 52 && Math.abs((s0.track.b - s0.thumb.b) / (s0.track.h - 36) - 52 / 60) < 0.04, JSON.stringify({ pitch: s0.pitch, now: s0.now, thumb: s0.thumb, track: s0.track }));
-    const X = s0.tilt.l + 25, yOf = v => s0.track.b - 18 - (v / 60) * (s0.track.h - 36);
-    // в) тягнемо бігунок униз до кінця — вид згори; карта стежить далі й кут не повертається
-    await page.mouse.move(X, yOf(52)); await page.mouse.down(); await page.mouse.move(X, yOf(30), { steps: 4 }); await sleep(120);
-    const d1 = await st();
-    await page.mouse.move(X, s0.track.b + 30, { steps: 5 }); await sleep(150);
-    const d2 = await st(); await page.mouse.up(); await sleep(200); await gps(); await sleep(1300);
-    const d3 = await st();
-    ok(`[${T}] тягнемо бігунок: карта нахиляється одразу за пальцем (посередині — 30°), у налаштування кут пишеться, коли палець відпустили`, d1.pitch === 30 && d1.S.pitch === 52 && d2.pitch === 0 && d2.S.view3d === true, JSON.stringify({ d1: [d1.pitch, d1.S], d2: [d2.pitch, d2.S] }));
-    ok(`[${T}] бігунок унизу — вид згори (2D): запам'ятовано, карта стежить далі й кут не «відскакує»; підсвічено «2D»`, d3.pitch === 0 && d3.S.view3d === false && d3.now === 0 && d3.flat && d3.text === 'вид згори' && d3.follow && Math.abs(d3.thumb.b - d3.track.b) <= 1, JSON.stringify(d3));
-    // г) дотик посеред шкали — туди й стає; кут лишається і в стеженні
-    await page.mouse.click(X, yOf(40)); await sleep(300); await gps(); await sleep(1300);
-    const t1 = await st();
-    ok(`[${T}] дотик по шкалі — бігунок стає туди (40°), 3D увімкнено, кут запам'ятовано й тримається, поки карта стежить за машиною`, Math.abs(t1.pitch - 40) <= 1 && t1.S.view3d === true && t1.S.pitch === t1.pitch && t1.now === t1.pitch && !t1.flat && t1.follow && t1.text === 'нахил ' + t1.pitch + '°', JSON.stringify(t1));
-    // ґ) угору до кінця — найбільший нахил
-    await page.mouse.move(X, yOf(40)); await page.mouse.down(); await page.mouse.move(X, s0.track.t - 30, { steps: 5 }); await page.mouse.up(); await sleep(300);
-    const u1 = await st();
-    ok(`[${T}] бігунок угорі — найбільший нахил (60°, дивимось збоку); «карта» на бігунці приплюснута`, u1.pitch === 60 && u1.S.pitch === 60 && Math.abs(u1.thumb.t - u1.track.t) <= 1 && u1.plane !== s0.plane && /^5,15\.0 19,15\.0 15\.6,9\.0 8\.4,9\.0$/.test(u1.plane), JSON.stringify({ pitch: u1.pitch, plane: u1.plane, thumb: u1.thumb, track: u1.track }));
-    await shot(page, '44b-tilt-top-' + sc.n);
-    // д) карту зсунули — з'явилось «Моє місце», повзунок із місця не зрушив
-    await page.mouse.move(sc.w * 0.35, sc.h * 0.45); await page.mouse.down(); await page.mouse.move(sc.w * 0.35 + 60, sc.h * 0.45 + 40, { steps: 4 }); await page.mouse.up(); await sleep(500);
-    const c1 = await st();
-    await shot(page, '44c-tilt-center-' + sc.n);
-    ok(`[${T}] карту зсунули — ${side ? 'з\'явилось' : 'під повзунком з\'явилось'} «Моє місце»; повзунок із місця не зрушив, нічого не накладається`, !c1.center.hidden && c1.center.vis && JSON.stringify(c1.tilt) === JSON.stringify(s0.tilt) && (side || c1.center.box.t - c1.tilt.b >= 6) && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ tilt: c1.tilt, was: s0.tilt, center: c1.center, lay: await page.evaluate(layoutCheck) }));
-    if (sc.n === 'tabland') ok(`[${T}] широкий планшет: «Моє місце» не в самому куті — на ${c1.vh - c1.center.box.b} пікселів вище краю (було 14), не лежить на ⓘ`, c1.vh - c1.center.box.b >= 90 && (c1.attr.t >= c1.center.box.b || c1.attr.r <= c1.center.box.l), JSON.stringify({ center: c1.center.box, attr: c1.attr, vh: c1.vh }));
-    if (main) {
-      // е) жест на карті (тут — Ctrl і мишка вгору; на телефоні — два пальці вгору-вниз) — те саме, що повзунок: бігунок іде слідом, кут запам'ятовується
-      await page.mouse.click(X, yOf(20)); await sleep(300);
-      const g0 = await st();
-      await page.keyboard.down('Control'); await page.mouse.move(sc.w * 0.4, sc.h * 0.5); await page.mouse.down(); await page.mouse.move(sc.w * 0.4, sc.h * 0.5 - 40, { steps: 6 }); await page.mouse.up(); await page.keyboard.up('Control'); await sleep(400);
-      const g1 = await st();
-      ok(`[${T}] нахилили карту жестом — бігунок пішов слідом, новий кут запам'ятовано (жест і повзунок — одне й те саме)`, g1.pitch > g0.pitch + 8 && g1.now === g1.pitch && g1.S.pitch === g1.pitch && g1.S.view3d === true, JSON.stringify({ before: g0.pitch, after: g1.pitch, now: g1.now, S: g1.S }));
-      // є) плитка «2D / 3D»: 2D — згори, 3D — останній виставлений кут (а не завжди 52°)
-      const keep = g1.S.pitch;
-      await page.click('#bQuick'); await page.click('#quick [data-q="3d"]'); await sleep(700);
-      const q1 = await st(), q1t = await app(page, () => document.querySelector('#quick [data-q="3d"] .q-txt').textContent);
-      await page.click('#quick [data-q="3d"]'); await sleep(700);
-      const q2 = await st(); await page.click('#quick [data-q="close"]');
-      ok(`[${T}] плитка «2D / 3D» працює, як раніше: 2D — вид згори (бігунок унизу), 3D — останній виставлений кут (${keep}°)`, q1.pitch === 0 && q1.now === 0 && q1t === '2D' && q1.S.pitch === keep && q2.pitch === keep && q2.now === keep && q2.S.view3d, JSON.stringify({ q1: [q1.pitch, q1.S, q1t], q2: [q2.pitch, q2.S] }));
-      // ж) клавіші: стрілки вгору-вниз по 5°
-      await app(page, () => document.getElementById('tilt').focus()); await page.keyboard.press('ArrowDown'); await sleep(250);
-      const k1 = await st();
-      ok(`[${T}] з клавіатури: стрілка вниз — на 5° менше`, k1.pitch === keep - 5 && k1.S.pitch === keep - 5, JSON.stringify({ keep, pitch: k1.pitch, S: k1.S }));
-      // з) після перезапуску кут той самий
-      await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.map.map.getSource('route'), null, { timeout: 20000 }); await gps(); await sleep(1500);
-      const r1 = await st();
-      ok(`[${T}] після перезапуску карта стежить під тим самим кутом (${keep - 5}°), бігунок там само`, r1.pitch === keep - 5 && r1.now === keep - 5 && r1.S.pitch === keep - 5, JSON.stringify({ pitch: r1.pitch, now: r1.now, S: r1.S }));
-      // и) меню точки на карті відкрите — повзунок не заважає
-      await app(page, () => window.__app.bus.emit('mapPick', { lat: 50.2, lon: 36.4 })); await sleep(400);
-      const pk = await app(page, () => ({ pick: !document.getElementById('pick').hidden, tilt: getComputedStyle(document.getElementById('tilt')).visibility }));
-      ok(`[${T}] відкрите меню точки на карті — повзунок сховано, нічого не накладається`, pk.pick && pk.tilt === 'hidden' && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ pk, lay: await page.evaluate(layoutCheck) }));
-    }
+  const last = s0.tabs[s0.tabs.length - 1];
+  // а) де стоїть і як виглядає
+  ok(`[${T}] нахил карти — у крайньому правому куті нижньої плашки (правіше «Міток»), на всю її висоту (${s0.tilt.h}); у межах екрана, нічим не перекритий, нічого не закриває`, s0.shown && s0.inBar === 'bottom' && s0.seen && s0.bottom.r - s0.tilt.r >= 2 && s0.bottom.r - s0.tilt.r <= 10 && s0.tilt.t >= s0.bottom.t + 2 && s0.tilt.b <= s0.bottom.b - 2 && s0.tilt.r <= s0.vw && s0.tilt.b <= s0.vh
+    && s0.tilt.w >= 44 && s0.tilt.h >= 60 && s0.tilt.l >= last.r + 2 && s0.tilt.l >= s0.tripbar.r && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ tilt: s0.tilt, bottom: s0.bottom, last, tripbar: s0.tripbar, lay: await page.evaluate(layoutCheck) }));
+  ok(`[${T}] це просто стрілка вгору-вниз: без тла, без рамки й тіні, без підписів «3D / 2D» — лише стрілка з двома вістрями (вгору й униз) на тонкій рисці`, /^rgba\(0, 0, 0, 0\)\|0px\|none\|rgba\(0, 0, 0, 0\)\|0px$/.test(s0.bg) && s0.caps === 0 && s0.arrows === 3 && s0.thumb.w === 34 && /Нахил карти/.test(s0.label), JSON.stringify({ bg: s0.bg, caps: s0.caps, arrows: s0.arrows, thumb: s0.thumb, label: s0.label }));
+  ok(`[${T}] вкладки посунуто ліворуч, усі пʼять на місці: не накладаються, підписи цілі (не обрізані)`, s0.tabs.length === 5 && s0.tabs.every((x, i) => !x.cut && x.w >= 40 && (!i || x.l >= s0.tabs[i - 1].r - 1)) && (await readCheck(page, '#tabs')).length === 0, JSON.stringify({ tabs: s0.tabs, read: await readCheck(page, '#tabs') }));
+  // б) карта стежить за машиною з нахилом «3D» (52°) — стрілка стоїть на тому самому місці шкали
+  const travel = s0.track.h - 34;
+  ok(`[${T}] карта стежить за машиною під кутом 52° — стрілка стоїть на тому самому місці шкали (хід ${travel} пікселів)`, s0.follow && s0.pitch === 52 && s0.now === 52 && Math.abs((s0.track.b - s0.thumb.b) / travel - 52 / 60) < 0.05, JSON.stringify({ pitch: s0.pitch, now: s0.now, thumb: s0.thumb, track: s0.track }));
+  const X = s0.tilt.l + Math.round(s0.tilt.w / 2), Yc = Math.round((s0.thumb.t + s0.thumb.b) / 2), per = 60 / Math.max(60, travel);            // градусів на піксель
+  // в) самий лише дотик нічого не міняє (стрілка поруч із «Мітками» — випадковий дотик карту не перекидає)
+  await page.mouse.click(X, s0.tilt.b - 6); await sleep(250);
+  const tp = await st();
+  ok(`[${T}] самий лише дотик до стрілки нічого не міняє — нахил той самий (52°)`, tp.pitch === 52 && tp.S.pitch === 52 && tp.S.view3d === true, JSON.stringify({ pitch: tp.pitch, S: tp.S }));
+  // г) тягнемо вниз: карта нахиляється одразу за пальцем; до кінця — вид згори; у налаштування пишеться, коли палець відпустили
+  const dMid = Math.round(22 / per);
+  await page.mouse.move(X, Yc); await page.mouse.down(); await page.mouse.move(X, Yc + dMid, { steps: 4 }); await sleep(120);
+  const d1 = await st();
+  await page.mouse.move(X, Yc + Math.round(70 / per), { steps: 5 }); await sleep(150);
+  const d2 = await st(); await page.mouse.up(); await sleep(200); await gps(); await sleep(1300);
+  const d3 = await st();
+  ok(`[${T}] тягнемо стрілку вниз: карта нахиляється одразу за пальцем (на ${dMid} пікселів — стало ${d1.pitch}°), у налаштування кут пишеться, коли палець відпустили`, Math.abs(d1.pitch - (52 - dMid * per)) <= 2 && d1.S.pitch === 52 && d2.pitch === 0 && d2.S.view3d === true, JSON.stringify({ d1: [d1.pitch, d1.S], d2: [d2.pitch, d2.S], per }));
+  ok(`[${T}] стрілка внизу — вид згори (2D): запам'ятовано, карта стежить далі й кут не «відскакує»; нижня «галочка» зблідла — далі нікуди`, d3.pitch === 0 && d3.S.view3d === false && d3.now === 0 && d3.flat && d3.text === 'вид згори' && d3.follow && Math.abs(d3.thumb.b - d3.track.b) <= 1 && /^1,0\.2/.test(d3.dim), JSON.stringify({ pitch: d3.pitch, S: d3.S, now: d3.now, flat: d3.flat, text: d3.text, dim: d3.dim, thumb: d3.thumb, track: d3.track }));
+  // ґ) тягнемо вгору на 40° — кут лишається й у стеженні
+  const Yb = Math.round((d3.thumb.t + d3.thumb.b) / 2);
+  await page.mouse.move(X, Yb); await page.mouse.down(); await page.mouse.move(X, Yb - Math.round(40 / per), { steps: 5 }); await page.mouse.up(); await sleep(300); await gps(); await sleep(1300);
+  const t1 = await st();
+  ok(`[${T}] потягли вгору — нахил ${t1.pitch}° (3D увімкнено), кут запам'ятовано й тримається, поки карта стежить за машиною`, Math.abs(t1.pitch - 40) <= 2 && t1.S.view3d === true && t1.S.pitch === t1.pitch && t1.now === t1.pitch && !t1.flat && t1.follow && t1.text === 'нахил ' + t1.pitch + '°', JSON.stringify({ pitch: t1.pitch, S: t1.S, now: t1.now, text: t1.text }));
+  // д) угору до кінця (палець може вийти за плашку) — найбільший нахил
+  const Yt = Math.round((t1.thumb.t + t1.thumb.b) / 2);
+  await page.mouse.move(X, Yt); await page.mouse.down(); await page.mouse.move(X, Yt - Math.round(40 / per), { steps: 5 }); await page.mouse.up(); await sleep(300);
+  const u1 = await st();
+  ok(`[${T}] стрілка вгорі — найбільший нахил (60°, дивимось збоку); верхня «галочка» зблідла`, u1.pitch === 60 && u1.S.pitch === 60 && Math.abs(u1.thumb.t - u1.track.t) <= 1 && u1.max && /^0\.2\d*,1$/.test(u1.dim), JSON.stringify({ pitch: u1.pitch, thumb: u1.thumb, track: u1.track, dim: u1.dim }));
+  await shot(page, '44b-tilt-top-' + sc.n);
+  // е) карту зсунули — з'явилось «Моє місце»; стрілка нахилу з місця не зрушила
+  await page.mouse.move(sc.w * 0.35, sc.h * 0.3); await page.mouse.down(); await page.mouse.move(sc.w * 0.35 + 60, sc.h * 0.3 + 40, { steps: 4 }); await page.mouse.up(); await sleep(500);
+  const c1 = await st();
+  await shot(page, '44c-tilt-center-' + sc.n);
+  ok(`[${T}] карту зсунули — з'явилось «Моє місце» (над нижньою плашкою справа, як і було); стрілка нахилу з місця не зрушила, нічого не накладається`, !c1.center.hidden && c1.center.vis && JSON.stringify(c1.tilt) === JSON.stringify(s0.tilt) && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ tilt: c1.tilt, was: s0.tilt, center: c1.center, lay: await page.evaluate(layoutCheck) }));
+  if (sc.n === 'tabland') ok(`[${T}] широкий планшет: «Моє місце» не в самому куті — на ${c1.vh - c1.center.box.b} пікселів вище краю, не лежить на ⓘ`, c1.vh - c1.center.box.b >= 90 && (c1.attr.t >= c1.center.box.b || c1.attr.r <= c1.center.box.l), JSON.stringify({ center: c1.center.box, attr: c1.attr, vh: c1.vh }));
+  if (main) {
+    // є) жест на карті (тут — Ctrl і мишка вгору; на телефоні — два пальці вгору-вниз) — те саме, що стрілка: вона йде слідом, кут запам'ятовується
+    const Y1 = Math.round((c1.thumb.t + c1.thumb.b) / 2);
+    await page.mouse.move(X, Y1); await page.mouse.down(); await page.mouse.move(X, Y1 + Math.round(40 / per), { steps: 5 }); await page.mouse.up(); await sleep(300);
+    const g0 = await st();
+    await page.keyboard.down('Control'); await page.mouse.move(sc.w * 0.4, sc.h * 0.4); await page.mouse.down(); await page.mouse.move(sc.w * 0.4, sc.h * 0.4 - 40, { steps: 6 }); await page.mouse.up(); await page.keyboard.up('Control'); await sleep(400);
+    const g1 = await st();
+    ok(`[${T}] нахилили карту жестом — стрілка пішла слідом, новий кут запам'ятовано (жест і стрілка — одне й те саме)`, Math.abs(g0.pitch - 20) <= 2 && g1.pitch > g0.pitch + 8 && g1.now === g1.pitch && g1.S.pitch === g1.pitch && g1.S.view3d === true && g1.thumb.b < g0.thumb.b, JSON.stringify({ before: g0.pitch, after: g1.pitch, now: g1.now, S: g1.S }));
+    // ж) плитка «2D / 3D»: 2D — згори, 3D — останній виставлений кут (а не завжди 52°)
+    const keep = g1.S.pitch;
+    await page.click('#bQuick'); await page.click('#quick [data-q="3d"]'); await sleep(700);
+    const q1 = await st(), q1t = await app(page, () => document.querySelector('#quick [data-q="3d"] .q-txt').textContent);
+    await page.click('#quick [data-q="3d"]'); await sleep(700);
+    const q2 = await st(); await page.click('#quick [data-q="close"]');
+    ok(`[${T}] плитка «2D / 3D» працює, як раніше: 2D — вид згори (стрілка внизу), 3D — останній виставлений кут (${keep}°)`, q1.pitch === 0 && q1.now === 0 && q1t === '2D' && q1.S.pitch === keep && q2.pitch === keep && q2.now === keep && q2.S.view3d, JSON.stringify({ q1: [q1.pitch, q1.S, q1t], q2: [q2.pitch, q2.S] }));
+    // з) клавіші: стрілки вгору-вниз по 5°
+    await app(page, () => document.getElementById('tilt').focus()); await page.keyboard.press('ArrowDown'); await sleep(250);
+    const k1 = await st();
+    ok(`[${T}] з клавіатури: стрілка вниз — на 5° менше`, k1.pitch === keep - 5 && k1.S.pitch === keep - 5, JSON.stringify({ keep, pitch: k1.pitch, S: k1.S }));
+    // и) після перезапуску кут той самий
+    await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.map.map.getSource('route'), null, { timeout: 20000 }); await gps(); await sleep(1500);
+    const r1 = await st();
+    ok(`[${T}] після перезапуску карта стежить під тим самим кутом (${keep - 5}°), стрілка там само`, r1.pitch === keep - 5 && r1.now === keep - 5 && r1.S.pitch === keep - 5, JSON.stringify({ pitch: r1.pitch, now: r1.now, S: r1.S }));
+    // і) відкрите меню точки, панель «Місця», рейс без GPS (кнопки ±100) — стрілка на місці, нічого не накладається
+    await app(page, () => window.__app.bus.emit('mapPick', { lat: 50.2, lon: 36.4 })); await sleep(400);
+    const pk = await app(page, () => ({ pick: !document.getElementById('pick').hidden, tilt: getComputedStyle(document.getElementById('tilt')).visibility }));
+    ok(`[${T}] відкрите меню точки на карті — стрілка нахилу на місці (вона в плашці й меню не заважає), нічого не накладається`, pk.pick && pk.tilt === 'visible' && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ pk, lay: await page.evaluate(layoutCheck) }));
+    await app(page, () => window.__reisBack()); await sleep(200);
+    await page.click('#tabs button[data-panel="places"]'); await sleep(400);
+    const pl = await st();
+    ok(`[${T}] відкриті «Місця» — стрілка нахилу на місці й під пальцем (плашка нижча — стрілка коротша: ${pl.tilt.h}), на вкладки не лягає`, pl.shown && pl.seen && pl.tilt.h >= 56 && pl.tilt.l >= pl.tabs[pl.tabs.length - 1].r + 2 && pl.tabs.every(x => !x.cut), JSON.stringify({ tilt: pl.tilt, tabs: pl.tabs }));
+    await page.click('#panelClose'); await sleep(250);
   }
   ok(`[${T}] прохід 31 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
