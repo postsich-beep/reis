@@ -52,6 +52,8 @@ export const ICON = {
   awake: I('<rect x="6.5" y="2.5" width="11" height="19" rx="2.5"/><path d="M10.5 18.5h3"/><path d="M12 7.5v4l2.5 1.5"/>'),
   check: I('<path d="m5 12.5 4.5 4.5L19 7.5"/>'),
   trash: I('<path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/>'),
+  archive: I('<path d="M4 5h16v4H4zM6 9v10h12V9M10 13h4"/>'),
+  save: I('<path d="M7 4h10v16l-5-4-5 4z"/>'),
   shower: I('<path d="M5 21V8a4 4 0 0 1 4-4h1a4 4 0 0 1 4 4"/><path d="M10.5 8h7"/><path d="M12 12v.01M15 12v.01M18 12v.01M12.5 15v.01M15.5 15v.01M18.5 15v.01M13 18v.01M16 18v.01M19 18v.01"/>'),
   go: I('<path d="M5 12h13M12.5 6l6 6-6 6"/>', 'stroke-width="2.6"'),
   plus: I('<path d="M12 5v14M5 12h14"/>', 'stroke-width="2.6"'),

@@ -1,6 +1,7 @@
 // Офлайн-карта всієї України: файл PMTiles у телефоні (завантажує оболонка), стиль Protomaps українською.
 import { bus, log, S } from './core.js';
 import * as P from './platform.js';
+import { houseLayer, houseSource } from './addr.js';
 
 export const off = { supported: P.isNative && P.offlineSupported(), installed: false, size: 0, date: '', free: 0, dl: { state: 'none' }, remote: null, remoteErr: '',
   ok: false, bad: '', mode: '', reads: 0, errs: 0, lastErr: '', glyphMiss: [], bounds: null, zooms: null };
@@ -162,8 +163,9 @@ export function offlineStyle(night = false) {
     glyphs: 'reisglyph://' + base + 'vendor/glyphs/{fontstack}/{range}.pbf',
     sprite: base + 'vendor/sprites/' + (night ? 'dark' : 'light'),
     metadata: { reisNight: !!night },
-    sources: { protomaps: { type: 'vector', url: 'pmtiles://' + base + 'offline/ukraine.pmtiles', attribution: '© OpenStreetMap · Protomaps' } },
-    layers: basemaps.layers('protomaps', flavor, { lang })
+    // addr — номери будинків: у файлі карти їх немає, беремо з мережі (від масштабу 16,4) і зберігаємо в телефоні — див. addr.js
+    sources: { protomaps: { type: 'vector', url: 'pmtiles://' + base + 'offline/ukraine.pmtiles', attribution: '© OpenStreetMap · Protomaps' }, addr: houseSource() },
+    layers: [...basemaps.layers('protomaps', flavor, { lang }), houseLayer('addr', night)]
   };
 }
 

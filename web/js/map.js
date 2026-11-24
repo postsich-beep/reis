@@ -7,6 +7,8 @@ import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { off, offlineActive, offlineStyle, tilesBad, tileBytesAt } from './offline.js';
+import { houseLayer, HOUSE_Z } from './addr.js';
+export { HOUSE_Z };
 import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
 import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
@@ -408,7 +410,6 @@ function addLayers() {
 const firstSymbolId = () => { try { const l = (map.getStyle().layers || []).find(x => x.type === 'symbol'); return l ? l.id : undefined; } catch (_) { return undefined; } };
 // Назви вулиць — більші, темні, з товстим білим обідком: читаються навіть поверх лінії рейсу.
 // Номери будинків — лише зблизька (коли водій сам наблизив карту), щоб на ходу не захаращували.
-export const HOUSE_Z = 17;
 function tuneLabels() {
   let style; try { style = map.getStyle(); } catch (_) { return; }
   const ls = style.layers || [], size = ['interpolate', ['linear'], ['zoom'], 12, 12.5, 15, 14.5, 17, 17, 19, 19];
@@ -431,12 +432,10 @@ function tuneLabels() {
   }
   // OpenMapTiles (онлайн-карта): у стилі немає шару номерів — додаємо свій із того ж джерела, нижче назв вулиць
   if (!house && omt && !map.getLayer('reis-house')) {
-    try {
-      map.addLayer({ id: 'reis-house', type: 'symbol', source: omt, 'source-layer': 'housenumber', minzoom: HOUSE_Z,
-        layout: { 'text-field': ['to-string', ['get', 'housenumber']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 17, 11, 19, 14], 'text-padding': 3 },
-        paint: { 'text-color': '#5a5145', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } }, firstRoad || undefined);
-    } catch (e) { log('warn', 'номери будинків: ' + e.message); }
+    try { map.addLayer(houseLayer(omt, false), firstRoad || undefined); } catch (e) { log('warn', 'номери будинків: ' + e.message); }
   }
+  // Офлайн-карта: шар номерів уже в стилі (джерело — addr.js, із запасом у телефоні); ставимо його теж під назви вулиць
+  else if (map.getLayer('reis-house') && firstRoad) { try { map.moveLayer('reis-house', firstRoad); } catch (_) {} }
 }
 // Контрольні повороти наперед (до 25 км, до 12 штук): видно, коли GPS немає, або коли водій увімкнув їх у Лабораторії
 let cpKey = '';
