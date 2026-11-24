@@ -398,21 +398,27 @@ if (run('1')) try {
     ok('«Рейс»: лише три точки — старт (звідки), через, фініш (куди): значки замість літер А·Б·С, без душів і зайвого', pb.tags === 'avb' && /Моє місце зараз/.test(pb.ph[0]) && /Через/.test(pb.ph[1]) && /Куди/.test(pb.ph[2]) && !/душ/i.test(pb.text), JSON.stringify({ tags: pb.tags, ph: pb.ph, text: pb.text.slice(0, 120) })); }
   await shot(page, '01b-shower');
   await page.click('#panelClose');
-  // шари карти: галочки, «вимкнути все» — чиста карта, вибірково лише АЗС
-  await page.click('#bLayers');
-  ok('кнопка «Шари» справа на головному екрані → одразу 11 галочок і «вимкнути все», без «Назад»', await page.$$eval('#quick .ly-row', e => e.length) === 11 && /Вимкнути все/.test(await page.textContent('#quick')) && !(await page.$('#quick [data-q="back"]')) && await app(page, () => document.getElementById('bLayers').classList.contains('on')));
+  // що показувати на карті (1.1.20): кнопки «Шари» справа вгорі більше немає — усі галочки в «Місцях», там же «Показати все / Прибрати все» і «Готово»
+  ok('кнопки «Шари» справа вгорі більше немає — справа лише швидкі налаштування і тип карти', await app(page, () => !document.getElementById('bLayers') && [...document.querySelectorAll('#rail > button')].map(b => b.id).join() === 'bQuick,bMap'));
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips');
+  const plc = await app(page, () => ({ keys: [...document.querySelectorAll('.pl-chip')].map(b => b.dataset.plc).join(), sub: (document.querySelector('.pl-sub') || { textContent: '' }).textContent, done: (document.querySelector('[data-plc="#done"]') || { textContent: '' }).textContent.trim(),
+    all: !!document.querySelector('[data-plc="#all"]'), none: !!document.querySelector('[data-plc="#none"]'), full: [...document.querySelectorAll('.pl-more .pl-chip')].map(b => b.getAttribute('aria-label')).join('|') }));
+  ok('«Місця»: одинадцять галочок-плиток — шість видів місць і «Ще на карті» (камери, позначки водіїв, події, проблемні місця, заміри покриття); «Показати все», «Прибрати все», унизу «Готово»', plc.keys === 'fuel,food,park,motel,shower,@mapVerified,cam,@mapReports,@mapEvents,@mapHazards,@roughMap' && plc.sub === 'Ще на карті' && plc.done === 'Готово' && plc.all && plc.none
+    && plc.full === 'Камери|Позначки водіїв (поліція, ДТП…)|Події на шляху|Проблемні місця для фури|Мої заміри покриття', JSON.stringify(plc));
   await shot(page, '01d-layers');
   const feats = () => app(page, async () => { const m = window.__app.map.map; const s = await m.getSource('stops').getData(), k = await m.getSource('marks').getData(); return { stops: s.features.map(f => f.properties.t).join(''), marks: k.features.length }; });
-  await page.click('#quick [data-ly="#off"]'); await sleep(200);
+  await page.click('[data-plc="#none"]'); await sleep(200);
   const f0 = await feats();
-  ok('«Вимкнути все» — на карті жодної точки й позначки', f0.stops === '' && f0.marks === 0, JSON.stringify(f0));
-  await page.click('#quick [data-ly="fuel"]'); await sleep(200);
+  ok('«Прибрати все» — на карті жодної точки й позначки (чиста карта)', f0.stops === '' && f0.marks === 0 && await app(page, () => { const S = window.__app.S; return !S.mapVerified && !S.mapReports && !S.mapEvents && !S.mapHazards && !S.roughMap; }), JSON.stringify(f0));
+  await page.click('.pl-chip[data-plc="fuel"]'); await sleep(200);
   const f1 = await feats();
   ok('галочка «АЗС» — лише заправки', /^f+$/.test(f1.stops) && f1.marks === 0, JSON.stringify(f1));
-  await page.click('#quick [data-ly="#off"]'); await page.click('#quick [data-ly="#on"]'); await sleep(200);
+  await page.click('[data-plc="#none"]'); await page.click('[data-plc="#all"]'); await sleep(200);
   const f2 = await feats();
-  ok('«Увімкнути все» — усі точки повернулися', f2.stops.length === 7 && f2.marks === 1, JSON.stringify(f2));
-  await page.mouse.click(4, 450); await sleep(150);       // шари займають майже весь екран — торкаємось карти збоку
+  ok('«Показати все» — усі точки повернулися, усі одинадцять галочок стоять', f2.stops.length === 7 && f2.marks === 1 && await app(page, () => [...document.querySelectorAll('.pl-chip')].every(b => b.classList.contains('on')) && document.querySelector('[data-plc="#all"]').disabled), JSON.stringify(f2));
+  await page.click('[data-plc="#done"]'); await sleep(250);
+  ok('«Готово» закриває «Місця» — знову карта', await app(page, () => document.getElementById('panel').hidden));
+  await page.click('#bQuick'); await sleep(150); await page.mouse.click(4, 450); await sleep(150);
   ok('торкання карти закриває швидкі налаштування', await app(page, () => document.getElementById('quick').hidden));
   await shot(page, '01-start');
   // АЗС на карті — плашкою з назвою мережі, а не кружечком
@@ -456,9 +462,9 @@ if (run('1')) try {
   await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), coords[500]); await sleep(300);
   ok('«Поставити на карту»: довге натискання ставить точку місцю', await app(page, () => { const x = window.__app.vplaces.byId('test-noloc'); return x && x.lat != null && document.querySelectorAll('.vpm').length === 3; }));
   await page.click('#panelClose');
-  await page.click('#bLayers'); await page.click('#quick [data-ly="@mapVerified"]');
-  ok('«Шари» → «Перевірені місця» ховає значки', await app(page, () => document.querySelectorAll('.vpm').length === 0));
-  await page.click('#quick [data-ly="@mapVerified"]'); await page.click('#quick [data-q="close"]');
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await page.click('.pl-chip[data-plc="@mapVerified"]'); await sleep(150);
+  ok('«Місця» → зняли «Перевірені» — значки з карти зникли', await app(page, () => document.querySelectorAll('.vpm').length === 0));
+  await page.click('.pl-chip[data-plc="@mapVerified"]'); await page.click('[data-plc="#done"]'); await sleep(200);
 
   // пошук: «Львов» — це Львів, а не село під Бєлгородом
   const lv = await app(page, () => window.__app.route.geocode('Львов', { lat: 49.99, lon: 36.23 }));
@@ -1130,7 +1136,7 @@ const layoutCheck = () => {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bMap,#bLayers,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bMap,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -1234,11 +1240,27 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     s1 = await tap('awake'); ok(`${T}: плитка «Екран» — гасне сам / не гасне (команда оболонці)`, s1.awake === !s0.awake && await app(page, v => window.__nativeCalls.includes('keepAwake:' + v), s1.awake)); await tap('awake');
     const z0 = s0.zb; s1 = await tap('zin'); const z1 = s1.zb; s1 = await tap('zout'); s1 = await tap('zout');
     ok(`${T}: масштаб + і −`, z1 === z0 + 1 && s1.zb === z0 - 1, `${z0} → ${z1} → ${s1.zb}`); await tap('zin');
-    await page.click('#quick [data-q="close"]'); await page.click('#bLayers'); await sleep(200);
-    ok(`${T}: кнопка «Шари» справа — 11 галочок, у межах екрана`, await app(page, () => { const q = document.getElementById('quick'); return q.querySelectorAll('.ly-row').length === 11 && q.getBoundingClientRect().bottom <= innerHeight; }));
-    await page.click('#quick [data-ly="fuel"]'); ok(`${T}: галочка в «Шарах» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
-    await page.click('#quick [data-ly="fuel"]');
-    await page.click('#quick [data-q="close"]'); ok(`${T}: ✕ закриває «Шари»`, await app(page, () => document.getElementById('quick').hidden && !document.getElementById('bLayers').classList.contains('on')));
+    await page.click('#quick [data-q="close"]');
+    // (1.1.20) галочки «що показувати на карті» — у «Місцях»: 11 плиток у межах екрана, написи цілі, «Готово» завжди внизу на видноті
+    await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(250);
+    const pl4 = await app(page, () => { const pb = document.getElementById('panelBody'), pr = pb.getBoundingClientRect(), W = innerWidth, bt = document.getElementById('bottom'), btTop = bt && getComputedStyle(bt).display !== 'none' ? bt.getBoundingClientRect().top : innerHeight;
+      const chips = [...document.querySelectorAll('.pl-chip')].map(b => { const r = b.getBoundingClientRect(), sp = b.querySelector('span:last-of-type'); return { k: b.dataset.plc, l: Math.round(r.left), r: Math.round(r.right), h: Math.round(r.height), fit: b.scrollWidth <= b.clientWidth + 1 && sp.scrollWidth <= sp.clientWidth + 1 }; });
+      const d = document.querySelector('[data-plc="#done"]'), dr = d.getBoundingClientRect(), hit = document.elementFromPoint(dr.left + dr.width / 2, dr.top + dr.height / 2);
+      const first = document.querySelector('.pl-chip').getBoundingClientRect(), fh = document.elementFromPoint(first.left + first.width / 2, first.top + first.height / 2);
+      return { n: chips.length, bad: chips.filter(c => c.l < pr.left - 1 || c.r > Math.min(W, pr.right) + 1 || c.h < 56 || !c.fit), done: { t: Math.round(dr.top), b: Math.round(dr.bottom), h: Math.round(dr.height), seen: !!hit && (hit === d || d.contains(hit)), flow: d.parentElement.classList.contains('flow') },
+        bodyH: Math.round(pb.clientHeight), bodyB: Math.round(pr.bottom), btTop: Math.round(btTop), firstSeen: !!fh && !!fh.closest('.pl-chip'), firstB: Math.round(first.bottom) }; });
+    await shot(page, '43-places-' + sc.n);
+    ok(`${T}: «Місця» — 11 галочок-плиток у межах екрана, написи цілі, зручні для пальця (≥ 56)`, pl4.n === 11 && pl4.bad.length === 0, JSON.stringify(pl4));
+    if (!pl4.done.flow) ok(`${T}: «Готово» — унизу «Місць», на видноті без прокручування (≥ 48), нічим не перекрита і перший ряд плиток не закриває`, pl4.done.seen && pl4.done.h >= 48 && pl4.done.b <= Math.min(pl4.bodyB, pl4.btTop) + 1 && pl4.firstSeen && pl4.firstB <= pl4.done.t + 16, JSON.stringify(pl4.done) + ' body ' + pl4.bodyB + ' bottom ' + pl4.btTop + ' firstB ' + pl4.firstB);
+    else {   // зовсім низька панель: «Готово» наприкінці — плитки не закриті; гортаємо до кнопки
+      await app(page, () => document.querySelector('[data-plc="#done"]').scrollIntoView({ block: 'end' })); await sleep(200);
+      const dn = await app(page, () => { const d = document.querySelector('[data-plc="#done"]'), r = d.getBoundingClientRect(), hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return { h: Math.round(r.height), seen: !!hit && (hit === d || d.contains(hit)) }; });
+      ok(`${T}: панель зовсім низька (${pl4.bodyH} пікселів) — «Готово» не закриває плитки, стоїть наприкінці; догорнули — її видно й можна натиснути`, pl4.bodyH < 200 && pl4.firstSeen && dn.seen && dn.h >= 48, JSON.stringify({ pl4: pl4.done, bodyH: pl4.bodyH, dn }));
+      await app(page, () => { document.getElementById('panelBody').scrollTop = 0; }); await sleep(100);
+    }
+    await page.click('.pl-chip[data-plc="fuel"]'); ok(`${T}: галочка в «Місцях» працює`, await app(page, () => window.__app.S.mapStopTypes.fuel === false));
+    await page.click('.pl-chip[data-plc="fuel"]');
+    await page.click('[data-plc="#done"]'); await sleep(250); ok(`${T}: «Готово» закриває «Місця»`, await app(page, () => document.getElementById('panel').hidden));
     await page.click('#bQuick');
     await app(page, () => { window.__app.map.view.lastTouch = Date.now(); window.__app.map.setFollow(false); });
     s1 = await tap('center'); ok(`${T}: плитка «Моє місце» — стежить і шторка закрилась`, s1.follow && !s1.open, JSON.stringify(s1));
@@ -1764,18 +1786,17 @@ if (run('15')) try {
   await go(cafe, 9.8); await sleep(1200);
   ok('віддалили — назв немає, усі кружечки повернулись', (await app(page, () => window.__app.map.hiddenDots())).length === 0 && !(await st(3)) && !(await st(1)), JSON.stringify(await app(page, () => window.__app.map.hiddenDots())));
   await shot(page, '18c-far-dots');
-  // «Шари» на головному екрані
-  const lb = await app(page, () => { const b = document.getElementById('bLayers'), q = document.getElementById('bQuick'), r = b.getBoundingClientRect(), rq = q.getBoundingClientRect();
-    return { vis: !b.hidden && r.width >= 44, below: r.top >= rq.bottom, right: innerWidth - r.right < 20, svg: !!b.querySelector('svg path[fill="#f59e0b"]'), label: b.getAttribute('aria-label') }; });
-  ok('кнопка «Шари» справа, під швидкими налаштуваннями, новий значок (шари з міткою)', lb.vis && lb.below && lb.right && lb.svg && /Що показувати на карті/.test(lb.label), JSON.stringify(lb));
-  await page.click('#bLayers'); await sleep(200);
-  ok('«Шари» відкривають одразу галочки (без плиток)', await app(page, () => document.querySelectorAll('#quick .ly-row').length === 11 && !document.querySelector('#quick .q-tile')));
+  // (1.1.20) кнопки «Шари» на головному екрані більше немає: галочки — у «Місцях», екран вільніший
+  const lb = await app(page, () => ({ gone: !document.getElementById('bLayers'), rail: [...document.querySelectorAll('#rail > button')].map(b => b.id).join(), quickHasLayers: !!document.querySelector('#quick .ly-row') }));
+  ok('кнопки «Шари» справа немає; справа — швидкі налаштування і тип карти', lb.gone && lb.rail === 'bQuick,bMap' && !lb.quickHasLayers, JSON.stringify(lb));
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(200);
+  ok('галочки — у «Місцях»: 11 плиток', await app(page, () => document.querySelectorAll('#panelBody .pl-chip').length === 11));
   await shot(page, '18d-layers');
-  await page.click('#quick [data-ly="#off"]'); await sleep(150);
-  ok('«Вимкнути все» — значок «Шарів» блідне', await app(page, () => document.getElementById('bLayers').classList.contains('off')));
-  await page.click('#quick [data-ly="#on"]'); await sleep(150);
-  ok('«Увімкнути все» — значок звичайний', await app(page, () => !document.getElementById('bLayers').classList.contains('off')));
-  await page.click('#quick [data-q="close"]');
+  await page.click('[data-plc="#none"]'); await sleep(150);
+  ok('«Прибрати все» — жодної галочки, кнопка «Прибрати все» неактивна', await app(page, () => !document.querySelector('.pl-chip.on') && document.querySelector('[data-plc="#none"]').disabled && !document.querySelector('[data-plc="#all"]').disabled));
+  await page.click('[data-plc="#all"]'); await sleep(150);
+  ok('«Показати все» — усі галочки, кнопка «Показати все» неактивна', await app(page, () => document.querySelectorAll('.pl-chip.on').length === 11 && document.querySelector('[data-plc="#all"]').disabled));
+  await page.click('[data-plc="#done"]'); await sleep(200);
   ok('прохід 15 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 15 дійшов до кінця', false, String(e.message).split('\n')[0]); }
@@ -1907,11 +1928,11 @@ if (run('17')) try {
   // базові шари: перший запуск — лише АЗС і камери
   { const { page, ctx, errors } = await newPage(true, { baseLayers: true });
     const lay = () => app(page, () => ({ types: window.__app.S.mapStopTypes, v: window.__app.S.mapVerified, e: window.__app.S.mapEvents, h: window.__app.S.mapHazards, r: window.__app.S.roughMap,
-      rows: [...document.querySelectorAll('#quick .ly-row')].map(r => (r.classList.contains('on') ? '✓' : '·') + r.textContent.trim()) }));
-    await page.click('#bLayers'); await sleep(200);
+      rows: [...document.querySelectorAll('#panelBody .pl-chip')].map(r => (r.classList.contains('on') ? '✓' : '·') + r.querySelector('span:last-of-type').textContent.trim()) }));
+    await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(200);
     let L = await lay();
-    ok('перший запуск: у «Шарах» стоять АЗС і Камери, як на погодженому знімку (+ позначки водіїв, які й раніше було видно завжди)', L.rows.filter(x => x[0] === '✓').map(x => x.slice(1)).join() === 'АЗС,Камери,Позначки водіїв (поліція, ДТП…)' && L.rows.length === 11, JSON.stringify(L.rows));
-    await page.click('#quick [data-ly="food"]'); await sleep(150); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
+    ok('перший запуск: у «Місцях» стоять галочки АЗС і Камери, як на погодженому знімку (+ позначки водіїв, які й раніше було видно завжди)', L.rows.filter(x => x[0] === '✓').map(x => x.slice(1)).join() === 'АЗС,Камери,Позначки водіїв' && L.rows.length === 11, JSON.stringify(L.rows));
+    await page.click('.pl-chip[data-plc="food"]'); await sleep(150); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.S);
     ok('водій додав «Де поїсти» — після перезапуску вибір водія лишився', await app(page, () => window.__app.S.mapStopTypes.food === true && window.__app.S.mapStopTypes.fuel === true));
     ok('перший запуск без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
@@ -2011,7 +2032,7 @@ if (run('19')) try {
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips');
   const pl = () => app(page, () => ({ chips: [...document.querySelectorAll('.pl-chip')].map(b => b.dataset.plc + (b.classList.contains('on') ? '+' : '-')), rows: [...document.querySelectorAll('.pl-row')].map(r => r.textContent.replace(/\s+/g, ' ').trim()), txt: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
   let st = await pl();
-  ok('«Місця»: угорі шість квадратиків — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені (стан — як галочки карти)', st.chips.length === 6 && st.chips.map(c => c.slice(0, -1)).join() === 'fuel,food,park,motel,shower,@mapVerified', JSON.stringify(st.chips));
+  ok('«Місця»: угорі шість квадратиків місць — АЗС, Їжа, Стоянки, Мотелі, Душ, Перевірені; під ними «Ще на карті» — ще п\'ять', st.chips.length === 11 && st.chips.slice(0, 6).map(c => c.slice(0, -1)).join() === 'fuel,food,park,motel,shower,@mapVerified' && st.chips.slice(6).map(c => c.slice(0, -1)).join() === 'cam,@mapReports,@mapEvents,@mapHazards,@roughMap', JSON.stringify(st.chips));
   await page.click('[data-plc="#none"]'); await sleep(200); await page.click('.pl-chip[data-plc="fuel"]'); await sleep(300); st = await pl();
   ok('«Прибрати все», потім «АЗС» — список лише АЗС попереду в рейсі, з відстанню', st.chips[0] === 'fuel+' && st.chips.slice(1).every(c => c.endsWith('-')) && st.rows.length >= 2 && st.rows.every(r => /АЗС|OKKO/.test(r)) && st.rows.some(r => /через 3,0 км/.test(r)) && /Найближчі попереду в рейсі/.test(st.txt), JSON.stringify(st.rows));
   await shot(page, '20-places-chips');
@@ -2106,8 +2127,8 @@ if (run('21')) try {
     return { img: m.hasImage('cam-ico'), ico: m.queryRenderedFeatures(box, { layers: ['cams-ico'] }).length, dot: m.queryRenderedFeatures(box, { layers: ['stops-all'] }).filter(f => f.properties.t === 'c').length }; }, camPt);
   ok('камера на карті — значком камери (білий круг, червоний обідок, фотоапарат), а не червоним кружечком', cm.img && cm.ico === 1 && cm.dot === 0, JSON.stringify(cm));
   await shot(page, '23-camera-icon');
-  await page.click('#bLayers'); await sleep(300);
-  ok('у «Що показувати на карті» біля «Камери» — той самий значок', await app(page, () => !!document.querySelector('#quick .ly-row .sdot.cam svg')));
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(300);
+  ok('у «Місцях» на плитці «Камери» — той самий значок', await app(page, () => !!document.querySelector('.pl-chip[data-plc="cam"] .pl-ic.cam svg circle[stroke="#e5484d"]')));
   ok('прохід 21 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 21 дійшов до кінця', false, String(e.message).split('\n')[0]); }
@@ -3094,9 +3115,9 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
       popup: !document.getElementById('quick').hidden, ext: window.__nativeCalls.filter(x => /^openUrl:/.test(x)).length,
       net: window.__app.map.cacheStats().net, filter: getComputedStyle(document.querySelector('.maplibregl-canvas')).filter, toast: document.getElementById('toasts').textContent }; });
   const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
-  // а) кнопка справа вгорі — між швидкими налаштуваннями й «Що показувати на карті»
+  // а) кнопка справа вгорі — під швидкими налаштуваннями (кнопки «Шари» з 1.1.20 немає)
   const order = await app(page, () => [...document.querySelectorAll('#rail > button')].map(b => b.id)), bm = await R('#bMap'), s0 = await st();
-  ok(`[${T}] справа вгорі — кнопка «Тип карти» між швидкими налаштуваннями і «Що показувати»; на ній мініатюра супутника; її нічого не перекриває`, order.join() === 'bQuick,bMap,bLayers' && bm.seen && bm.w >= 44 && bm.h >= 44 && bm.r <= bm.vw && bm.b <= bm.vh && s0.thumb === '#3f5a35' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && s0.label === 'Увімкнути супутник', JSON.stringify({ order, bm, s0 }));
+  ok(`[${T}] справа вгорі — кнопка «Тип карти» під швидкими налаштуваннями; на ній мініатюра супутника; її нічого не перекриває`, order.join() === 'bQuick,bMap' && bm.seen && bm.w >= 44 && bm.h >= 44 && bm.r <= bm.vw && bm.b <= bm.vh && s0.thumb === '#3f5a35' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && s0.label === 'Увімкнути супутник', JSON.stringify({ order, bm, s0 }));
   // б) один дотик — супутник: жодного віконця, знімки під лініями рейсу й нашими значками, напряму (не в наш кеш), джерело підписано
   const net0 = s0.net; await clearToasts();
   await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
