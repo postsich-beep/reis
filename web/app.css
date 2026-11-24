@@ -339,12 +339,12 @@ body[data-theme="night"]{
 #pts[hidden]{display:none}
 .pt-bar{padding:8px 8px 10px}
 .pt-chips{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
-.pt-chip{display:flex;align-items:center;gap:6px;min-height:50px;min-width:0;padding:4px 6px;border-radius:13px;border:2px solid transparent;background:rgba(var(--glass2-rgb),.75);color:var(--ink);text-align:left}
-.pt-chip.on{border-color:var(--amber);background:var(--panel)}
-.pt-chip .rp-t{width:26px;height:26px;border-radius:8px}.pt-chip .rp-t svg{width:18px;height:18px}
-.pt-chip span{display:flex;flex-direction:column;min-width:0}
-.pt-chip small{font:600 10px/1.1 var(--f-ui);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2)}
-.pt-chip b{font:600 13px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* точка на плашці: значок і назва («СТАРТ») — угорі, значення — окремим рядком на всю ширину («Моє місце» не обрізається) */
+.pt-chip{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;column-gap:6px;row-gap:3px;min-height:54px;min-width:0;padding:6px 7px;border-radius:13px;border:2px solid transparent;background:rgba(var(--glass2-rgb),.75);color:var(--ink);text-align:left}
+.pt-chip .rp-t{width:22px;height:22px;border-radius:7px}.pt-chip .rp-t svg{width:15px;height:15px}
+.pt-chip span{display:contents}
+.pt-chip small{font:600 10.5px/1.1 var(--f-ui);letter-spacing:.05em;text-transform:uppercase;color:var(--ink-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pt-chip b{grid-column:1/-1;font:600 13px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .pt-chip:not(.set) b{font-weight:400;color:var(--ink-2)}
 .pt-mid{display:flex;align-items:center;gap:6px;margin-top:6px;min-height:46px}
 .pt-sum{flex:1;min-width:0;margin:0 0 0 4px;font:500 14px/1.3 var(--f-ui);color:var(--ink-2)}
@@ -354,14 +354,27 @@ body[data-theme="night"]{
 .pt-bar .row{margin-top:6px;gap:6px}
 .pt-bar .btn{min-height:50px;padding:0 10px;white-space:nowrap;min-width:0}
 .pt-bar .btn span{overflow:hidden;text-overflow:ellipsis}
-.pt-bar .btn[data-pt="put"]{flex:1.5 1 0}
 .pt-bar .btn[data-pt="route"]{flex:1 1 0}
-.pt-cross.a{border-color:#2f9e62}.pt-cross.a::before,.pt-cross.a::after{background:#2f9e62}
-.pt-cross.v{border-color:#5f6a75}.pt-cross.v::before,.pt-cross.v::after{background:#5f6a75}
-/* кнопки «Старт · Через · Фініш» у картках на карті: значок над підписом — три в ряд уміщаються й на найвужчому екрані */
+.pt-bar .btn.pt-ctx{flex:1.3 1 0;gap:6px}
+.pt-bar .btn.pt-ctx svg{width:20px;height:20px;flex:none}
+.pt-bar .btn.pt-ctx.on{background:rgba(47,158,98,.16);color:var(--ink);box-shadow:inset 0 0 0 2px #2f9e62}
+/* «ця точка чекає дотику до карти» — кольорова смужка з підказкою */
+.pt-arm{display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;border-radius:12px;font:600 14px/1.25 var(--f-ui);background:rgba(229,72,77,.13);color:var(--ink)}
+.pt-arm svg{width:20px;height:20px;flex:none}
+.pt-arm.a{background:rgba(47,158,98,.16)} .pt-arm.v{background:rgba(95,106,117,.18)}
+.pt-chip.on{border-color:var(--amber);background:var(--panel);box-shadow:0 0 0 3px rgba(245,165,36,.25)}
+/* кнопки в картках на карті: «Їхати сюди» (головна) · «Старт тут» · «Через» — значок над підписом, три в ряд і на найвужчому екрані */
 .btn.pt-b{flex:1 1 0;min-width:0;flex-direction:column;gap:3px;padding:5px 4px;min-height:54px;font:600 12.5px/1 var(--f-ui)}
 .btn.pt-b .rp-t{width:26px;height:26px;border-radius:8px}.btn.pt-b .rp-t svg{width:18px;height:18px}
+#pick .row .btn.pt-b{flex:1 1 0;min-height:54px;padding:5px 4px}
+#pick .row .btn.pt-b.pt-go{flex:1.6 1 0;font-weight:800}
 #pick .row .btn[data-k="x"]{flex:none}
+/* старт у «Рейсі»: два явні способи під полем */
+.pt-two{display:grid;grid-template-columns:1fr 1fr;gap:6px;margin:-2px 0 10px}
+.pt-two button{display:flex;align-items:center;justify-content:center;gap:6px;min-height:44px;padding:0 8px;border-radius:12px;border:2px solid transparent;background:var(--panel-2);color:var(--ink);font:600 14px/1.15 var(--f-ui);min-width:0}
+.pt-two button svg{width:20px;height:20px;flex:none}
+.pt-two button span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pt-two button.on{border-color:#2f9e62;background:rgba(47,158,98,.14)}
 .wp-plan{filter:drop-shadow(0 2px 3px rgba(0,0,0,.45))}
 /* ---- 1.1.12: логотип у «Налаштуваннях» (на ньому — прихований вхід до Лабораторії) ---- */
 .app-logo{display:flex;flex-direction:column;align-items:center;gap:4px;margin:4px auto 6px;padding:6px 18px 8px;width:max-content;max-width:100%;
@@ -841,6 +854,18 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .nudge .turn-btn.hand{border-style:dashed}
 @keyframes turnwait{0%,100%{transform:scale(1)}50%{transform:scale(1.05)}}
 
+/* ---- 1.1.14: клавіатура й нижня плашка ----
+   Поки водій набирає адресу, нижня плашка (час і вкладки) не стоїть над клавіатурою поверх підказок: її немає,
+   а панель займає все місце над клавіатурою. */
+body.kb #bottom{display:none}
+/* З відкритою клавіатурою вікно стає «широким і низьким» — браузер вважає це альбомною орієнтацією.
+   Бічну розкладку для цього випадку скасовуємо: панель — на всю ширину (на планшеті — по центру). */
+body.kb #panel{top:calc(var(--st) + 6px);bottom:0;left:0;right:0;margin-inline:auto;width:min(760px,100%);height:auto;max-height:none;border-radius:16px 16px 0 0;z-index:9}
+body.kb #speed,body.kb #zoom,body.kb #cam,body.kb #rail,body.kb #attr,body.kb #top{visibility:hidden}
+/* планування рейсу (відкрита панель або плашка точок): нижня плашка непрозора — під вкладками не просвічують підписи карти */
+body.panel-open #bottom,body.pts-on #bottom{background:var(--panel)}
+body.planning #tripbar{display:none}   /* складаємо рейс: годинник у нижній плашці не забирає місце у форми */
+body.pts-on #pick{z-index:14}   /* картка точки — поверх плашки точок (у телефоні набік вони в одній колонці) */
 /* ---- 1.1.12: ПЛАНШЕТ (і вертикально, і горизонтально) ----
    Бічна розкладка («усе праворуч, карта ліворуч») — лише для телефона, покладеного набік (висота до 520 px).
    На планшеті місця досить: карта на весь екран, а все, що відкривається, — по центру й не ширше ~720 px. */

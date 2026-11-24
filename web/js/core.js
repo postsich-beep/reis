@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 40, name: '1.1.13' };
+export const VERSION = { web: 41, name: '1.1.14' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
