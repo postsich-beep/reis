@@ -82,7 +82,7 @@ function check() {
     if (said.has(key)) continue; said.add(key);
     const km = Math.round(w.ahead / 1000);
     bus.emit('feedPush', { src: 'stop', level: 'green', key, lat: p.lat, lon: p.lon,
-      text: t('vpAhead', p.name, t('vpKind_' + (p.kind || 'food')), km), voice: t('vpAheadVoice', p.name, km) });
+      text: t('vpAhead', p.name, t('vpKind_' + (p.kind || 'food')), km), voice: (v => v === 'vpAheadVoice_' + p.kind ? t('vpAheadVoice', p.name, km) : v)(t('vpAheadVoice_' + p.kind, p.name, km)) });
   }
 }
 export function init() { load(); bus.on('pos', check); bus.on('settings', k => { if (k === 'lang') bus.emit('vplaces', vp); }); }

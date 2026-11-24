@@ -110,7 +110,7 @@ export async function tileLoad(params, abortController) {
   const m = /^reisaddr:\/\/(\d+)\/(\d+)\/(\d+)/.exec(String(params && params.url || ''));
   if (!m || +m[1] !== Z) return { data: new ArrayBuffer(0) };
   const d = await getTile(+m[2], +m[3]);
-  if (d == null) return { data: new ArrayBuffer(0), cacheControl: 'max-age=40' };
+  if (d == null) { bus.emit('addrMiss', { x: +m[2], y: +m[3] }); return { data: new ArrayBuffer(0), cacheControl: 'max-age=40' }; }
   return { data: d.buffer.slice(d.byteOffset, d.byteOffset + d.byteLength) };
 }
 

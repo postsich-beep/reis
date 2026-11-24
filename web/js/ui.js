@@ -1085,7 +1085,8 @@ function placeHtml(p) {
     ${vpWhereText(p) ? `<div class="vp-where">${esc(vpWhereText(p))}</div>` : ''}
     <p class="vp-say">${esc(vpTxt(p.say))}</p>
     <div class="vp-tags">${(vpTxt(p.tags) || []).map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div>
-    ${p.menu && p.menu.length ? `<div class="sec">${t('vpMenu')}</div><div class="vp-menu">${p.menu.map(([n, pr]) => `<div><span>${esc(n)}</span><b>${esc(pr)}</b></div>`).join('')}</div><div class="muted" style="margin-top:6px">${esc(vpTxt(p.note))}</div>` : ''}
+    ${p.services && p.services.length ? `<div class="sec">${t('vpServices')}</div><div class="vp-menu vp-serv">${p.services.map(([n, pr]) => `<div><span>${esc(vpTxt(n))}</span><b>${esc(pr)}</b></div>`).join('')}</div>` : ''}
+    ${p.menu && p.menu.length ? `<div class="sec">${t(p.services && p.services.length ? 'vpMenuCafe' : 'vpMenu')}</div><div class="vp-menu">${p.menu.map(([n, pr]) => `<div><span>${esc(n)}</span><b>${esc(pr)}</b></div>`).join('')}</div><div class="muted" style="margin-top:6px">${esc(vpTxt(p.note))}</div>` : ''}
     <div class="btns">${vpOnMap(p) ? `<button class="btn pri" data-vp="go">${g.active ? t('vpVia') : t('vpRoute')}</button><button class="btn" data-vp="map">${t('vpOnMap')}</button>` : ''}</div>
     ${!vpOnMap(p) || p.own ? `<div class="btns"><button class="btn" data-vp="setloc">${t('vpSetLoc')}</button></div>` : ''}`;
 }
@@ -1354,6 +1355,8 @@ export function initUI() {
   let plT = 0; bus.on('stopsdb', () => refresh('places')); bus.on('pos', () => { const n = Date.now(); if (n - plT > 10000) { plT = n; refresh('places'); } });
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
   bus.on('trips', () => { refresh('trip'); refresh('archive'); });
+  let addrMissT = 0;
+  bus.on('addrMiss', () => { const z = mapM.map ? mapM.map.getZoom() : 0, now = Date.now(); if (!offlineActive() || z < mapM.HOUSE_Z || now - addrMissT < 600000) return; addrMissT = now; toast(t('addrMissToast'), 'yellow', 9000); });
   bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });

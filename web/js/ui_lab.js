@@ -16,6 +16,7 @@ import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from 
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
 import { logoHtml } from './lab.js';
+import { cacheInfo as addrCacheInfo } from './addr.js';
 
 /* =====================  ЛАБОРАТОРІЯ  ===================== */
 const TG = [
@@ -103,6 +104,7 @@ function offlineHtml() {
     if (dl.state === 'failed') h += `<div class="muted" style="margin-top:8px;color:var(--red)">${t('offFailed')}</div>`;
     if (off.installed && off.bad) h += `<div class="muted" id="offBad" style="margin-top:8px;color:var(--red)">${t(off.bad === 'app' ? 'offBadApp' : off.bad === 'tiles' ? 'offBadTiles' : off.bad.startsWith('short') ? 'offBadShort' : 'offBadRead', off.bad.replace(/^\w+:/, ''))}</div>`;
     // як саме читається файл карти — щоб на знімку екрана було видно причину, якщо карта не малюється
+    if (off.installed) h += `<div class="muted" id="addrInfo" style="margin-top:6px;font-size:12px">${esc(t('addrInfo', '…'))}</div>`;
     if (off.installed) h += `<div class="muted" id="offDiag" style="margin-top:6px;font-size:12px">${esc(t('offDiag', off.mode ? t('offMode_' + off.mode) : '—', off.reads, off.errs) + (off.lastErr ? ' · ' + off.lastErr : '') + (off.glyphMiss && off.glyphMiss.length ? ' · ' + t('offGlyphMiss', off.glyphMiss.length) : '') + ' · ' + t('offShell', (P.appInfo() || {}).nativeRev || '?'))}</div>`;
     const newer = r && off.installed && String(r.date) > String(off.date);
     const btns = [];
@@ -192,10 +194,13 @@ function settingsHtml() {
   <div class="btns"><button class="btn sm" data-act="resetLearn">${t('resetLearn')}</button><button class="btn sm" data-act="clearFeed">${t('clearFeed')}</button></div>
   <div class="btns"><button class="btn sm wide" data-act="about">${t('about')} · ${VERSION.name}</button></div>`;
 }
+// скільки квадратів номерів будинків уже лежить у телефоні (рядок у розділі офлайн-карти)
+function addrInfoFill() { addrCacheInfo().then(i => { const e = $('addrInfo'); if (e) e.textContent = t('addrInfo', i.tiles); }).catch(() => {}); }
 definePanel('settings', {
   title: () => t('settings'),
   render(body) {
     body.innerHTML = settingsHtml();
+    addrInfoFill();
     body.onclick = e => {
       const row = e.target.closest('[data-tg]'), b = e.target.closest('button');
       const vr = e.target.closest('[data-voice]'); if (vr) { selectVoice(vr.dataset.voice); return; }
