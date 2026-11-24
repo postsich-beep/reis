@@ -244,10 +244,12 @@ body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлай
   --ga:.40; --gs:.76; --gm:.70; --gc:.70;
   --glass-rgb:255,255,255; --glass2-rgb:206,214,222; --man-rgb:19,23,28;
   --halo:rgba(255,255,255,.95); --edge:rgba(19,23,28,.14);
+  --red-ink:#c5252b;                                   /* червоний ТЕКСТ: удень темніший, уночі світліший — читається на щільному тлі панелі */
 }
 body[data-theme="night"]{
   --glass-rgb:23,27,32; --glass2-rgb:52,61,70; --man-rgb:8,10,12;
   --halo:rgba(8,10,12,.95); --edge:rgba(255,255,255,.14);
+  --red-ink:#ff8f93;
 }
 .man,.strip,.rb,#speed,#cam,#bottom,.chip,.nudge button{-webkit-backdrop-filter:none;backdrop-filter:none}
 #panel,.toast,#pick{-webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px)}
@@ -292,7 +294,7 @@ body[data-theme="night"]{
 .hz-item .hz-ico.red{border-color:var(--red);color:#b4161b}
 .hz-item .hz-ico.green{border-color:var(--green);color:var(--green)}
 .hz-item .hz-ico svg{width:22px;height:22px}
-.hz-item.red .t{color:var(--red);font-weight:600}
+.hz-item.red .t{color:var(--red-ink,var(--red));font-weight:600}
 .hz-item .hz-ico.sh{border-color:#06b6d4;color:#0e7490}
 .sh-item{cursor:pointer}
 #pick .btn.wide{flex:1}
@@ -1072,3 +1074,6 @@ body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturat
   .cb-rows span{font-size:17px} .cb-rows b{font-size:21px} .cb-foot{font-size:15px}
   .cb-phone{border-width:3.5px;border-radius:12px} .cb-phone i{inset:8px 6px 12px}
 }
+
+/* ---- 1.1.22: перевірена стоянка для фур у деталях рейсу — рядок-кнопка (дотик — картка місця) ---- */
+.tp-row{width:100%;text-align:left;color:var(--ink);font:inherit}

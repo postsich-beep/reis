@@ -376,7 +376,7 @@ if (run('1')) try {
   ok('база піт-стопів завантажена й намальована на карті', await page.waitForFunction(() => { const s = window.__app.stopsdb.sdb; const m = window.__app.map.map; return s.ready && s.count === 7 && m.getLayer('stops-all') && m.getLayer('stops-major'); }, null, { timeout: 8000 }).then(() => true, () => false), await app(page, () => JSON.stringify({ c: window.__app.stopsdb.sdb.count, r: window.__app.stopsdb.sdb.ready, l: !!window.__app.map.map.getLayer('stops-all') })));
   await app(page, () => window.__app.bus.emit('stopTap', { i: 1 }));
   const card = await page.textContent('#pick');
-  ok('торкання точки: картка з назвою й зручностями', /OKKO/.test(card) && /душ/.test(card) && /для фур/.test(card), card.slice(0, 120));
+  ok('торкання точки: картка з назвою й зручностями; «для фур» про АЗС не пишемо (1.1.22: біля АЗС фури не пускають)', /OKKO/.test(card) && /душ/.test(card) && !/для фур/.test(card), card.slice(0, 120));
   await page.click('#pick [data-k="x"]');
   // зона сервісу: що тут є, що поруч, години й посилання
   await app(page, () => window.__app.bus.emit('stopTap', { i: 6 }));
@@ -436,7 +436,8 @@ if (run('1')) try {
   // перевірені місця: значок на карті, вкладка «Місця», картка з фото й цінами
   ok('перевірене місце на карті — значок-бургер із зіркою', !!(await page.$('.vpm')));
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row');
-  ok('«Місця» без маршруту: лише поблизу (до 50 км), шиномонтаж у Львові не показано; без точки — з поясненням', await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()) === 'test-bistro,test-noloc' && /Поблизу · до 50 км/.test(await page.textContent('#panelBody')) && /Точки на карті ще немає/.test(await page.textContent('#panelBody')), await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()));
+  ok('«Місця» без маршруту (1.1.22): УСІ перевірені місця, найближчі перші, далі за віддаленням (шиномонтаж у Львові — теж, із відстанню); без точки — у кінці, з поясненням', await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()) === 'test-bistro,test-far,test-noloc' && /Перевірені · Усі · найближчі перші/.test(await page.textContent('#panelBody')) && /Точки на карті ще немає/.test(await page.textContent('#panelBody'))
+    && /^За \d+ км від вас$/.test(await page.$eval('.vp-row[data-vpid="test-far"] .vp-w', e => e.textContent)), await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid + ':' + (x.querySelector('.vp-w') || { textContent: '' }).textContent).join(' | ')));
   await shot(page, '16-places');
   await page.click('.vp-row[data-vpid="test-bistro"]'); await page.waitForSelector('.vp-photos img');
   await page.waitForFunction(() => [...document.querySelectorAll('.vp-photos img')].slice(0, 1).every(i => i.complete && i.naturalWidth > 0), null, { timeout: 5000 }).catch(() => {});
@@ -581,10 +582,10 @@ if (run('1')) try {
   const s1 = await app(page, () => ({ next: window.__app.guide.g.next && window.__app.guide.g.next.type, dist: window.__app.guide.g.distNext, man: document.getElementById('manDist').textContent, text: document.getElementById('manText').textContent, spd: document.getElementById('spdVal').textContent }));
   ok('картка маневру: поворот ліворуч попереду', s1.next === 15 && /км|м/.test(s1.man) && /Пушкінськ/.test(s1.text), JSON.stringify(s1));
   ok('швидкість на екрані', +s1.spd > 40 && +s1.spd < 70, s1.spd);
-  // «Місця» в дорозі: лише попереду по маршруту, до 50 км від траси
+  // «Місця» в дорозі (1.1.22): усі перевірені — спершу ті, що попереду в рейсі, далі решта за відстанню
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-scope');
   const pl = await app(page, () => ({ ids: [...document.querySelectorAll('.vp-row')].map(x => x.dataset.vpid).join(), scope: ([...document.querySelectorAll('.vp-scope')].find(x => /Перевірені/.test(x.textContent)) || { textContent: '' }).textContent, w: [...document.querySelectorAll('.vp-w')].map(x => x.textContent).join(' | ') }));
-  ok('«Місця» в дорозі: лише по маршруту попереду (до 50 км від траси), Львів — ні', /^test-bistro/.test(pl.ids) && !/test-far/.test(pl.ids) && /У рейсі попереду/.test(pl.scope) && /через 15 км/.test(pl.w), JSON.stringify(pl));
+  ok('«Місця» в дорозі: усі перевірені місця — спершу попереду в рейсі («через 15 км»), далі решта за відстанню (Львів — «За … від вас»)', /^test-bistro/.test(pl.ids) && pl.ids.split(',').pop() === 'test-far' && /Усі · спершу попереду в рейсі/.test(pl.scope) && /через 15 км/.test(pl.w) && /За \d+ км від вас/.test(pl.w), JSON.stringify(pl));
   await page.click('#panelClose');
   await shot(page, '03-drive');
   // пройдене: за замовчуванням ховаємо — на карті лише шлях попереду; за налаштуванням — блідо
@@ -711,7 +712,7 @@ if (run('1')) try {
   ok('камеру і стоянки з бази піт-стопів прив’язано до маршруту', fin.cams === 1 && fin.stops === 3, `камер ${fin.cams}, стоянок ${fin.stops}`);
   ok('попередження про камеру прозвучало', fin.spoken.some(s => /Камера швидкості через/.test(s)), '');
   ok('голосові підказки поворотів були', fin.spoken.some(s => /Поверніть ліворуч/.test(s)) && fin.spoken.some(s => /Через .* (метрів|кілометр)/.test(s)));
-  ok('стоянку для фур OKKO запропоновано заздалегідь', fin.feed.some(x => /OKKO/.test(x)), fin.feed.join(' | '));
+  ok('АЗС OKKO попереду запропоновано заздалегідь — як АЗС, без слів «стоянка для фур» (ні в стрічці, ні голосом)', fin.feed.some(x => /OKKO/.test(x)) && !fin.feed.some(x => /для фур/.test(x)) && fin.spoken.some(s => /^Через .* — АЗС OKKO/.test(s)) && !fin.spoken.some(s => /стоянка для фур/.test(s)), fin.feed.join(' | ') + ' || ' + fin.spoken.filter(s => /OKKO|стоянка/.test(s)).join(' | '));
   ok('перевірене місце на маршруті попереду — у стрічці й голосом', fin.feed.some(x => /Перевірене місце «Бістро \(тест\)»/.test(x)) && fin.spoken.some(s => /перевірене кафе/.test(s)), fin.feed.join(' | '));
   ok('прибуття оголошено', fin.spoken.some(s => /Ви прибули/.test(s)) && /прибули/i.test(fin.man), fin.man);
   await shot(page, '07-arrived');
@@ -1573,7 +1574,33 @@ if (run('11')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tal
   await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick[data-mode="trip"]');
   await page.click('#routePick [data-ts="details"]');
   ok(`${T}: «Деталі» — повна панель маршруту`, await app(page, () => !document.getElementById('panel').hidden && !!document.querySelector('[data-act="rerouteFresh"]') && document.getElementById('routePick').hidden));
-  await page.click('#panelClose');
+  // (1.1.22) деталі рейсу — на весь екран: верхньої плашки з маневром і нижньої (час, кілометри, вкладки) під рукою немає
+  await sleep(250);
+  const dt = await app(page, () => { const P = document.getElementById('panel'), r = P.getBoundingClientRect(), cover = sel => { const e = document.querySelector(sel); if (!e) return true; const b = e.getBoundingClientRect(); if (!b.width || getComputedStyle(e).display === 'none') return true; const h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!h && P.contains(h); };
+    const bk = document.querySelector('#panelBody .pb-back button'), br = bk ? bk.getBoundingClientRect() : null, body = document.getElementById('panelBody');
+    return { full: P.classList.contains('full'), l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), vw: innerWidth, vh: innerHeight, top: cover('#top'), tripbar: cover('#tripbar'), tabs: cover('#tabs'), tilt: cover('#tilt'), speed: cover('#speed'),
+      back: br ? { t: Math.round(br.top), b: Math.round(br.bottom), txt: bk.textContent.trim() } : null, secs: [...body.querySelectorAll('.sec')].map(x => x.textContent.trim()).join(' | '), text: body.textContent.replace(/\s+/g, ' ') }; });
+  await shot(page, `t-${sc.n}-details`);
+  ok(`${T}: деталі рейсу — на весь екран: верхню плашку з маневром і нижню (час, кілометри, вкладки, стрілку нахилу) закрито — нічого з карти не заважає`, dt.full && dt.t <= 40 && dt.b >= dt.vh - 1 && dt.r - dt.l >= Math.min(dt.vw, 760) - 1 && dt.top && dt.tripbar && dt.tabs && dt.tilt && dt.speed, JSON.stringify(dt));
+  ok(`${T}: у деталях рейсу: «Стоянки для фур попереду» — лише перевірені (тут їх немає — так і сказано, і чому), АЗС — окремо в «АЗС і сервіс попереду», без слів «для фур»`, /Стоянки для фур попереду \| АЗС і сервіс попереду/.test(dt.secs) && /Перевірених стоянок для фур попереду в рейсі немає\. Біля АЗС фури тепер здебільшого не пускають/.test(dt.text) && !/· для фур|, для фур|для фур,/.test(dt.text), JSON.stringify({ secs: dt.secs, text: dt.text.slice(0, 600) }));
+  ok(`${T}: деталі рейсу: усе читається; унизу — «Назад»`, (await readCheck(page, '#panel', '#panelBody')).length === 0 && !!dt.back && dt.back.txt === 'Назад', JSON.stringify([await readCheck(page, '#panel', '#panelBody'), dt.back]));
+  if (sc.n === 'S10') {
+    // перевірена стоянка (комплекс для фур) попереду на маршруті — зʼявляється в «Стоянках для фур попереду»; вимкнули «Перевірені» — підказка, де їх увімкнути
+    await app(page, cx => { const V = window.__app.vplaces; V.vp.list.push(cx); window.__app.bus.emit('vplaces', V.vp); window.__app.bus.emit('guide', window.__app.guide.g); }, VP_COMPLEX); await sleep(1300);
+    const tp1 = await app(page, () => ({ rows: [...document.querySelectorAll('#panelBody .tp-row')].map(x => x.textContent.replace(/\s+/g, ' ').trim()), text: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
+    ok(`${T}: перевірена стоянка попереду на маршруті — у «Стоянках для фур попереду»: назва, вид, коли перевірено, через скільки`, tp1.rows.length === 1 && /^Комплекс \(тест\)\s*Стоянка · готель · кафе · перевірено .*2026.*\d/.test(tp1.rows[0]) && !/Перевірених стоянок для фур попереду в рейсі немає/.test(tp1.text), JSON.stringify(tp1.rows));
+    await page.click('#panelBody .tp-row'); await sleep(350);
+    ok(`${T}: дотик до неї — її картка (ціни, фото)`, await app(page, () => /Комплекс \(тест\)/.test(document.getElementById('panelTitle').textContent)), await app(page, () => document.getElementById('panelTitle').textContent));
+    await app(page, () => { window.__app.ui.setLayer ? window.__app.ui.setLayer('@mapVerified', false) : (window.__app.S.mapVerified = false); }); await sleep(200);
+    await page.click('#panelClose'); await sleep(200);
+    await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick[data-mode="trip"]'); await page.click('#routePick [data-ts="details"]'); await sleep(300);
+    const tp2 = await app(page, () => ({ rows: document.querySelectorAll('#panelBody .tp-row').length, text: document.getElementById('panelBody').textContent.replace(/\s+/g, ' ') }));
+    ok(`${T}: галочку «Перевірені» вимкнено — стоянок для фур не показуємо, підказано, де їх увімкнути`, tp2.rows === 0 && /Тут — лише перевірені стоянки\. Увімкніть «Перевірені» в «Місцях»/.test(tp2.text), tp2.text.slice(0, 400));
+    await app(page, () => { window.__app.S.mapVerified = true; const V = window.__app.vplaces; V.vp.list = V.vp.list.filter(x => x.id !== 'test-complex'); window.__app.bus.emit('vplaces', V.vp); });
+  }
+  // «Назад» унизу закриває деталі — знову карта з плашками
+  await page.click('#panelBody .pb-back button'); await sleep(300);
+  ok(`${T}: «Назад» закриває деталі — знову карта: верхня й нижня плашки на місці`, await app(page, () => document.getElementById('panel').hidden && (e => { const b = e.getBoundingClientRect(), h = document.elementFromPoint(b.left + b.width / 2, b.top + b.height / 2); return !!h && e.contains(h); })(document.getElementById('tabs'))));
   await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick [data-ts="stop"]');
   await page.click('#routePick [data-ts="stop"]');
   ok(`${T}: «Завершити» питає ще раз`, await app(page, () => window.__app.guide.g.active && /Так, завершити/.test(document.querySelector('#routePick [data-ts="stop"]').textContent)));
@@ -3621,6 +3648,16 @@ if (run('32')) try {
     const t4 = await tabR();
     ok('рейс завершено — «Мітки» знову не світяться', !t4.has && t4.n === '', JSON.stringify(t4));
     ok('прохід 32 («Мітки») без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+  /* ---- Г. Мова одна — українська: розділу «Мова» в налаштуваннях немає; хто мав «русский» — після оновлення українська ---- */
+  { const { page, ctx, errors } = await newPage(true, { viewport: { width: 360, height: 670 }, oldSettings: { lang: 'ru' } });
+    await sleep(400);
+    const l0 = await app(page, () => ({ lang: window.__app.S.lang, html: document.documentElement.lang, tabs: [...document.querySelectorAll('#tabs > button')].map(b => b.textContent.trim()).join('|'), stored: JSON.parse(localStorage.getItem('reis.settings') || '{}').lang }));
+    ok('у кого була вибрана російська — після оновлення інтерфейс українською (і збережено саме так)', l0.lang === 'uk' && l0.html === 'uk' && l0.stored === 'uk' && /^Телефон\|Події\d*\|Рейс\|Місця\|Мітки$/.test(l0.tabs), JSON.stringify(l0));
+    await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .sec'); await sleep(200);
+    const st = await app(page, () => ({ secs: [...document.querySelectorAll('#panelBody .sec')].map(x => x.textContent.trim()), seg: !!document.querySelector('#panelBody [data-seg^="lang:"]'), text: document.getElementById('panelBody').textContent }));
+    ok('у «Налаштуваннях» розділу «Мова» більше немає (ні заголовка, ні перемикача «Українська / Русский»); решта розділів на місці', !st.seg && !st.secs.some(x => /^Мова$/i.test(x)) && !/Русский/.test(st.text) && st.secs.some(x => /Фура/i.test(x)) && st.secs.length >= 5, JSON.stringify(st.secs));
+    ok('прохід 32 (мова) без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
 } catch (e) { ok('прохід 32 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 

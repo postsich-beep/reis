@@ -107,7 +107,9 @@ export const snapshot = () => ({ cams: [...rawCams.values()], stops: [...rawStop
 
 export const stopsAhead = (minScore = 0) => poi.stops.filter(s => pos.rd == null || s.d > pos.rd + 200).filter(s => s.score >= minScore);
 export function stopLabel(s) {
-  const kind = t('stop_' + s.kind), feats = [s.hgv && t('f_hgv'), s.shower && t('f_shower'), s.food && t('f_food'), s.wc && t('f_wc'), s.h24 && '24/7'].filter(Boolean);
+  // (1.1.22) «для фур» про місця із загальної бази більше не кажемо й не пишемо: біля АЗС фури тепер здебільшого не пускають,
+  // а перевірити позначку з карти ми не можемо. «Стоянка для фур» — лише перевірені стоянки (ui.js: truckParksAhead).
+  const kind = t('stop_' + s.kind), feats = [s.shower && t('f_shower'), s.food && t('f_food'), s.wc && t('f_wc'), s.h24 && '24/7'].filter(Boolean);
   return { title: s.name ? s.name : kind, sub: (s.name ? kind + (feats.length ? ' · ' : '') : '') + feats.join(', ') };
 }
 
@@ -132,7 +134,7 @@ function check() {
       const best = win.slice().sort((a, b) => (b.score - a.score) || (a.d - b.d))[0], ahead = best.d - rd, lb = stopLabel(best);
       for (const s of win) stopSaid.add(s.id);
       lastStopSay = Date.now();
-      bus.emit('feedPush', { src: 'stop', level: 'green', text: t('stopAhead', fmtDist(ahead), lb.title) + (lb.sub ? ' — ' + lb.sub : ''), key: 'stop' + best.id, lat: best.lat, lon: best.lon, voice: t('voiceStop', distWords(ahead), lb.title) });
+      bus.emit('feedPush', { src: 'stop', level: 'green', text: t('stopAhead', fmtDist(ahead), lb.title) + (lb.sub ? ' — ' + lb.sub : ''), key: 'stop' + best.id, lat: best.lat, lon: best.lon, voice: t('voiceStop', distWords(ahead), (best.name ? t('stop_' + best.kind) + ' ' : '') + lb.title) });
     }
   }
 }

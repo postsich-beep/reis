@@ -31,6 +31,7 @@ import * as uiCalib from './ui_calib.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
+  if (S.lang !== 'uk') S.lang = 'uk';        // (1.1.22) мова одна — українська; розділ «Мова» з налаштувань прибрано, колишній вибір «русский» скидаємо
   document.documentElement.lang = S.lang;
   offline.init(); addr.init();
   await offline.whenChecked(1500);        // файл офлайн-карти перевірено — карта одразу стартує з правильним джерелом

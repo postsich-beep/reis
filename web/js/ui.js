@@ -491,9 +491,17 @@ function showersNearHtml() {
   return `<div class="sec">${t('showerNear')}</div><div class="list">${showerItems(list, x => x.dist)}</div><div class="muted" style="margin-top:6px">${t('showerHint')}</div>`;
 }
 
+// Перевірені стоянки для фур попереду на маршруті (1.1.22). В Україні фури біля АЗС тепер здебільшого не пускають, тож «стоянкою для фур»
+// називаємо лише перевірене місце-стоянку (вид «Стоянка» чи «Стоянка · готель · кафе») — і лише коли ввімкнено галочку «Перевірені».
+function truckParksAhead() {
+  if (!layerOn('@mapVerified') || !vp.ready) return [];
+  return vp.list.filter(p => p.kind === 'park' || p.kind === 'complex').map(p => ({ p, w: vpWhere(p) }))
+    .filter(x => x.w && x.w.route && x.w.ahead > -300 && x.w.off <= 1500).sort((a, b) => a.w.ahead - b.w.ahead);
+}
 function tripActiveHtml() {
   const tr = g.trip;
   const st = stopsAhead(3).slice(0, 3).map(s => { const l = stopLabel(s); return `<div class="item"><div class="grow"><div class="t">${esc(l.title)}</div><div class="muted">${esc(l.sub)}</div></div><b style="font:800 20px var(--f-num)">${fmtDist(Math.max(0, s.d - (pos.rd || 0)))}</b></div>`; }).join('');
+  const parks = truckParksAhead().slice(0, 4).map(x => `<button class="item tp-row" data-vpid="${esc(x.p.id)}"><div class="grow"><div class="t">${esc(x.p.name)}</div><div class="muted">${esc(t('vpKind_' + x.p.kind))} · ${t('tpChecked', vpMonth(x.p.checked))}</div></div><b style="font:800 20px var(--f-num)">${fmtDist(Math.max(0, x.w.ahead))}</b></button>`).join('');
   const regs = regionsAhead().map(r => `<span class="pill${feed.air[r.id] ? ' air' : ''}">${esc(oblastName(r.id))}${r.eta > 60 ? ' · ' + fmtDur(r.eta) : ''}</span>`).join('');
   return `<div class="card"><div class="t" style="font-weight:600;margin-bottom:10px">${esc(tripTitle(tr))}</div>
     <div class="kv"><div><b>${fmtDist(g.remain)}</b><span>${t('remainL')}</span></div><div><b>${fmtDur(g.remTime)}</b><span>${t('driveTime')}</span></div><div><b>${g.arrived ? '—' : fmtClock(new Date(g.eta))}</b><span>${t('arrival')}</span></div></div>
@@ -502,9 +510,11 @@ function tripActiveHtml() {
   <div class="btns"><button class="btn" data-act="offline">${t('offlineMap')}</button></div>
   <div class="btns"><button class="btn danger wide" data-act="stop">${t('endTrip')}</button></div>
   ${poi.drive > 300 ? `<div class="sec">${t('driveSec')}</div><div class="card">${t('driveNow', fmtDur(poi.drive))}</div>` : ''}
-  <div class="sec">${t('stopsSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>
+  <div class="sec">${t('stopsSec')}</div><div class="list">${parks || `<div class="muted">${t(layerOn('@mapVerified') ? 'tpNone' : 'tpOff')}</div>`}</div>
+  <div class="sec">${t('stopsOtherSec')}</div><div class="list">${st || `<div class="muted">${poi.loading ? t('loading') : t('stopsNone')}</div>`}</div>
   ${showersRouteHtml(g.route, g.idx, pos.rd || 0)}
-  ${truckHtml(g.route, pos.rd || 0, d => Date.now() + Math.max(0, d - (pos.rd || 0)) / Math.max(1, g.remain) * g.remTime * 1000)}`;
+  ${truckHtml(g.route, pos.rd || 0, d => Date.now() + Math.max(0, d - (pos.rd || 0)) / Math.max(1, g.remain) * g.remTime * 1000)}
+  <div class="pb-back"><button class="btn wide" data-act="back">${ICON.back}${t('back')}</button></div>`;
 }
 /* ---------- «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки (1.1.16) ----------
    Раніше всі збережені рейси розгортались стрічкою під формою «Рейс» (а зберігається кожен рейс, яким рушили, —
@@ -999,6 +1009,8 @@ async function goTrip(trip, opts = {}) {
   pollAir(); pollTelegram(true);
 }
 function tripClicks(e) {
+  const tp = e.target.closest('.tp-row[data-vpid]');
+  if (tp) { vpCur = byIdVp(tp.dataset.vpid); if (vpCur) openPanel('place'); return; }
   const sh = e.target.closest('[data-shlat]');
   if (sh) { closePanel(); flyTo({ lat: +sh.dataset.shlat, lon: +sh.dataset.shlon }, 15); return; }
   const b = e.target.closest('button'); if (!b) return;
@@ -1019,6 +1031,7 @@ function tripClicks(e) {
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') endTrip(true);
+  else if (d.act === 'back') closePanel();
 
   else if (d.here) {
     // «З мого місця»: старт — там, де телефон у мить побудови рейсу (не знімок координат, зроблений зараз)
@@ -1054,9 +1067,12 @@ definePanel('trip', {
     body.innerHTML = active ? tripActiveHtml() : planHtml();
     body.onclick = tripClicks; body.oninput = tripInput; body.onfocusin = tripFocus;
     $('panel').classList.toggle('half', !active && !!plan.trip);     // маршрут побудовано — панель нижче, лінію видно на карті
+    // (1.1.22) деталі рейсу в дорозі — на ВЕСЬ екран: верхня плашка з маневром і нижня (час, кілометри, вкладки) належать карті й тут заважали
+    $('panel').classList.toggle('full', !!active);
   },
   update(body) {
     const active = g.trip && (g.active || g.arrived);
+    $('panel').classList.toggle('full', !!active);
     if (active) { body.innerHTML = tripActiveHtml(); return; }
     // форму не перемальовуємо, щоб не збивати введення
     const sum = $('planSum'), er = $('planErr'), bb = body.querySelector('[data-act="build"]'), ns = $('newSec');
@@ -1134,7 +1150,7 @@ const plAllHtml = () => { const any = LAYERS.some(([k]) => layerOn(k)), all = LA
 function plRowHtml(x) {
   const [, , ty, f, name, , info] = x.r, fa = (info && info.fa) || [];
   const kind = stopKindLabel(ty, info), title = ty === 'f' ? brandOf(name) : (name || kind);
-  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && ty !== 'e' && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
+  const feats = [f & F.SHOWER && t('f_shower'), f & F.FOOD && ty !== 'e' && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);       // «для фур» не пишемо: перевірити не можемо (1.1.22)
   const where = x.ahead != null ? (x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead))) : fmtDist(x.dist);
   const side = x.ahead != null && x.off > 300 ? `<small>${esc(t('plOff', fmtDist(x.off)))}</small>` : '';
   return `<button class="pl-row" data-sti="${x.i}">${plPic(ty, !!(f & F.SHOWER))}
@@ -1312,7 +1328,7 @@ function onStopTap(x) {
   const r = sdb.rows[x.i]; if (!r) return;
   const [lat, lon, ty, f, name, extra, info] = r;
   const fa = (info && info.fa) || [];
-  const feats = [f & F.HGV && t('f_hgv'), f & F.SHOWER && t('f_shower'), f & F.FOOD && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
+  const feats = [f & F.SHOWER && t('f_shower'), f & F.FOOD && t('f_food'), (f & F.WC || fa.includes('wc')) && t('f_wc'), f & F.H24 && '24/7'].filter(Boolean);
   const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, { lat, lon })) + ' ' + t('fromYou') : '';
   const kindL = stopKindLabel(ty, info);
   const title = ty === 'c' ? t('camera') + (extra ? ' · ' + extra + ' ' + t('kmh') : '') : (name || kindL);

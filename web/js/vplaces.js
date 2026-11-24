@@ -45,21 +45,20 @@ export function whereIs(p) {
   if (pos.lat == null) return null;
   return { dist: hav(pos, p), route: false };
 }
-// «Місця»: з маршрутом — лише попереду по маршруту й не далі 50 км від траси; без маршруту — до 50 км від машини.
-// Так у списку не буде зайвого, коли картотека розростеться (шиномонтажі, виїзний ремонт по всій Україні).
-export const NEAR_M = 50000;
+// «Місця» → «Перевірені» (1.1.22): УСІ перевірені місця, найближчі перші, далі — за віддаленням (раніше — лише до 50 км).
+// У рейсі спершу ті, що попереду на маршруті (за відстанню по рейсу), потім решта — за відстанню по прямій від машини.
+// Місця без точки на карті — у кінці (щоб водій міг її поставити).
+export const NEAR_M = 50000;               // «поруч із трасою» в рейсі: до 50 км убік — це ще «попереду в рейсі»
 export function listed() {
   const trip = g.active && g.idx && pos.rd != null, out = [];
   for (const p of vp.list) {
-    if (!onMap(p)) { if (!trip) out.push({ p, k: 1e12 }); continue; }      // без точки — у кінці, щоб водій міг її поставити
+    if (!onMap(p)) { out.push({ p, k: 9e12 }); continue; }
     if (trip) {
-      const l = g.idx.locate(p, null); if (!l || l.off > NEAR_M) continue;
-      const a = l.d - pos.rd; if (a < -500) continue;                      // позаду — не цікаво
-      out.push({ p, k: a, w: { ahead: a, off: l.off, route: true } });
-    } else if (pos.lat != null) {
-      const d = hav(pos, p); if (d > NEAR_M) continue;
-      out.push({ p, k: d, w: { dist: d, route: false } });
-    } else out.push({ p, k: 1e12 });
+      const l = g.idx.locate(p, null), a = l ? l.d - pos.rd : 0;
+      if (l && l.off <= NEAR_M && a >= -500) { out.push({ p, k: a, w: { ahead: a, off: l.off, route: true } }); continue; }
+    }
+    if (pos.lat != null) { const d = hav(pos, p); out.push({ p, k: 1e9 + d, w: { dist: d, route: false } }); }
+    else out.push({ p, k: 8e12 });
   }
   return out.sort((a, b) => a.k - b.k);
 }
