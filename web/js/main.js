@@ -13,6 +13,7 @@ import * as roads from './roads.js';
 import * as rough from './rough.js';
 import * as showers from './showers.js';
 import * as offline from './offline.js';
+import * as addr from './addr.js';
 import * as stopsdb from './stopsdb.js';
 import * as mapM from './map.js';
 import * as route from './route.js';
@@ -29,7 +30,7 @@ import * as sensors from './sensors.js';
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
   document.documentElement.lang = S.lang;
-  offline.init();
+  offline.init(); addr.init();
   await offline.whenChecked(1500);        // файл офлайн-карти перевірено — карта одразу стартує з правильним джерелом
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
@@ -45,5 +46,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, stopsdb, vplaces, reports, limits, sfx, sensors, lab, ui: { ptsState } };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, lab, ui: { ptsState } };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

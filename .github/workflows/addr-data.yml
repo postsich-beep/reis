@@ -1,0 +1,87 @@
+name: Номери будинків
+
+# Раз на місяць збирає з вивантаження OpenStreetMap для України (Geofabrik) номери будинків — компактними «пачками»
+# (tools/build_addr.py) — і кладе їх у гілку addr цього сховища. Застосунок бере їх звідти
+# (raw.githubusercontent.com віддає файли з дозволом для вебсторінок) і зберігає в телефоні: номери будинків
+# на офлайн-карті видно без мережі. У main і в оновлення застосунку ці файли не потрапляють.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 3 3 * *'
+  push:
+    branches: [main]
+    paths: ['.github/workflows/addr-data.yml', 'tools/build_addr.py']
+
+permissions:
+  contents: write
+
+concurrency:
+  group: addr-data
+  cancel-in-progress: false
+
+jobs:
+  addr:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Інструменти
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq osmium-tool
+
+      - name: Перевірка збирача на зразку
+        run: |
+          # зразок дає ті самі пачки, що лежать у тестах застосунку (порівнюємо розпаковане: gzip у різних версіях стискає по-різному)
+          python3 tools/build_addr.py tests/fixtures/addr/sample.geojsonseq "$RUNNER_TEMP/selftest" 20261124
+          python3 -c "import gzip,json,sys; a,b=sys.argv[1:3]; i=json.load(open(a+'/index.json')); j=json.load(open(b+'/index.json')); assert i['total']==j['total']==8 and set(i['packs'])==set(j['packs']), (i,j); [sys.exit('пачка '+k+' інакша') for k in i['packs'] if gzip.decompress(open(a+'/'+k+'.bin.gz','rb').read())!=gzip.decompress(open(b+'/'+k+'.bin.gz','rb').read())]; print('зразок збігається')" "$RUNNER_TEMP/selftest/v1" tests/fixtures/addr/v1
+
+      - name: Вивантаження України з Geofabrik
+        run: |
+          # ті самі адреси й порядок спроб, що й у «Даних OpenStreetMap»
+          cands=$(curl -fsSL --retry 3 https://download.geofabrik.de/index-v1.json | python3 -c "import json,sys; d=json.load(sys.stdin); print(' '.join(f['properties']['urls']['pbf'] for f in d['features'] if f['properties'].get('id')=='ukraine'))" || true)
+          echo "каталог Geofabrik: ${cands:-немає}"
+          for d in 0 1 2 3 4 5 6 7; do day=$(date -u -d "-$d day" +%y%m%d); cands="$cands https://download.geofabrik.de/europe/ukraine/ukraine-$day.osm.pbf https://download.geofabrik.de/europe/ukraine-$day.osm.pbf"; done
+          cands="$cands https://download.geofabrik.de/europe/ukraine/ukraine-latest.osm.pbf https://download.geofabrik.de/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine-latest.osm.pbf https://download.openstreetmap.fr/extracts/europe/ukraine.osm.pbf"
+          ok=""
+          for round in 1 2 3; do
+            for u in $cands; do
+              code=$(curl -sIL -o /dev/null -w '%{http_code} %{url_effective}' "$u" || true)
+              echo "перевірка: $u → $code"
+              case "$code" in 200*) ;; *) continue;; esac
+              if curl -fSL --retry 3 --retry-delay 20 -o ukraine.osm.pbf "$u" && [ "$(stat -c %s ukraine.osm.pbf)" -gt 300000000 ]; then echo "звідки: $u"; ok=1; break 2; fi
+              echo "не вдалося: $u"
+            done
+            sleep 300
+          done
+          [ -n "$ok" ] || { echo "вивантаження України недоступне"; exit 1; }
+          ls -la ukraine.osm.pbf
+
+      - name: Об'єкти з номером будинку
+        run: |
+          osmium tags-filter ukraine.osm.pbf nw/addr:housenumber -o addr.osm.pbf --overwrite
+          rm -f ukraine.osm.pbf
+          osmium export addr.osm.pbf -f geojsonseq -x print_record_separator=false -o addr.geojsonseq --overwrite
+          ls -la addr.osm.pbf addr.geojsonseq
+          wc -l addr.geojsonseq
+
+      - name: Зібрати пачки
+        run: |
+          DATE=$(date -u +%Y%m%d)
+          python3 tools/build_addr.py addr.geojsonseq "$RUNNER_TEMP/addr" "$DATE"
+          ls "$RUNNER_TEMP/addr/v1" | wc -l
+          du -sh "$RUNNER_TEMP/addr/v1"
+          # запобіжник: якщо номерів підозріло мало — нічого не публікуємо (старі дані кращі за зіпсовані)
+          python3 -c "import json,sys; d=json.load(open(sys.argv[1])); print('номерів:', d['total'], 'пачок:', len(d['packs']), 'байтів:', d['bytes']); sys.exit(0 if d['total'] > 300000 and len(d['packs']) > 20 else 1)" "$RUNNER_TEMP/addr/v1/index.json"
+
+      - name: Покласти в гілку addr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "$RUNNER_TEMP/addr"
+          printf '%s\n' "# Номери будинків України для застосунку «Рейс»" "" "Зібрано з OpenStreetMap (© учасники OpenStreetMap, ODbL) — tools/build_addr.py у гілці main." "Гілка перезаписується щомісяця; історії тут немає навмисно." > README.md
+          git init -q -b addr
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -q -m "Номери будинків: $(date -u +%Y-%m-%d)"
+          git push -f "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" addr

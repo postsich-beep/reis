@@ -7,6 +7,8 @@ import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
 import { OBLAST_CENTER, oblastName } from './route.js';
 import { off, offlineActive, offlineStyle, tilesBad, tileBytesAt } from './offline.js';
+import { houseLayer, HOUSE_Z } from './addr.js';
+export { HOUSE_Z };
 import { sdb, TYPES, SHOWER_COLOR } from './stopsdb.js';
 import * as showers from './showers.js';
 import { routeCats, hazardsAlong, hazardText, indexOf } from './roads.js';
@@ -120,6 +122,7 @@ export const aiming = () => !!tapHook;
 export function screenToGeo(x, y) { if (!map) return null; const p = map.unproject([x, y]); return { lat: p.lat, lon: p.lng }; }
 // Перевірене місце: маленький бургер із золотою зіркою — відрізняється від кольорових кружечків піт-стопів
 const VP_ICON = { food: '<svg viewBox="0 0 32 32"><path d="M6 14a10 7 0 0 1 20 0z" fill="#f5a524"/><circle cx="12" cy="10" r=".9" fill="#fff6d6"/><circle cx="17" cy="8.6" r=".9" fill="#fff6d6"/><circle cx="20.5" cy="11" r=".9" fill="#fff6d6"/><path d="M5.5 15.6q2.6 1.8 5.2 0t5.3 0 5.3 0 5.2 0" stroke="#3fae49" stroke-width="2.2" fill="none" stroke-linecap="round"/><rect x="6" y="17.4" width="20" height="3.6" rx="1.8" fill="#7a2e12"/><path d="M6.5 22.4h19a1.5 1.5 0 0 1-1.6 3.1H8.1a1.5 1.5 0 0 1-1.6-3.1z" fill="#f5a524"/></svg>' };
+VP_ICON.complex = VP_ICON.park = '<svg viewBox="0 0 32 32"><rect x="5" y="5" width="22" height="22" rx="5" fill="#1f6feb"/><path d="M12.5 22.5V9.5h5a4 4 0 0 1 0 8h-5" fill="none" stroke="#fff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const VP_STAR = '<i class="vpm-star"><svg viewBox="0 0 24 24"><path d="M12 3.2l2.6 5.5 6 .7-4.5 4.1 1.2 5.9L12 16.5l-5.3 2.9 1.2-5.9L3.4 9.4l6-.7z" fill="#fff"/></svg></i>';
 export function drawVerified() {
   if (!map) return;
@@ -408,7 +411,6 @@ function addLayers() {
 const firstSymbolId = () => { try { const l = (map.getStyle().layers || []).find(x => x.type === 'symbol'); return l ? l.id : undefined; } catch (_) { return undefined; } };
 // Назви вулиць — більші, темні, з товстим білим обідком: читаються навіть поверх лінії рейсу.
 // Номери будинків — лише зблизька (коли водій сам наблизив карту), щоб на ходу не захаращували.
-export const HOUSE_Z = 17;
 function tuneLabels() {
   let style; try { style = map.getStyle(); } catch (_) { return; }
   const ls = style.layers || [], size = ['interpolate', ['linear'], ['zoom'], 12, 12.5, 15, 14.5, 17, 17, 19, 19];
@@ -431,12 +433,10 @@ function tuneLabels() {
   }
   // OpenMapTiles (онлайн-карта): у стилі немає шару номерів — додаємо свій із того ж джерела, нижче назв вулиць
   if (!house && omt && !map.getLayer('reis-house')) {
-    try {
-      map.addLayer({ id: 'reis-house', type: 'symbol', source: omt, 'source-layer': 'housenumber', minzoom: HOUSE_Z,
-        layout: { 'text-field': ['to-string', ['get', 'housenumber']], 'text-font': ['Noto Sans Regular'], 'text-size': ['interpolate', ['linear'], ['zoom'], 17, 11, 19, 14], 'text-padding': 3 },
-        paint: { 'text-color': '#5a5145', 'text-halo-color': '#ffffff', 'text-halo-width': 1.5 } }, firstRoad || undefined);
-    } catch (e) { log('warn', 'номери будинків: ' + e.message); }
+    try { map.addLayer(houseLayer(omt, false), firstRoad || undefined); } catch (e) { log('warn', 'номери будинків: ' + e.message); }
   }
+  // Офлайн-карта: шар номерів уже в стилі (джерело — addr.js, із запасом у телефоні); ставимо його теж під назви вулиць
+  else if (map.getLayer('reis-house') && firstRoad) { try { map.moveLayer('reis-house', firstRoad); } catch (_) {} }
 }
 // Контрольні повороти наперед (до 25 км, до 12 штук): видно, коли GPS немає, або коли водій увімкнув їх у Лабораторії
 let cpKey = '';

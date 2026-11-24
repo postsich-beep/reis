@@ -461,12 +461,60 @@ function tripActiveHtml() {
   ${showersRouteHtml(g.route, g.idx, pos.rd || 0)}
   ${truckHtml(g.route, pos.rd || 0, d => Date.now() + Math.max(0, d - (pos.rd || 0)) / Math.max(1, g.remain) * g.remTime * 1000)}`;
 }
-function savedHtml() {
-  const list = getTrips().filter(x => !g.trip || x.id !== g.trip.id);
-  if (!list.length) return '';                                       // порожньо — нічого не показуємо
-  return `<div class="sec">${t('savedSec')}</div><div class="list">` + list.map(x => `<div class="item"><div class="grow"><div class="t">${esc(tripTitle(x))}</div><div class="muted">${x.route ? fmtDist(x.route.dist) + ' · ' + fmtDur(x.route.time) : ''}</div></div>
-    <button class="btn sm pri" data-open="${x.id}">${t('open')}</button><button class="btn sm" data-del="${x.id}" aria-label="${t('delete')}">${ICON.trash}</button></div>`).join('') + '</div>';
+/* ---------- «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки (1.1.16) ----------
+   Раніше всі збережені рейси розгортались стрічкою під формою «Рейс» (а зберігається кожен рейс, яким рушили, —
+   стрічка росла й відсувала форму). Тепер у формі — дві кнопки на місці заголовка «Новий рейс» (місця не займають):
+     • «Архів рейсів» (з кількістю) — окремий екран зі списком: найновіші згори, «Відкрити», кошик (із поверненням);
+     • «Зберегти рейс» — зберігає прокладений рейс; якщо рейс іще не прокладено, а фініш уже є — прокладає й зберігає. */
+const archList = () => getTrips().filter(x => !g.trip || x.id !== g.trip.id).slice().sort((a, b) => (b.created || 0) - (a.created || 0));
+const canSaveTrip = () => !!plan.trip || !!plan.b || !!($('in_b') && $('in_b').value.trim());
+function tripToolsHtml() {
+  const n = archList().length;
+  return `<button class="tt-b" data-act="archive">${ICON.archive}<span>${t('tripArchive')}</span>${n ? `<i>${n}</i>` : ''}</button>
+    <button class="tt-b${canSaveTrip() ? ' can' : ''}" data-act="saveTrip" ${plan.busy ? 'disabled' : ''}>${ICON.save}<span>${t('tripSave')}</span></button>`;
 }
+function tripToolsSync() { const b = $('tripTools'); if (b) b.innerHTML = tripToolsHtml(); }
+/** Зберегти прокладений рейс і почати з чистого аркуша (його видно в «Архіві рейсів»). */
+function saveCurrentTrip() {
+  const tr = plan.trip; if (!tr) return;
+  if (tr.route) delete tr.route.alts;
+  plan.routes = []; saveTrip(tr); toast(t('saved'), 'green', 4000);
+  plan.trip = null; plan.a = plan.v = plan.b = null; pickHide(); previewRoute(null); previewAlts(null); mapM.previewPoints(null); hud(); openPanel('trip');
+}
+function saveTripTap() {
+  if (plan.busy) return;
+  if (plan.trip) { saveCurrentTrip(); return; }
+  if (!canSaveTrip()) { toast(t('tripSaveNeed'), 'yellow', 5000); const i = $('in_b'); if (i) i.focus(); return; }
+  plan.saveAfter = true; toast(t('tripSaving'), '', 4000); doBuild();        // рейс іще не прокладено: прокладаємо й одразу зберігаємо
+}
+const archDate = x => { try { return x.created ? new Date(x.created).toLocaleDateString(S.lang === 'ru' ? 'ru-RU' : 'uk-UA', { day: 'numeric', month: 'short' }) : ''; } catch (_) { return ''; } };
+function archiveHtml() {
+  const list = archList();
+  if (!list.length) return `<div class="arch-empty">${ICON.archive}<div>${t('archEmpty')}</div></div>`;
+  return `<div class="muted arch-hint">${t('archHint')}</div><div class="list arch">` + list.map(x => `<div class="item"><div class="grow"><div class="t">${esc(tripTitle(x))}</div>
+      <div class="muted">${[x.route ? fmtDist(x.route.dist) + ' · ' + fmtDur(x.route.time) : '', archDate(x)].filter(Boolean).join(' · ')}</div></div>
+    <button class="btn sm pri" data-open="${x.id}">${t('open')}</button><button class="btn sm arch-del" data-del="${x.id}" aria-label="${t('delete')}">${ICON.trash}</button></div>`).join('') + '</div>';
+}
+function openSavedTrip(id) {
+  const tr = getTrips().find(x => x.id === id); if (!tr || !tr.route) return;
+  plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null;
+  mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr);
+}
+function archClicks(e) {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.open) openSavedTrip(b.dataset.open);
+  else if (b.dataset.del) {
+    const tr = getTrips().find(x => x.id === b.dataset.del); if (!tr) return;
+    deleteTrip(tr.id); archRedraw();
+    toast(t('tripDeleted'), '', 7000, () => { saveTrip(tr); toast(t('tripRestored'), 'green', 3000); });      // випадковий дотик до кошика — можна повернути
+  }
+}
+function archRedraw() { if (currentPanel() === 'archive') { const b = $('panelBody'), st = b.scrollTop; b.innerHTML = archiveHtml(); b.scrollTop = st; } }
+definePanel('archive', {
+  title: () => t('tripArchive'), back: 'trip', tab: 'trip',
+  render(body) { body.innerHTML = archiveHtml(); body.onclick = archClicks; body.oninput = null; body.onfocusin = null; },
+  update(body) { body.innerHTML = archiveHtml(); }
+});
 // Поле точки рейсу: значок (старт / через / фініш), текст — або кнопка «на карті»: поставити точку пальцем
 function fieldHtml(k, ph) {
   const v = k === 'a' && startIsMe() ? null : plan[k];
@@ -481,13 +529,13 @@ const startTwoHtml = () => `<button class="${startIsMe() ? 'on' : ''}" data-here
 const startTwoSync = () => { const e = $('startTwo'); if (e) e.innerHTML = startTwoHtml(); };
 function planHtml() {
   // Лише три точки: старт — звідки, через (проміжна, необов'язково), фініш — куди. Нічого зайвого (душі тощо — на карті й у дорозі).
-  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec">${t('newTrip')}</div>
+  return `<div class="trip-tools" id="tripTools">${tripToolsHtml()}</div>
+    <div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec" id="newSec" ${plan.trip ? '' : 'hidden'}>${t('newTrip')}</div>
     ${fieldHtml('a', t('phA'))}${fieldHtml('v', t('phV'))}${fieldHtml('b', t('phB'))}
     <div class="muted pt-hint">${ICON.pin}<span>${t('ptFormHint')}</span></div>
     ${vehHtml()}
     <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
-    <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
-    <div id="savedBox">${savedHtml()}</div>`;
+    <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>`;
 }
 // Знак «фурам заборонено», а іншої дороги немає й усі їздять: рейс уже показано, тим часом питаємо сервер про варіант
 // через такі дороги. Якщо він помітно коротший — додаємо третьою карткою; вибирає водій.
@@ -835,11 +883,11 @@ async function doBuild() {
     const inp = $('in_' + k), txt = inp ? inp.value.trim() : k === 'a' && startIsMe() ? '' : plan[k] ? plan[k].label : '';
     if (txt && (!plan[k] || plan[k].label !== txt)) {
       const r = await findPlaces(txt);
-      if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); refresh('trip'); return; }
+      if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); plan.saveAfter = false; refresh('trip'); return; }
     } else if (!txt) plan[k] = null;
   }
   if (startIsMe()) plan.a = pos.lat != null ? { lat: pos.lat, lon: pos.lon, label: t('myPlace'), me: true } : null;   // «моє місце» — щоразу свіже
-  if (!plan.a || !plan.b) { plan.err = t('needAB'); refresh('trip'); return; }
+  if (!plan.a || !plan.b) { plan.err = t('needAB'); plan.saveAfter = false; refresh('trip'); return; }
   plan.busy = true; plan.trip = null; plan.off = null; refresh('trip');
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
@@ -850,14 +898,16 @@ async function doBuild() {
     trip.route = r;
     plan.trip = trip; mapM.previewPoints(trip); previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
     loadRegions(trip);
-    plan.busy = false; closePanel(); pickShow();
+    plan.busy = false;
+    if (plan.saveAfter) { plan.saveAfter = false; saveCurrentTrip(); return; }       // «Зберегти рейс» без прокладеного рейсу: проклали — і одразу в архів
+    closePanel(); pickShow();
     softOffer(trip, r); return;
   } catch (e) {
     // помилки сервера — людською мовою, а не «No path could be found for input»
     plan.err = e.code ? t('routeFail') + ' ' + (e.code === 171 ? t('noEdge') : [170, 442].includes(e.code) ? t('noPath') : (e.message || '')) : t('netErr') + ' ' + (e.message || '');
     log('warn', 'маршрут: ' + e.message);
   }
-  plan.busy = false; refresh('trip');
+  plan.busy = false; plan.saveAfter = false; refresh('trip');
 }
 async function goTrip(trip, opts = {}) {
   plan.going = true; pickHide();
@@ -892,12 +942,13 @@ function tripClicks(e) {
     alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
-  else if (d.act === 'save' && plan.trip) { if (plan.trip.route) delete plan.trip.route.alts; plan.routes = []; saveTrip(plan.trip); toast(t('saved'), 'green', 3000); plan.trip = null; plan.a = plan.v = plan.b = null; previewRoute(null); hud(); openPanel('trip'); }
+  else if (d.act === 'save' && plan.trip) saveCurrentTrip();
+  else if (d.act === 'saveTrip') saveTripTap();
+  else if (d.act === 'archive') openPanel('archive');
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') endTrip(true);
-  else if (d.open) { const tr = getTrips().find(x => x.id === d.open); if (tr && tr.route) { plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null; mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr); } }
-  else if (d.del) { deleteTrip(d.del); refresh('trip'); }
+
   else if (d.here) {
     // «З мого місця»: старт — там, де телефон у мить побудови рейсу (не знімок координат, зроблений зараз)
     plan.a = null; const i = $('in_a'); if (i) i.value = ''; showSugg('a', []); startTwoSync();
@@ -909,6 +960,7 @@ function tripClicks(e) {
 }
 function tripInput(e) {
   const k = e.target.dataset && e.target.dataset.f; if (!k) return;
+  if (k === 'b') requestAnimationFrame(tripToolsSync);
   plan[k] = null; clearTimeout(geoTimer);
   const q = e.target.value.trim();
   if (!q) { showSugg(k, places.recent(), t('recentPlaces')); return; }
@@ -936,9 +988,9 @@ definePanel('trip', {
     const active = g.trip && (g.active || g.arrived);
     if (active) { body.innerHTML = tripActiveHtml(); return; }
     // форму не перемальовуємо, щоб не збивати введення
-    const sum = $('planSum'), sv = $('savedBox'), er = $('planErr'), bb = body.querySelector('[data-act="build"]');
+    const sum = $('planSum'), er = $('planErr'), bb = body.querySelector('[data-act="build"]'), ns = $('newSec');
     if (!sum) { body.innerHTML = planHtml(); return; }
-    sum.innerHTML = plan.trip ? planSumHtml() : ''; sv.innerHTML = savedHtml(); er.textContent = plan.err;
+    sum.innerHTML = plan.trip ? planSumHtml() : ''; er.textContent = plan.err; tripToolsSync(); if (ns) ns.hidden = !plan.trip;
     if (bb) { bb.disabled = plan.busy; bb.textContent = plan.busy ? t('building') : t('build'); }
     if (plan.trip && !sum.dataset.shown) { sum.dataset.shown = '1'; body.scrollTop = 0; } else if (!plan.trip) delete sum.dataset.shown;
     $('panel').classList.toggle('half', !!plan.trip);
@@ -1033,7 +1085,8 @@ function placeHtml(p) {
     ${vpWhereText(p) ? `<div class="vp-where">${esc(vpWhereText(p))}</div>` : ''}
     <p class="vp-say">${esc(vpTxt(p.say))}</p>
     <div class="vp-tags">${(vpTxt(p.tags) || []).map(x => `<span class="pill">${esc(x)}</span>`).join('')}</div>
-    ${p.menu && p.menu.length ? `<div class="sec">${t('vpMenu')}</div><div class="vp-menu">${p.menu.map(([n, pr]) => `<div><span>${esc(n)}</span><b>${esc(pr)}</b></div>`).join('')}</div><div class="muted" style="margin-top:6px">${esc(vpTxt(p.note))}</div>` : ''}
+    ${p.services && p.services.length ? `<div class="sec">${t('vpServices')}</div><div class="vp-menu vp-serv">${p.services.map(([n, pr]) => `<div><span>${esc(vpTxt(n))}</span><b>${esc(pr)}</b></div>`).join('')}</div>` : ''}
+    ${p.menu && p.menu.length ? `<div class="sec">${t(p.services && p.services.length ? 'vpMenuCafe' : 'vpMenu')}</div><div class="vp-menu">${p.menu.map(([n, pr]) => `<div><span>${esc(n)}</span><b>${esc(pr)}</b></div>`).join('')}</div><div class="muted" style="margin-top:6px">${esc(vpTxt(p.note))}</div>` : ''}
     <div class="btns">${vpOnMap(p) ? `<button class="btn pri" data-vp="go">${g.active ? t('vpVia') : t('vpRoute')}</button><button class="btn" data-vp="map">${t('vpOnMap')}</button>` : ''}</div>
     ${!vpOnMap(p) || p.own ? `<div class="btns"><button class="btn" data-vp="setloc">${t('vpSetLoc')}</button></div>` : ''}`;
 }
@@ -1301,7 +1354,9 @@ export function initUI() {
   bus.on('vplaces', () => { refresh('places'); refresh('place'); });
   let plT = 0; bus.on('stopsdb', () => refresh('places')); bus.on('pos', () => { const n = Date.now(); if (n - plT > 10000) { plT = n; refresh('places'); } });
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
-  bus.on('trips', () => refresh('trip'));
+  bus.on('trips', () => { refresh('trip'); refresh('archive'); });
+  let addrMissT = 0;
+  bus.on('addrMiss', () => { const z = mapM.map ? mapM.map.getZoom() : 0, now = Date.now(); if (!offlineActive() || z < mapM.HOUSE_Z || now - addrMissT < 600000) return; addrMissT = now; toast(t('addrMissToast'), 'yellow', 9000); });
   bus.on('hazards', () => refresh('trip'));
   bus.on('view', railState);
   bus.on('settings', k => { railState(); if (k === 'glass') applyGlass(); if (k === 'lang') { staticLabels(); hud(); stripUpdate(); } if (k === 'lookahead') stripUpdate(); });
@@ -1390,6 +1445,7 @@ export function initUI() {
     if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
+    if (currentPanel() === 'archive') { openPanel('trip'); return true; }           // з архіву «Назад» веде у «Рейс», звідки прийшли
     if (currentPanel()) { closePanel(); return true; }
     return false;
   };
@@ -1451,7 +1507,7 @@ export function initUI() {
   bus.on('panel', name => {
     document.body.classList.toggle('panel-open', !!name);
     // складаємо рейс (форма «Рейс», рейс ще не їде): рядок із годинником у нижній плашці ховаємо — формі більше місця, кнопка «Побудувати» не ховається під плашку
-    document.body.classList.toggle('planning', name === 'trip' && !g.active && !g.arrived);
+    document.body.classList.toggle('planning', (name === 'trip' || name === 'archive') && !g.active && !g.arrived);
     requestAnimationFrame(layoutVars);
   });
   window.addEventListener('resize', () => { if (aim) aimPlaceCross(); });

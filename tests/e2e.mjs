@@ -15,7 +15,7 @@ const SHOTS = process.argv.includes('--shots') ? process.argv[process.argv.index
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 let rangeHits = 0;
-const PM = { old: false, rangeBroken: false, failFrom: null, q: 0, range: 0, file: 'tiny' };   // як поводиться «оболонка» з файлом офлайн-карти
+const PM = { old: false, rangeBroken: false, failFrom: null, q: 0, range: 0, file: 'tiny', fonts: false };   // як поводиться «оболонка» з файлом офлайн-карти
 // Файли карти для перевірок: tiny — крихітний (піраміда до Харкова); city — СПРАВЖНІЙ квадрат Львова (tools/make_city_fixture.mjs);
 // blank — той самий заголовок, але у квадраті немає жодного об'єкта («файл читається, а малювати нічого»).
 const pmFiles = {};
@@ -56,6 +56,8 @@ const server = createServer(async (rq, rs) => {
     // Набори літер для підписів офлайн-карти: у сховищі їх немає (збірка бере їх із Protomaps), тож тут — як на телефоні,
     // де потрібного набору не знайшлося: 404. Один «тестовий» набір є — щоб перевірити й звичайний шлях.
     if (p === '/vendor/glyphs/Test Font/0-255.pbf') { rs.writeHead(200, { 'content-type': 'application/x-protobuf' }); rs.end(Buffer.from('GLYF')); return; }
+    // PM.fonts — «набори літер у збірці є»: латинка з цифрами й кирилиця (справжні файли Noto Sans — tests/fixtures/glyphs); решти, як і в збірці, немає
+    if (PM.fonts && p.startsWith('/vendor/glyphs/')) { const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'glyphs', p.slice('/vendor/glyphs/'.length).replace(/^Noto Sans (Medium|Italic)\//, 'Noto Sans Regular/'))); rs.writeHead(200, { 'content-type': 'application/x-protobuf' }); rs.end(b); return; }
     const f = join(ROOT, p === '/' ? 'index.html' : p);
     const b = await readFile(f); rs.writeHead(200, { 'content-type': MIME[extname(f)] || 'application/octet-stream' }); rs.end(b);
   } catch (_) { rs.writeHead(404); rs.end('nf'); }
@@ -140,6 +142,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ntfy.sh для тестів: одне сховище на всі «телефони» в тесті
 const NTFY = { msgs: [], posts: 0, fail: false };
+// місце-комплекс для фур (як «Автопорт»): стоянка з душем, готель, кафе — окремо ціни на послуги й окремо меню кафе
+const VP_COMPLEX = { id: 'test-complex', kind: 'complex', name: 'Комплекс (тест)', rating: 5, checked: '2026-11', lat: vpPt[0] + 0.0012, lon: vpPt[1] + 0.0004, road: 'М-03', town: { uk: 'Тестове', ru: 'Тестовое' },
+    photos: ['verified/bistro-1.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: стоянка, готель і кафе.', ru: 'Советуем: стоянка, гостиница и кафе.' }, tags: { uk: ['Стоянка для фур', 'Готель'], ru: ['Стоянка для фур', 'Гостиница'] },
+    services: [[{ uk: 'Стоянка для фури — душ входить у вартість', ru: 'Стоянка для фуры — душ входит в стоимость' }, '100 грн'], [{ uk: 'Готель: одномісний номер', ru: 'Гостиница: одноместный номер' }, '1000 грн']],
+    menu: [['Борщ', '100 грн / 300 г']], note: { uk: 'Ціни станом на 24.11.2026.', ru: 'Цены на 24.11.2026.' } };
 const ROUTE = { fn: null };                                        // підміна відповіді сервера маршрутів у окремих перевірках
 // Сторінки, що лишились відкритими після збою попередньої перевірки, гальмують усі наступні (карта малює й далі) — закриваємо.
 const liveCtx = new Set();
@@ -157,7 +164,7 @@ async function newPage(native, opts = {}) {
   await page.route('**/data/hazards.json', r => json(r, HAZ_JSON));
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
-  await page.route('**/data/verified.json', r => json(r, VP_JSON));
+  if (!opts.realVp) await page.route('**/data/verified.json', r => json(r, VP_JSON));
   await page.route('https://ntfy.sh/**', r => {
     const rq = r.request(), u = new URL(rq.url());
     if (NTFY.fail) return r.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: 'down' });
@@ -212,6 +219,7 @@ async function newPage(native, opts = {}) {
       keepAwake(on) { window.__nativeCalls.push('keepAwake:' + on); }, openLocationSettings() { window.__nativeCalls.push('locSettings'); }, openAppSettings() {}, saveFile(n, m, txt) { window.__nativeCalls.push('saveFile:' + n); window.__savedText = txt; }, openUrl(u) { window.__nativeCalls.push('openUrl:' + u); }, postNotice() {}, vibrate() {}, checkUpdate() { window.__nativeCalls.push('checkUpdate'); }, applyWebUpdate() { window.__nativeCalls.push('applyWebUpdate'); }, installApk() { window.__nativeCalls.push('installApk'); }, reloadUi() { window.__nativeCalls.push('reloadUi'); }
     };
   }, { tg: TG_HTML('kharkiv_roads', ['Перекрито рух на трасі М-03 біля Чугуєва через ДТП за участі фури. Об’їзд через Кам’яну Яругу.', 'На заводі «Турбоатом» тимчасово зупинили виробництво.', 'Рух на мосту через Уди відновлено, дорогу відкрили.', 'Можливо, перекриють проїзд вулицею Сумською ввечері, уточнюється.', 'Знижки до 50% у нашому магазині! Підписуйтесь!']), air: AIR_MD, offline: !!opts.offline });
+  if (opts.before) await opts.before(page);          // додаткові підміни (напр., квадрати з номерами будинків) — до першого завантаження
   await page.goto(BASE);
   await page.waitForFunction(() => window.__app && document.getElementById('boot') === null, null, { timeout: 15000 });
   return { page, ctx, errors };
@@ -281,6 +289,31 @@ async function readCheck(page, rootSel, scrollSel) {
 }
 const shot = async (page, name) => { if (SHOTS) await page.screenshot({ path: join(SHOTS, name + '.png') }); };
 const app = (page, fn, arg) => page.evaluate(fn, arg);
+
+/* ============ дані: справжня картотека перевірених місць (web/data/verified.json) ============ */
+if (run('1')) try {
+  const { statSync } = await import('node:fs');
+  const vj = JSON.parse(await readFile(join(ROOT, 'data', 'verified.json'), 'utf8')), bad = [];
+  const KINDS = ['food', 'tire', 'repair', 'service', 'park', 'shower', 'complex'];
+  for (const p of vj.places) {
+    const say = k => bad.push(p.id + ': ' + k);
+    if (!p.id || !p.name || !KINDS.includes(p.kind)) say('вид/назва');
+    if (!(p.lat > 44 && p.lat < 53 && p.lon > 22 && p.lon < 41)) say('координати поза Україною');
+    if (!p.say || !p.say.uk || !p.say.ru) say('опис двома мовами');
+    if (!/^\d{4}-\d{2}$/.test(p.checked || '')) say('місяць перевірки');
+    if (!(p.photos || []).length || (p.thumbs || []).length !== p.photos.length) say('фото й мініатюри');
+    for (const f of [...(p.photos || []), ...(p.thumbs || [])]) { try { const n = statSync(join(ROOT, 'data', f)).size; if (n < 2000 || n > 200000) say('розмір ' + f + ' = ' + n); } catch (_) { say('немає файла ' + f); } }
+    // де є ціни — має бути сказано, на який час вони записані
+    if (((p.menu || []).length || (p.services || []).length) && !(p.note && /20\d\d/.test(p.note.uk || '') && /20\d\d/.test(p.note.ru || ''))) say('ціни без дати');
+    for (const [n, pr] of (p.services || [])) if (!n.uk || !n.ru || !/грн/.test(pr)) say('послуга ' + JSON.stringify(n));
+    for (const [n, pr] of (p.menu || [])) if (!n || (pr && !/грн/.test(pr))) say('меню ' + n);
+  }
+  ok('картотека перевірених місць: у кожного місця вид, координати в Україні, опис двома мовами, фото з мініатюрами (не важчі 200 КБ), ціни — з датою', vj.places.length >= 2 && bad.length === 0 && new Set(vj.places.map(p => p.id)).size === vj.places.length, bad.join(' | '));
+  const ap = vj.places.find(p => p.id === 'avtoport-vinnytsia');
+  ok('«Автопорт» (Вінниця): комплекс — стоянка 100 грн із душем, готель 1000 грн за одномісний, меню кафе; ціни станом на 24.11.2026', !!ap && ap.kind === 'complex' && ap.rating === 5 && Math.abs(ap.lat - 49.258925) < 1e-6 && Math.abs(ap.lon - 28.573011) < 1e-6
+    && ap.services.length === 2 && /душ входить у вартість/.test(ap.services[0][0].uk) && ap.services[0][1] === '100 грн' && /одномісний/.test(ap.services[1][0].uk) && ap.services[1][1] === '1000 грн'
+    && ap.menu.length >= 20 && ap.menu.some(m => m[0] === 'Яєшня' && m[1] === '75 грн') && /24\.11\.2026/.test(ap.note.uk) && /24\.11\.2026/.test(ap.note.ru) && ap.photos.length === 10, JSON.stringify(ap && { k: ap.kind, s: ap.services, n: ap.note.uk }));
+} catch (e) { ok('картотека перевірених місць читається', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 1: застосунок (з імітацією оболонки) ============ */
 if (run('1')) try {
@@ -390,6 +423,19 @@ if (run('1')) try {
   await page.click('[data-vp="go"]'); await page.waitForSelector('#in_b');
   ok('«Маршрут сюди» — місце стає точкою Б', await app(page, () => document.getElementById('in_b').value === 'Бістро (тест)'));
   await app(page, () => { document.getElementById('in_b').value = ''; }); await page.click('[data-clear="b"]');
+  // 1.1.16: комплекс для фур (стоянка з душем, готель, кафе) — свій вид місця, окремо ціни на послуги й окремо меню кафе
+  await app(page, cx => { const V = window.__app.vplaces; V.vp.list.push(cx); window.__app.bus.emit('vplaces', V.vp); }, VP_COMPLEX);
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row[data-vpid="test-complex"]');
+  const cxRow = await page.$eval('.vp-row[data-vpid="test-complex"]', e => e.textContent);
+  await page.click('.vp-row[data-vpid="test-complex"]'); await page.waitForSelector('.vp-serv');
+  const cx = await app(page, () => ({ secs: [...document.querySelectorAll('#panelBody .sec')].map(e => e.textContent.trim()), serv: [...document.querySelectorAll('.vp-serv div')].map(e => e.querySelector('span').textContent + ' = ' + e.querySelector('b').textContent),
+    menu: document.querySelectorAll('.vp-menu:not(.vp-serv) div').length, txt: document.getElementById('panelBody').textContent, order: (() => { const a = document.querySelector('.vp-serv'), b = document.querySelector('.vp-menu:not(.vp-serv)'); return !!(a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING); })(),
+    fit: [...document.querySelectorAll('.vp-serv div')].every(e => e.getBoundingClientRect().right <= document.getElementById('panelBody').getBoundingClientRect().right + 1) }));
+  ok('комплекс для фур у списку — «Стоянка · готель · кафе»; у картці спершу «Стоянка, душ, готель — почім» (100 і 1000 грн), далі «Кафе: що є і почім»', /Стоянка · готель · кафе/.test(cxRow) && cx.secs[0] === 'Стоянка, душ, готель — почім' && cx.secs[1] === 'Кафе: що є і почім' && cx.serv.length === 2 && /душ входить у вартість = 100 грн/.test(cx.serv[0]) && /одномісний номер = 1000 грн/.test(cx.serv[1]) && cx.menu === 1 && cx.order && cx.fit, JSON.stringify({ secs: cx.secs, serv: cx.serv, row: cxRow.slice(0, 80) }));
+  ok('…і під цінами сказано, на який день вони записані', /Ціни станом на 24\.11\.2026/.test(cx.txt));
+  ok('на карті комплекс має свій значок — синій знак стоянки із зіркою (а не бургер)', await app(page, () => { const m = [...document.querySelectorAll('.vpm')].find(e => e.getAttribute('aria-label') === 'Комплекс (тест)'); return !!m && !!m.querySelector('rect[fill="#1f6feb"]') && !!m.querySelector('.vpm-star'); }));
+  await app(page, () => { const V = window.__app.vplaces; V.vp.list = V.vp.list.filter(p => p.id !== 'test-complex'); window.__app.bus.emit('vplaces', V.vp); });
+  await page.click('#panelClose');
   // місцю без координат водій ставить точку сам
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row');
   await page.click('.vp-row[data-vpid="test-noloc"]'); await page.click('[data-vp="setloc"]');
@@ -762,7 +808,7 @@ if (run('2в')) try {
     route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
   await app(page, tr => window.__app.route.saveTrip(tr), trip);
   await page.click('#tabs button[data-panel="trip"]');
-  await page.click('[data-open="t-auto"]'); await page.click('#panelClose');
+  await page.click('#tripTools [data-act="archive"]'); await page.click('[data-open="t-auto"]'); await page.click('#panelClose');
   ok('без рейсу немає «Рейс не задано»; побудований маршрут — «не запущено»', /не запущено/.test(await page.textContent('#remain')) && !/Рейс не задано/.test(await page.textContent('#bottom')));
   // водій просто їде маршрутом ~20 м/с
   await app(page, () => { const R = window.__app.core.RouteIndex; const idx = new R(window.__app.route.getTrips().find(x => x.id === 't-auto').route.coords); let d = 100;
@@ -2668,6 +2714,192 @@ if (run('3')) try {
   { const er = errors.filter(e => !/офлайн-карта не (читається|малюється)/.test(e) && !/status of (416|500)/.test(e)); ok('прохід офлайн-карти без помилок JS (крім очікуваних записів про файл, що не читається)', er.length === 0, er.join(' | ')); }
   await ctx.close();
 } catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 28 (1.1.16): номери будинків — на онлайн- і офлайн-карті, із запасом у телефоні ============ */
+// Квадрати OpenFreeMap підмінені: у кожному — шар «housenumber» (шість номерів біля Луганської у Львові) і «важкий» сусідній шар.
+const pbv = n => { const o = []; let x = BigInt(n); do { let c = Number(x & 0x7fn); x >>= 7n; if (x > 0n) c |= 0x80; o.push(c); } while (x > 0n); return o; };
+const pbld = (f, bytes) => [...pbv((f << 3) | 2), ...pbv(bytes.length), ...bytes], pbs = t => [...Buffer.from(t)], pbzz = n => (n << 1) ^ (n >> 31);
+function mvtPoints(name, key, feats) {
+  const vals = [...new Set(feats.map(f => f.v))]; let body = [...pbld(1, pbs(name))];
+  for (const f of feats) body.push(...pbld(2, [...pbld(2, [...pbv(0), ...pbv(vals.indexOf(f.v))]), ...pbv((3 << 3) | 0), ...pbv(1), ...pbld(4, [...pbv(9), ...pbv(pbzz(f.x)), ...pbv(pbzz(f.y))])]));
+  body.push(...pbld(3, pbs(key))); for (const v of vals) body.push(...pbld(4, pbld(1, pbs(v))));
+  body.push(...pbv((5 << 3) | 0), ...pbv(4096), ...pbv((15 << 3) | 0), ...pbv(2));
+  return pbld(3, body);
+}
+const HOUSE_AT = [49.807, 24.045], HOUSE_TILE = [9286, 5570];                                   // центр кадру й квадрат 14/x/y, у якому він лежить
+const HOUSE_C = (() => { const n = 2 ** 14, r = HOUSE_AT[0] * Math.PI / 180; return [Math.round(((HOUSE_AT[1] + 180) / 360 * n - HOUSE_TILE[0]) * 4096), Math.round(((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n - HOUSE_TILE[1]) * 4096)]; })();
+const HOUSES = [['12', -70, -150], ['14А', 60, -110], ['16', -40, -20], ['18/2', 70, 40], ['20', -60, 110], ['22-Б', 50, 170]].map(([v, dx, dy]) => ({ v, x: HOUSE_C[0] + dx, y: HOUSE_C[1] + dy }));   // шість будинків навколо центру кадру
+const OFM_TILE = Buffer.from([...mvtPoints('building', 'k', Array.from({ length: 400 }, (_, i) => ({ v: 'будівля ' + i, x: i * 9, y: i * 7 }))), ...mvtPoints('housenumber', 'housenumber', HOUSES), ...mvtPoints('poi', 'name', [{ v: 'Кав\'ярня', x: 1200, y: 1600 }])]);
+const OFM = { ver: 'V1', tj: 0, tiles: [], down: false };
+const ofmStub = async page => {
+  const cors = { 'access-control-allow-origin': '*' };
+  await page.route('https://tiles.openfreemap.org/planet', r => { if (OFM.down) return r.abort(); OFM.tj++; r.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify({ tiles: [`https://tiles.openfreemap.org/planet/${OFM.ver}/{z}/{x}/{y}.pbf`], minzoom: 0, maxzoom: 14 }) }); });
+  await page.route('https://tiles.openfreemap.org/planet/**', r => { if (OFM.down) return r.abort(); const m = /planet\/([^/]+)\/(\d+)\/(\d+)\/(\d+)\.pbf/.exec(r.request().url());
+    if (!m || m[1] !== OFM.ver) return r.fulfill({ status: 404, headers: cors, body: '' }); OFM.tiles.push(m[2] + '/' + m[3] + '/' + m[4]); r.fulfill({ status: 200, contentType: 'application/x-protobuf', headers: cors, body: OFM_TILE }); });
+};
+if (run('28')) try {
+  PM.fonts = true;
+  const VP = { width: 360, height: 670 }, LV = [49.807, 24.045];
+  const jumpTo = (page, z) => app(page, ([lat, lon, z]) => { const P = window.__app; P.map.view.follow = false; P.map.view.lastTouch = Date.now() + 3600e3; P.map.map.jumpTo({ center: [lon, lat], zoom: z, pitch: 0, bearing: 0 }); }, [...LV, z]);
+  const nums = page => app(page, () => { const m = window.__app.map.map; let r = []; try { r = m.queryRenderedFeatures({ layers: ['reis-house'] }).map(f => String(f.properties.housenumber)); } catch (e) { return { err: String(e) }; }
+    const L = m.getLayer('reis-house'), ids = m.getStyle().layers.map(l => l.id); return { layer: !!L, under: ids.indexOf('reis-house') >= 0 && ids.indexOf('reis-house') < Math.max(ids.indexOf('highway-name-minor'), ids.indexOf('roads_labels_minor')), source: L && L.source, minzoom: L && L.minzoom, drawn: [...new Set(r)].sort(), zoom: +m.getZoom().toFixed(2), A: { ...window.__app.addr.addr } }; });
+  const waitNums = page => page.waitForFunction(() => { try { return window.__app.map.map.queryRenderedFeatures({ layers: ['reis-house'] }).length >= 4; } catch (e) { return false; } }, null, { timeout: 15000 }).catch(() => {});
+  // ---- а) онлайн-карта: шар номерів поверх уже завантажених квадратів ----
+  {
+    const style = { version: 8, glyphs: BASE + 'vendor/glyphs/{fontstack}/{range}.pbf', sources: { openmaptiles: { type: 'vector', tiles: ['https://tiles.openfreemap.org/planet/V1/{z}/{x}/{y}.pbf'], minzoom: 0, maxzoom: 14 } },
+      layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }, { id: 'highway-name-minor', type: 'symbol', source: 'openmaptiles', 'source-layer': 'transportation_name', layout: { 'text-field': ['get', 'name'], 'text-font': ['Noto Sans Regular'], 'symbol-placement': 'line' } }] };
+    const { page, ctx, errors } = await newPage(true, { style, viewport: VP, before: ofmStub });
+    await jumpTo(page, 17.2); await waitNums(page); await sleep(400);
+    const a1 = await nums(page);
+    await shot(page, '35-house-online');
+    ok('онлайн-карта, наблизили: номери будинків намальовані (12, 14А, 16, 18/2, 20, 22-Б) — із квадратів самої карти, під назвами вулиць', a1.layer && a1.source === 'openmaptiles' && a1.under && a1.drawn.length >= 5 && a1.drawn.includes('12') && a1.drawn.includes('14А') && a1.drawn.includes('18/2'), JSON.stringify(a1));
+    ok('…нічого зайвого не завантажуємо: каталог квадратів не питали, окремих запитів по номери немає', OFM.tj === 0 && a1.A.net === 0, JSON.stringify({ tj: OFM.tj, A: a1.A }));
+    await jumpTo(page, 16.5); await sleep(900);
+    const a2 = await nums(page);
+    ok('віддалили (масштаб 16,5) — номерів немає: вони з\'являються від 17, щоб на ходу не захаращувати карту', a2.layer && a2.drawn.length === 0 && a2.minzoom === 17, JSON.stringify(a2));
+    ok('номери на онлайн-карті — без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+  // ---- б) офлайн-карта (справжній квадрат Львова): номерів у файлі немає — беремо з мережі й кладемо в запас ----
+  OFM.tj = 0; OFM.tiles = []; PM.file = 'city';
+  const size = (await pmFile('city')).length;
+  const { page, ctx, errors } = await newPage(true, { offline: true, viewport: VP, before: async pg => { await ofmStub(pg); await pg.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n; }, [7, size]); } });
+  await page.waitForFunction(() => window.__app.offline.offlineActive() && !!window.__app.map.map.getSource('protomaps'), null, { timeout: 15000 }).catch(() => {});
+  const b0 = await app(page, () => ({ active: window.__app.offline.offlineActive(), addrSrc: !!window.__app.map.map.getSource('addr'), A: { ...window.__app.addr.addr } }));
+  ok('офлайн-карта: поки не наблизили — по номери в мережу не ходимо', b0.active && b0.addrSrc && OFM.tiles.length === 0 && OFM.tj === 0 && b0.A.net === 0, JSON.stringify({ b0, tiles: OFM.tiles.length, tj: OFM.tj }));
+  await jumpTo(page, 17.2); await waitNums(page); await sleep(500);
+  const b1 = await nums(page);
+  await shot(page, '35-house-offline');
+  ok('офлайн-карта, наблизили: номери будинків намальовані на справжній карті Львова (той самий вигляд, від 17, під назвами вулиць)', b1.layer && b1.source === 'addr' && b1.minzoom === 17 && b1.under && b1.drawn.length >= 5 && b1.drawn.includes('12') && b1.drawn.includes('22-Б'), JSON.stringify(b1));
+  ok('…квадрат номерів узято з мережі один раз (каталог — теж раз)', OFM.tj === 1 && OFM.tiles.includes('14/9286/5570') && b1.A.net >= 1 && b1.A.fails === 0, JSON.stringify({ tj: OFM.tj, tiles: OFM.tiles, A: b1.A }));
+  const st = await app(page, async full => { const c = await caches.open('reis-addr-1'), r = await c.match(location.origin + '/__addr/14/9286/5570'), b = r ? new Uint8Array(await r.arrayBuffer()) : null, A = window.__app.addr;
+    const again = b ? A.onlyHouseNumbers(b) : null, txt = b ? new TextDecoder().decode(b) : '';
+    return { n: (await c.keys()).length, bytes: b ? b.length : -1, full, hasNum: /housenumber/.test(txt) && /22-Б/.test(txt), other: /будівля|Кав/.test(txt), idem: !!again && again.length === b.length, info: await A.cacheInfo() }; }, OFM_TILE.length);
+  ok('у запас телефона пішов лише шар номерів (решту квадрата відкинуто) — кількасот байтів замість кількох кілобайтів', st.n >= 1 && st.bytes > 40 && st.bytes < st.full / 5 && st.hasNum && !st.other && st.idem && st.info.tiles >= 1 && !st.info.mem, JSON.stringify(st));
+  const nReq = OFM.tiles.length;
+  const b2 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9286/5570' }, new AbortController()); return { len: r.data.byteLength, hits: A.addr.hits }; });
+  ok('той самий квадрат удруге — із запасу, без мережі', b2.len > 40 && b2.hits >= 1 && OFM.tiles.length === nReq, JSON.stringify({ b2, req: OFM.tiles.length - nReq }));
+  const nightL = await app(page, () => { const O = window.__app.offline, d = O.offlineStyle(false).layers.at(-1), n = O.offlineStyle(true).layers.at(-1); return { id: d.id, day: d.paint['text-color'], night: n.paint['text-color'], halo: n.paint['text-halo-color'], src: Object.keys(O.offlineStyle(false).sources) }; });
+  ok('уночі в офлайн-карті номери світлі на темному (власні кольори, без «перевертання»)', nightL.id === 'reis-house' && nightL.day !== nightL.night && nightL.halo === '#0f1317' && nightL.src.includes('addr'), JSON.stringify(nightL));
+  // ---- в) мережі немає (і застосунок перезапущено): номери біля цього місця — із запасу ----
+  OFM.down = true; OFM.tiles = [];
+  await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline.offlineActive(), null, { timeout: 20000 });
+  await jumpTo(page, 17.2); await waitNums(page); await sleep(400);
+  const c1 = await nums(page);
+  ok('без мережі після перезапуску: номери будинків є — із запасу в телефоні', c1.drawn.length >= 5 && c1.A.net === 0 && c1.A.hits >= 1 && OFM.tiles.length === 0, JSON.stringify(c1));
+  const c2 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9000/5500' }, new AbortController()); return { len: r.data.byteLength, cc: r.cacheControl || '', fails: A.addr.fails }; });
+  ok('…а де запасу немає — порожньо без помилки, і за 40 с спитаємо знову (мережа може з\'явитись)', c2.len === 0 && /max-age=40/.test(c2.cc) && c2.fails >= 1, JSON.stringify(c2));
+  // ---- г) дані на сервері оновились (нова тижнева версія): стара адреса квадратів дає 404 — беремо нову з каталогу ----
+  OFM.down = false; OFM.ver = 'V2'; OFM.tj = 0; OFM.tiles = [];
+  const d1 = await app(page, async () => { const A = window.__app.addr, r = await A.tileLoad({ url: 'reisaddr://14/9001/5501' }, new AbortController()); return { len: r.data.byteLength, net: A.addr.net, tpl: (JSON.parse(localStorage.getItem('reis.addrTpl') || '{}').u || '') }; });
+  ok('версія даних змінилась: квадрат усе одно отримано (адресу оновлено з каталогу)', d1.len > 40 && OFM.tj === 1 && OFM.tiles.includes('14/9001/5501') && /\/V2\//.test(d1.tpl), JSON.stringify({ d1, tj: OFM.tj }));
+  // ---- ґ) рушили в рейс: номери навколо фінішу — у запас заздалегідь (остання миля може бути без мережі) ----
+  OFM.tiles = [];
+  const fin = { lat: 49.5883, lon: 34.5514 };
+  const got = await app(page, async fin => { const A = window.__app.addr; window.__app.bus.emit('trip', { active: true, trip: { id: 't-addr', a: { lat: 49.99, lon: 36.23 }, b: fin } });
+    const t0 = Date.now(); while (Date.now() - t0 < 8000 && A.addr.prefetched < 9) await new Promise(r => setTimeout(r, 150));
+    window.__app.bus.emit('trip', { active: true, trip: { id: 't-addr', a: { lat: 49.99, lon: 36.23 }, b: fin } }); await new Promise(r => setTimeout(r, 400));
+    return { pre: A.addr.prefetched, xy: A.tileXY(fin.lat, fin.lon), log: window.__app.core.getLog().filter(l => /номери будинків біля фінішу/.test(l.msg || l.text || '')).length }; }, fin);
+  const want = []; for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) want.push('14/' + (got.xy[0] + dx) + '/' + (got.xy[1] + dy));
+  ok('рушили в рейс — 9 квадратів номерів навколо фінішу збережено заздалегідь (один раз на рейс)', got.pre === 9 && want.every(k => OFM.tiles.includes(k)) && OFM.tiles.length === 9 && got.log === 1, JSON.stringify({ got, req: OFM.tiles.length }));
+  ok('номери будинків на офлайн-карті — без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 28 (номери будинків) дійшов до кінця', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; OFM.down = false; OFM.ver = 'V1'; }
+
+/* ============ прохід 29 (1.1.16): «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки, стрічки під формою немає ============ */
+if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tablet'].includes(x.n) && (!process.env.SCR || process.env.SCR.split(',').includes(x.n)))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+  const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(300);
+  const n = coords.length, mk = (id, la, lb, created) => ({ id, created, a: { lat: coords[0][0], lon: coords[0][1], label: la }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: lb },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } });
+  const lay = () => app(page, () => { const R = e => { if (!e) return null; const r = e.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
+    const pb = document.getElementById('panelBody'), tools = [...document.querySelectorAll('#tripTools .tt-b')], pr = R(pb), bt = R(document.getElementById('bottom'));
+    const seen = e => { const r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, el = document.elementFromPoint(x, y); return !!el && (el === e || e.contains(el)); };
+    return { panel: !document.getElementById('panel').hidden, title: document.getElementById('panelTitle').textContent.trim(), back: !document.getElementById('panelBack').hidden, body: pr, bottomTop: bt && getComputedStyle(document.getElementById('bottom')).display !== 'none' ? bt.t : innerHeight, vw: innerWidth,
+      tools: tools.map(b => ({ act: b.dataset.act, txt: b.querySelector('span').textContent.trim(), n: (b.querySelector('i') || { textContent: '' }).textContent, can: b.classList.contains('can'), box: R(b), seen: seen(b), fit: b.scrollWidth <= b.clientWidth + 1 && b.querySelector('span').scrollWidth <= b.querySelector('span').clientWidth + 1 })),
+      inline: document.querySelectorAll('#panelBody [data-open]').length, saved: !!document.getElementById('savedBox'), newSec: (e => !!e && !e.hidden)(document.getElementById('newSec')),
+      build: (b => b ? { box: R(b), seen: seen(b) } : null)(document.querySelector('#panelBody [data-act="build"]')), firstField: R(document.getElementById('in_a')), scroll: pb.scrollTop,
+      items: [...document.querySelectorAll('#panelBody .arch .item')].map(e => ({ t: e.querySelector('.t').textContent.trim(), meta: e.querySelector('.muted').textContent.trim(), box: R(e), open: R(e.querySelector('[data-open]')), del: R(e.querySelector('[data-del]')), id: e.querySelector('[data-open]').dataset.open })),
+      empty: (document.querySelector('.arch-empty') || { textContent: '' }).textContent.trim(), toast: document.getElementById('toasts').textContent, count: window.__app.route.getTrips().length }; });
+  // чотирнадцять рейсів в архіві — раніше це була стрічка на кілька екранів просто під формою
+  await app(page, list => { for (const tr of list) window.__app.route.saveTrip(tr); }, Array.from({ length: 14 }, (_, i) => mk('t-' + (i + 1), 'Харків, склад № ' + (i + 1), i === 13 ? 'Полтава, вулиця Європейська, 155, розподільчий центр «Нова лінія»' : 'Полтава ' + (i + 1), Date.UTC(2026, 10, 1 + i, 8))));
+  await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#tripTools .tt-b'); await sleep(300);
+  const f0 = await lay();
+  await shot(page, '36-trip-tools-' + sc.n);
+  ok(`[${T}] у «Рейсі» — дві окремі кнопки: «Архів рейсів» (із кількістю 14) і «Зберегти рейс»; стрічки рейсів під формою немає`, f0.tools.length === 2 && f0.tools[0].act === 'archive' && f0.tools[0].txt === 'Архів рейсів' && f0.tools[0].n === '14' && f0.tools[1].act === 'saveTrip' && f0.tools[1].txt === 'Зберегти рейс' && f0.inline === 0 && !f0.saved, JSON.stringify(f0.tools.map(x => [x.txt, x.n])));
+  ok(`[${T}] кнопки поруч, однакові, зручні для пальця (≥ 46), написи цілі, ніщо їх не перекриває`, f0.tools.every(x => x.box.h >= 46 && x.seen && x.fit && x.box.l >= f0.body.l && x.box.r <= f0.body.r + 1) && Math.abs(f0.tools[0].box.w - f0.tools[1].box.w) <= 2 && Math.abs(f0.tools[0].box.t - f0.tools[1].box.t) <= 1 && f0.tools[0].box.r < f0.tools[1].box.l, JSON.stringify(f0.tools.map(x => ({ ...x.box, seen: x.seen, fit: x.fit }))));
+  ok(`[${T}] форма не стала довшою: кнопки стоять на місці заголовка «Новий рейс», «Прокласти рейс» — як і раніше, на видноті (без прокручування)`, !f0.newSec && f0.firstField.t - f0.tools[0].box.b <= 16 && (sc.n === 'tiny' || sc.n === 'land' || (f0.build.seen && f0.build.box.b <= f0.bottomTop)), JSON.stringify({ gap: f0.firstField.t - f0.tools[0].box.b, build: f0.build, bottomTop: f0.bottomTop }));
+  ok(`[${T}] «Зберегти рейс» поки бліда (нічого зберігати); торкнулись — підказка «Спершу вкажіть, куди їхати», рейсів не додалось`, !f0.tools[1].can && await (async () => { await page.click('#tripTools [data-act="saveTrip"]'); await sleep(300); const x = await lay(); return /Спершу вкажіть, куди їхати/.test(x.toast) && x.count === 14; })());
+  if (await app(page, () => document.body.classList.contains('kb'))) { await app(page, () => document.activeElement && document.activeElement.blur()); await sleep(500); }
+  // ---- архів: окремий екран ----
+  await page.click('#tripTools [data-act="archive"]'); await sleep(350);
+  const a0 = await lay();
+  await shot(page, '37-archive-' + sc.n);
+  ok(`[${T}] «Архів рейсів» — окремий екран зі стрілкою «назад»; 14 рейсів, найновіші згори, у кожного «Відкрити» й кошик`, a0.panel && a0.title === 'Архів рейсів' && a0.back && a0.items.length === 14 && a0.items[0].id === 't-14' && a0.items[13].id === 't-1' && a0.items.every(i => i.open && i.del && i.open.h >= 44 && i.del.h >= 44 && i.del.w >= 44), JSON.stringify({ title: a0.title, n: a0.items.length, first: a0.items[0] }));
+  ok(`[${T}] довга назва рейсу не розпирає рядок: кнопки на місці, усе в межах панелі; дата й відстань під назвою`, a0.items.every(i => i.box.l >= a0.body.l && i.box.r <= a0.body.r + 1 && i.del.r <= i.box.r && i.open.l > i.box.l + 60) && /27 км · .* · 14 лист/.test(a0.items[0].meta), JSON.stringify({ it: a0.items[0], body: a0.body }));
+  // прокручується всередині панелі й не залазить під нижню плашку
+  const sc1 = await app(page, () => { const pb = document.getElementById('panelBody'); pb.scrollTop = pb.scrollHeight; const last = [...document.querySelectorAll('.arch .item')].pop().getBoundingClientRect(), bt = document.getElementById('bottom'), btTop = getComputedStyle(bt).display !== 'none' ? bt.getBoundingClientRect().top : innerHeight, pr = document.getElementById('panel').getBoundingClientRect();
+    const el = document.elementFromPoint(last.left + 30, last.bottom - 6); return { lastB: Math.round(last.bottom), btTop: Math.round(btTop), panelB: Math.round(pr.bottom), mine: !!el && !!el.closest('.arch .item'), scrolled: pb.scrollTop > 0 }; });
+  ok(`[${T}] список прокручується всередині екрана; останній рейс видно повністю, нижня плашка його не накриває`, sc1.mine && sc1.lastB <= Math.max(sc1.btTop, sc1.panelB) + 1, JSON.stringify(sc1));
+  // «назад» (стрілка й системна) — у «Рейс»
+  await page.click('#panelBack'); await sleep(300);
+  const a1 = await lay();
+  await page.click('#tripTools [data-act="archive"]'); await sleep(250);
+  const backSys = await app(page, () => window.__reisBack()); await sleep(250);
+  const a2 = await lay();
+  ok(`[${T}] стрілка «назад» і системна «Назад» повертають з архіву у «Рейс» (а не закривають усе)`, a1.title === 'Рейс' && a1.tools.length === 2 && backSys === true && a2.panel && a2.title === 'Рейс', JSON.stringify({ t1: a1.title, t2: a2.title, backSys }));
+  // кошик — із поверненням
+  await page.click('#tripTools [data-act="archive"]'); await sleep(250);
+  await page.click('.arch [data-del="t-13"]'); await sleep(350);
+  const d1 = await lay();
+  await app(page, () => { const ts = [...document.querySelectorAll('#toasts .toast')]; ts[ts.length - 1].click(); }); await sleep(700);
+  const d2 = await lay();
+  ok(`[${T}] кошик видаляє рейс одразу, але випадковий дотик можна скасувати: «Торкніться тут — поверну»`, d1.items.length === 13 && !d1.items.some(i => i.id === 't-13') && /Рейс видалено/.test(d1.toast) && d2.items.length === 14 && d2.items.some(i => i.id === 't-13') && d2.count === 14, JSON.stringify({ n1: d1.items.length, n2: d2.items.length, toast: d1.toast.slice(0, 60) }));
+  // «Відкрити» — рейс на карті й у «Рейсі», далі «Поїхали»
+  await page.click('.arch [data-open="t-14"]'); await sleep(600);
+  const o1 = await lay(), o1b = await app(page, () => ({ go: !!document.querySelector('#planSum [data-act="go"]'), save: (document.querySelector('#planSum [data-act="save"]') || { textContent: '' }).textContent.trim(), line: !!window.__app.map.map.getLayer('route-line'), finish: document.getElementById('in_b').value }));
+  ok(`[${T}] «Відкрити» — рейс показано у «Рейсі» (підсумок, «Поїхали»), поля заповнені; «Зберегти рейс» тепер жива`, o1.title === 'Рейс' && o1b.go && o1b.save === 'Зберегти рейс' && /Європейська/.test(o1b.finish) && o1.newSec && o1.tools[1].can, JSON.stringify({ o1b, can: o1.tools[1].can }));
+  // «Зберегти рейс» із прокладеним рейсом: в архів, форма — з чистого аркуша
+  await app(page, () => { const P = window.__app; P.route.deleteTrip('t-14'); }); await sleep(600);
+  await page.click('#tripTools [data-act="saveTrip"]'); await sleep(500);
+  const s1 = await lay(), s1b = await app(page, () => ({ has: window.__app.route.getTrips().some(x => x.id === 't-14'), finish: (document.getElementById('in_b') || { value: '?' }).value, sum: document.getElementById('planSum').textContent.trim() }));
+  ok(`[${T}] «Зберегти рейс» (рейс прокладено) — рейс в архіві, сказано де; форма чиста`, s1b.has && /Рейс збережено — він в «Архіві рейсів»/.test(s1.toast) && s1b.finish === '' && s1b.sum === '' && s1.count === 14 && s1.tools[0].n === '14', JSON.stringify({ s1b, toast: s1.toast.slice(-60), n: s1.tools[0].n }));
+  // «Зберегти рейс», коли рейс іще не прокладено, а фініш уже вказано: прокладаємо й зберігаємо одним дотиком
+  await page.fill('#in_b', 'Полтава'); await sleep(900);
+  const s2a = await lay();
+  if (await app(page, () => document.body.classList.contains('kb'))) { await app(page, () => document.activeElement && document.activeElement.blur()); await sleep(500); }
+  const reqN = routeReqs.length;
+  await page.click('#tripTools [data-act="saveTrip"]');
+  await page.waitForFunction(() => window.__app.route.getTrips().length === 15, null, { timeout: 15000 }).catch(() => {});
+  await sleep(600);
+  const s2 = await lay(), s2b = await app(page, () => { const ts = window.__app.route.getTrips(), last = ts[ts.length - 1]; return { b: last.b && last.b.label, me: !!(last.a && last.a.me), route: !!(last.route && last.route.coords && last.route.coords.length > 2), pick: !document.getElementById('routePick').hidden, finish: (document.getElementById('in_b') || { value: '?' }).value }; });
+  ok(`[${T}] фініш уже вписано — «Зберегти рейс» оживає; один дотик: рейс прокладено (від мого місця) і збережено, вікно варіантів не відкривається`, s2a.tools[1].can && routeReqs.length > reqN && s2.count === 15 && s2.tools[0].n === '15' && /Полтава/.test(s2b.b || '') && s2b.me && s2b.route && !s2b.pick && s2b.finish === '' && /Рейс збережено/.test(s2.toast), JSON.stringify({ s2b, n: s2.tools[0].n, toast: s2.toast.slice(-70) }));
+  // порожній архів
+  await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); }); await sleep(600);
+  const e0 = await lay();
+  await page.click('#tripTools [data-act="archive"]'); await sleep(300);
+  const e1 = await lay();
+  ok(`[${T}] порожній архів: на кнопці немає числа, на екрані — що зробити, щоб рейс тут з'явився`, e0.tools[0].n === '' && e1.items.length === 0 && /Архів порожній/.test(e1.empty) && /Зберегти рейс/.test(e1.empty), JSON.stringify({ n: e0.tools[0].n, empty: e1.empty.slice(0, 60) }));
+  ok(`[${T}] прохід 29 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`прохід 29 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
+
+/* ============ знімки справжньої картотеки (лише на прохання: REALVP=1 ONLY=vpreal --shots тека) ============ */
+if (process.env.REALVP && run('vpreal')) try {
+  const { page, ctx, errors } = await newPage(true, { realVp: true, viewport: { width: 360, height: 760 } });
+  await app(page, ([la, lo]) => window.__reis('loc', { prov: 'gps', lat: la, lon: lo, acc: 5, spd: 0, t: Date.now() }), [49.2500, 28.5600]); await sleep(600);
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row[data-vpid="avtoport-vinnytsia"]'); await sleep(500);
+  await shot(page, 'vp-list');
+  await page.click('.vp-row[data-vpid="avtoport-vinnytsia"]'); await page.waitForSelector('.vp-serv'); await sleep(900);
+  await shot(page, 'vp-card-1');
+  for (const [i, y] of [[2, 430], [3, 1000], [4, 1700]]) { await app(page, y => { document.getElementById('panelBody').scrollTop = y; }, y); await sleep(300); await shot(page, 'vp-card-' + i); }
+  const info = await app(page, () => ({ imgs: [...document.querySelectorAll('.vp-photos img')].length, secs: [...document.querySelectorAll('#panelBody .sec')].map(e => e.textContent), rows: document.querySelectorAll('.vp-menu div').length, h: document.getElementById('panelBody').scrollHeight }));
+  console.log('VPREAL', JSON.stringify(info));
+  await page.click('[data-vp="map"]'); await sleep(1500); await shot(page, 'vp-map');
+  ok('справжня картка «Автопорт» відкривається без помилок', errors.length === 0 && info.imgs === 10 && info.secs.length >= 2, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('знімки справжньої картотеки', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
 if (run('2')) try {
