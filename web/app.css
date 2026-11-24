@@ -920,6 +920,9 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .pl-ok:active{transform:scale(.94)}
 /* вузький екран (до 340): плитки по три в ряд, щоб написи не обрізались */
 @media (max-width:340px){ .pl-chips{grid-template-columns:repeat(3,minmax(0,1fr))} }
+/* над кнопками щось стоїть (кнопки «без GPS», «Нова версія», «прийняти GPS») — це окремі кнопки на прозорому, тож невисока панель
+   (форма «Рейс» із побудованим маршрутом) під них не заходить */
+#bottom:has(.nudge:not([hidden]),#updBar:not([hidden]),#bAcceptGps:not([hidden])) ~ #panel:not(.full){bottom:var(--bh,150px)}
 .pl-row{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border-radius:14px;background:rgba(var(--glass2-rgb),.55);color:var(--ink);text-align:left;min-height:56px}
 .pl-row .grow{min-width:0}
 .pl-row b{display:block;font:700 16px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}

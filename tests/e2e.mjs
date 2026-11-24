@@ -737,13 +737,13 @@ if (run('1')) try {
   ok('швидкі налаштування → «Налаштування» → тема «День»', await app(page, () => document.body.dataset.theme === 'day' && window.__app.S.theme === 'day'));
   // прозорість плашок: за замовчуванням нижня панель і кнопки напівпрозорі, без розмиття
   const alpha = sel => app(page, s => { const m = getComputedStyle(document.querySelector(s)).backgroundColor.match(/rgba?\(([^)]+)\)/); const p = m ? m[1].split(',').map(Number) : []; return p.length === 4 ? p[3] : 1; }, sel);
-  const aBottom = await alpha('#bottom'), aRail = await alpha('#bQuick'), aSpeed = await alpha('#speed');
+  const aBottom = await alpha('#tabbar'), aRail = await alpha('#bQuick'), aSpeed = await alpha('#speed');
   ok('нижня панель, кнопки і швидкість прозорі (≤ 0,5)', aBottom <= 0.5 && aRail <= 0.5 && aSpeed <= 0.5, `низ ${aBottom}, кнопка ${aRail}, швидкість ${aSpeed}`);
-  ok('нижня панель без розмиття', await app(page, () => ['none', ''].includes(getComputedStyle(document.getElementById('bottom')).backdropFilter || 'none')));
+  ok('нижня панель без розмиття', await app(page, () => ['none', ''].includes(getComputedStyle(document.getElementById('tabbar')).backdropFilter || 'none')));
   await page.click('[data-seg="glass:low"]'); await sleep(200);
-  const aLow = await alpha('#bottom');
+  const aLow = await alpha('#tabbar');
   await page.click('[data-seg="glass:max"]'); await sleep(200);
-  const aMax = await alpha('#bottom');
+  const aMax = await alpha('#tabbar');
   ok('перемикач «Прозорість плашок» міняє щільність', aLow > 0.75 && aMax < 0.3, `слабка ${aLow}, максимум ${aMax}`);
   await page.click('[data-seg="glass:high"]'); await sleep(200);
   if (SHOTS) {
@@ -760,7 +760,7 @@ if (run('1')) try {
   }
   await page.click('[data-seg="theme:night"]'); await sleep(300);
   ok('нічний режим', await app(page, () => document.body.dataset.theme === 'night'));
-  ok('вночі нижня панель теж прозора і темна', await app(page, () => { const c = getComputedStyle(document.getElementById('bottom')).backgroundColor; const p = c.match(/[\d.]+/g).map(Number); return p[0] < 60 && p[3] <= 0.5; }));
+  ok('вночі нижня панель теж прозора і темна', await app(page, () => { const c = getComputedStyle(document.getElementById('tabbar')).backgroundColor; const p = c.match(/[\d.]+/g).map(Number); return p[0] < 60 && p[3] <= 0.5; }));
   await page.click('[data-tg="vibrate"]');
   ok('перемикач вібрації', await app(page, () => window.__app.S.vibrate === false));
   await page.click('#panelClose');
@@ -2546,9 +2546,9 @@ if (run('25')) for (const sc of TABS.filter(x => !process.env.SCR || process.env
   const centered = (r, maxW) => r && Math.abs((r.l + r.r) / 2 - sc.w / 2) <= 1.5 && r.l >= 0 && r.r <= sc.w && (!wide || r.w <= maxW);
   const overflow = () => app(page, () => { const out = []; for (const e of document.querySelectorAll('#top,#bottom,#panel,#quick,#pick,#routePick,#repSheet,.aim-bar,#toasts .toast,#panelBody *')) { if (e.closest('[hidden]')) continue; const r = e.getBoundingClientRect(); if (!r.width) continue; if (r.right > innerWidth + 1 || r.left < -1) out.push((e.id || e.className || e.tagName) + ' ' + Math.round(r.left) + '..' + Math.round(r.right)); } return [...new Set(out)].slice(0, 6); });
   await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(500);
-  const top = await R('#top'), bot = await R('#bottom'), spd = await R('#speed'), zm = await R('#zoom'), mapR = await R('#map');
+  const top = await R('#top'), bot = await R('#bottom'), bar = await R('#tabbar'), spd = await R('#speed'), zm = await R('#zoom'), mapR = await R('#map');
   ok(`[${T}] карта на весь екран; верхня й нижня плашки — по центру${wide ? ', не ширші 760 px' : ''} (а не збоку)`, mapR.w === sc.w && mapR.h === sc.h && centered(top, 760) && centered(bot, 760) && bot.b === sc.h, JSON.stringify({ top, bot }));
-  ok(`[${T}] круг швидкості й кнопки масштабу не налазять на нижню плашку`, spd && zm && (spd.b <= bot.t || spd.r <= bot.l) && (zm.b <= bot.t || zm.l >= bot.r) && spd.l >= 0 && zm.r <= sc.w && spd.b <= sc.h && zm.b <= sc.h, JSON.stringify({ spd, zm, bot }));
+  ok(`[${T}] круг швидкості й кнопки масштабу не налазять на нижню плашку`, spd && zm && (spd.b <= bot.t || spd.r <= bot.l) && (zm.b <= bar.t || zm.l >= bar.r) && spd.l >= 0 && zm.r <= sc.w && spd.b <= sc.h && zm.b <= sc.h, JSON.stringify({ spd, zm, bot }));
   await shot(page, `31-${sc.n}-map`);
   await page.click('#bQuick'); await sleep(300);
   const q = await R('#quick');
@@ -3412,7 +3412,7 @@ if (run('32')) try {
       out.offCentre = sim({ ops: std(82, 98) });                                      // «прямо» на початку було на 8° убік — розмах той самий
       out.rightFirst = sim({ ops: [['rest', 3], ['turn', -90, 1.2], ['rest', 1.4], ['turn', 180, 2], ['rest', 1.4]] });
       out.early = sim({ ops: [['rest', 3], ['turn', 55, 1], ['rest', 1.6], ['turn', 35, 0.6], ['rest', 1.4]] });
-      out.asym = sim({ ops: std(75, 100) });
+      out.asym = sim({ ops: std(75, 100) }); out.short1 = sim({ ops: std(72, 90) }); out.short1b = sim({ ops: std(90, 73) }); out.s92off = sim({ scale: 0.92, ops: std(86, 94) });
       out.range = sim({ ops: std(72, 72) });
       out.flat = sim({ up: [0, 0.3, 0.954], ops: [['rest', 4]] });
       out.moving = sim({ ops: [['turn', 40, 4]] });
@@ -3476,6 +3476,8 @@ if (run('32')) try {
     ok('калібрування, логіка: спершу повернули праворуч — теж зараховано (перший бік — праворуч, далі просимо ліворуч)', R('rightFirst').ok && U.rightFirst.first === 1 && near(U.rightFirst.left, 90, 0.2) && near(U.rightFirst.right, 90, 0.2), JSON.stringify({ first: U.rightFirst.first, log: U.rightFirst.log }));
     ok('калібрування, логіка: зупинились на 55° — не зараховано, підказка «ще трохи»; довели до 90° — зараховано', U.early.log[2].step === 2 && U.early.log[2].hint === 'more' && U.early.log[4].step === 3 && near(U.early.left, 90, 0.2), JSON.stringify(U.early.log));
     ok('калібрування, логіка: ліворуч 75°, праворуч 100° — надто по-різному: «повторіть» (asym); обидва боки по 72° — це не 90°: «повторіть» (range)', U.asym.step === 4 && !R('asym').ok && R('asym').why === 'asym' && !R('range').ok && R('range').why === 'range', JSON.stringify([R('asym'), R('range')]));
+    ok(`калібрування, логіка: один бік не довели до грані (72° і 90°) — виглядає як «гіроскоп занижує на 10 %», але справжня похибка датчика дає боки однакові: чесно «повторіть», а не хибна поправка +11 %; гіроскоп −8 % і «прямо» трохи вбік (79° і 86,5°) — поправку беремо`,
+      U.short1.step === 4 && !R('short1').ok && R('short1').why === 'asym' && !R('short1b').ok && R('short1b').why === 'asym' && R('s92off').ok && !R('s92off').fine && near(R('s92off').k, 1.087, 0.003), JSON.stringify([R('short1'), R('short1b'), R('s92off')]));
     ok('калібрування, логіка: телефон лежить — крок 1 не йде, підказка «поставте вертикально»; телефон рухають — «тримайте нерухомо»; на кроці 2 поклали екраном догори — теж «вертикально»', U.flat.step === 1 && U.flat.hint === 'upright' && U.moving.step === 1 && U.moving.hint === 'hold' && U.moving.log[0].prog < 0.6 && U.laidDown.step === 2 && U.laidDown.hint === 'upright' && U.laidDown.left == null, JSON.stringify([U.flat.log, U.moving.log, U.laidDown.log]));
     ok('калібрування, логіка: повернули на 131° — забагато, не зараховано; заміри урвались на 1,5 с посеред повороту (програму згорнули) — починаємо з кроку 1', U.tooFar.step === 2 && U.tooFar.hint === 'tooFar' && U.tooFar.left == null && U.gap.step === 1 && U.gap.left == null, JSON.stringify([U.tooFar.log, U.gap.log]));
     ok('калібрування, логіка: екран «заїкнувся» на 0,3 с посеред рівного повороту — кут не загублено (90,0°), крок зараховано', U.stutter.step === 3 && near(U.stutter.left, 90, 0.5), JSON.stringify([U.stutter.left, U.stutter.log]));
