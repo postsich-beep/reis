@@ -131,7 +131,8 @@ export function newCal() {
     if (tFirst == null) tFirst = s.t;
     st.n++; if (s.t - tFirst > 0.5) st.hz = Math.round(st.n / (s.t - tFirst));
     const dt = lastT == null ? 0 : s.t - lastT, GAP = s.slow ? CAL.GAP_SLOW_S : CAL.GAP_S; lastT = s.t; st.slow = !!s.slow;
-    gl = gl ? [gl[0] + 0.1 * (g[0] - gl[0]), gl[1] + 0.1 * (g[1] - gl[1]), gl[2] + 0.1 * (g[2] - gl[2])] : g.slice();   // згладжене «вгору»
+    { const al = Math.min(1, dt / 0.24);                    // згладжене «вгору» — з тією самою сталою часу (~0,25 с), що й у служби навігації
+      gl = gl ? [gl[0] + al * (g[0] - gl[0]), gl[1] + al * (g[1] - gl[1]), gl[2] + al * (g[2] - gl[2])] : g.slice(); }
     if (st.step === 1) {
       st.angle = 0;
       if (poseOf(gl).kind === 'flat') { still0(s.t); st.hint = 'upright'; return st; }      // лежить — спершу поставити вертикально
@@ -160,8 +161,9 @@ export function newCal() {
       st.step = 1; st.left = st.right = null; st.first = 0; st.want = -1; st.angle = 0; drift = 0; still0(s.t); st.hint = 'hold'; return st;
     }
     const wb = [w[0] - b[0], w[1] - b[1], w[2] - b[2]];
-    // поворот за крок — за середньою швидкістю між двома замірами (трапеція): пропущений замір чи два кута не псують
-    const mid = pw ? [(pw[0] + wb[0]) / 2, (pw[1] + wb[1]) / 2, (pw[2] + wb[2]) / 2] : wb; pw = wb;
+    // поворот за крок — за середньою швидкістю між двома замірами (трапеція): пропущений замір чи два кута не псують.
+    // Рідкі заміри (slow) — це вже середня швидкість за секунду, тож їх беремо як є.
+    const mid = pw && !s.slow ? [(pw[0] + wb[0]) / 2, (pw[1] + wb[1]) / 2, (pw[2] + wb[2]) / 2] : wb; pw = wb;
     q = qstep(q, mid, dt);
     yawW -= dot(mid, unit(gl)) * dt;                          // те саме, що рахує служба: поворот навколо вертикалі (за годинниковою — плюс)
     if (dt > CAL.GAP_BAD && !s.slow) loss += Math.hypot(mid[0], mid[1], mid[2]) * dt;

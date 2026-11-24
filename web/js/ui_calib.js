@@ -139,7 +139,8 @@ function onSens(s) {
   if (!s || s.yaw == null || !cal) return;
   const now = performance.now(), ts = now / 1000;
   if (rawN === 0 && now - t0 > 1800) {
-    if (natPrev && ts - natPrev.t > 0.2 && ts - natPrev.t < 3) cal.feed({ t: ts, w: [0, -(s.yaw - natPrev.yaw) / (ts - natPrev.t), 0], g: [0, 9.81, 0], slow: true });
+    if (natPrev && ts - natPrev.t < 0.2) return;               // два звіти служби впритул — дочекаємось наступного
+    if (natPrev && ts - natPrev.t < 3) cal.feed({ t: ts, w: [0, -(s.yaw - natPrev.yaw) / (ts - natPrev.t), 0], g: [0, 9.81, 0], slow: true });
     natPrev = { t: ts, yaw: s.yaw };
   }
   cal.native(s.yaw);
