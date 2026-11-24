@@ -464,15 +464,17 @@ function tripActiveHtml() {
 }
 /* ---------- «Архів рейсів» і «Зберегти рейс» — дві окремі кнопки (1.1.16) ----------
    Раніше всі збережені рейси розгортались стрічкою під формою «Рейс» (а зберігається кожен рейс, яким рушили, —
-   стрічка росла й відсувала форму). Тепер у формі — дві кнопки на місці заголовка «Новий рейс» (місця не займають):
+   стрічка росла й відсувала форму). Тепер у формі — дві кнопки, з 1.1.18 — ПІД «Прокласти рейс» (у порядку дій:
+   вписав точки → проклав → зберіг; архів — поруч), кожна з кольоровим значком: синій годинник — архів (із кількістю
+   рейсів на значку), зелена дискета — зберегти:
      • «Архів рейсів» (з кількістю) — окремий екран зі списком: найновіші згори, «Відкрити», кошик (із поверненням);
      • «Зберегти рейс» — зберігає прокладений рейс; якщо рейс іще не прокладено, а фініш уже є — прокладає й зберігає. */
 const archList = () => getTrips().filter(x => !g.trip || x.id !== g.trip.id).slice().sort((a, b) => (b.created || 0) - (a.created || 0));
 const canSaveTrip = () => !!plan.trip || !!plan.b || !!($('in_b') && $('in_b').value.trim());
 function tripToolsHtml() {
   const n = archList().length;
-  return `<button class="tt-b" data-act="archive">${ICON.archive}<span>${t('tripArchive')}</span>${n ? `<i>${n}</i>` : ''}</button>
-    <button class="tt-b${canSaveTrip() ? ' can' : ''}" data-act="saveTrip" ${plan.busy ? 'disabled' : ''}>${ICON.save}<span>${t('tripSave')}</span></button>`;
+  return `<button class="tt-b" data-act="archive"><em class="tt-ic" aria-hidden="true">${ICON.archive}${n ? `<i>${n}</i>` : ''}</em><span>${t('tripArchive')}</span></button>
+    <button class="tt-b${canSaveTrip() ? ' can' : ''}" data-act="saveTrip" ${plan.busy ? 'disabled' : ''}><em class="tt-ic" aria-hidden="true">${ICON.save}</em><span>${t('tripSave')}</span></button>`;
 }
 function tripToolsSync() { const b = $('tripTools'); if (b) b.innerHTML = tripToolsHtml(); }
 /** Зберегти прокладений рейс і почати з чистого аркуша (його видно в «Архіві рейсів»). */
@@ -530,13 +532,13 @@ const startTwoHtml = () => `<button class="${startIsMe() ? 'on' : ''}" data-here
 const startTwoSync = () => { const e = $('startTwo'); if (e) e.innerHTML = startTwoHtml(); };
 function planHtml() {
   // Лише три точки: старт — звідки, через (проміжна, необов'язково), фініш — куди. Нічого зайвого (душі тощо — на карті й у дорозі).
-  return `<div class="trip-tools" id="tripTools">${tripToolsHtml()}</div>
-    <div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec" id="newSec" ${plan.trip ? '' : 'hidden'}>${t('newTrip')}</div>
+  return `<div id="planSum">${plan.trip ? planSumHtml() : ''}</div><div class="sec" id="newSec" ${plan.trip ? '' : 'hidden'}>${t('newTrip')}</div>
     ${fieldHtml('a', t('phA'))}${fieldHtml('v', t('phV'))}${fieldHtml('b', t('phB'))}
     <div class="muted pt-hint">${ICON.pin}<span>${t('ptFormHint')}</span></div>
     ${vehHtml()}
     <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
-    <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>`;
+    <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
+    <div class="trip-tools" id="tripTools">${tripToolsHtml()}</div>`;
 }
 // Знак «фурам заборонено», а іншої дороги немає й усі їздять: рейс уже показано, тим часом питаємо сервер про варіант
 // через такі дороги. Якщо він помітно коротший — додаємо третьою карткою; вибирає водій.

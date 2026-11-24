@@ -2969,7 +2969,9 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
     const pb = document.getElementById('panelBody'), tools = [...document.querySelectorAll('#tripTools .tt-b')], pr = R(pb), bt = R(document.getElementById('bottom'));
     const seen = e => { const r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, el = document.elementFromPoint(x, y); return !!el && (el === e || e.contains(el)); };
     return { panel: !document.getElementById('panel').hidden, title: document.getElementById('panelTitle').textContent.trim(), back: !document.getElementById('panelBack').hidden, body: pr, bottomTop: bt && getComputedStyle(document.getElementById('bottom')).display !== 'none' ? bt.t : innerHeight, vw: innerWidth,
-      tools: tools.map(b => ({ act: b.dataset.act, txt: b.querySelector('span').textContent.trim(), n: (b.querySelector('i') || { textContent: '' }).textContent, can: b.classList.contains('can'), box: R(b), seen: seen(b), fit: b.scrollWidth <= b.clientWidth + 1 && b.querySelector('span').scrollWidth <= b.querySelector('span').clientWidth + 1 })),
+      tools: tools.map(b => { const ic = b.querySelector('.tt-ic'), cs = ic ? getComputedStyle(ic) : null, sv = ic && ic.querySelector('svg'), bd = ic && ic.querySelector('i');
+        return { act: b.dataset.act, txt: b.querySelector('span').textContent.trim(), n: (b.querySelector('i') || { textContent: '' }).textContent, can: b.classList.contains('can'), box: R(b), seen: seen(b), fit: b.scrollWidth <= b.clientWidth + 1 && b.querySelector('span').scrollWidth <= b.querySelector('span').clientWidth + 1,
+          ic: ic ? { box: R(ic), bg: cs.backgroundColor, fg: cs.color, op: +cs.opacity, svg: !!sv && sv.getBoundingClientRect().width >= 16, badge: bd ? R(bd) : null, left: R(ic).l < R(b.querySelector('span')).l } : null }; }),
       inline: document.querySelectorAll('#panelBody [data-open]').length, saved: !!document.getElementById('savedBox'), newSec: (e => !!e && !e.hidden)(document.getElementById('newSec')),
       build: (b => b ? { box: R(b), seen: seen(b) } : null)(document.querySelector('#panelBody [data-act="build"]')), firstField: R(document.getElementById('in_a')), scroll: pb.scrollTop,
       items: [...document.querySelectorAll('#panelBody .arch .item')].map(e => ({ t: e.querySelector('.t').textContent.trim(), meta: e.querySelector('.muted').textContent.trim(), box: R(e), open: R(e.querySelector('[data-open]')), del: R(e.querySelector('[data-del]')), id: e.querySelector('[data-open]').dataset.open })),
@@ -2980,8 +2982,15 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const f0 = await lay();
   await shot(page, '36-trip-tools-' + sc.n);
   ok(`[${T}] у «Рейсі» — дві окремі кнопки: «Архів рейсів» (із кількістю 14) і «Зберегти рейс»; стрічки рейсів під формою немає`, f0.tools.length === 2 && f0.tools[0].act === 'archive' && f0.tools[0].txt === 'Архів рейсів' && f0.tools[0].n === '14' && f0.tools[1].act === 'saveTrip' && f0.tools[1].txt === 'Зберегти рейс' && f0.inline === 0 && !f0.saved, JSON.stringify(f0.tools.map(x => [x.txt, x.n])));
-  ok(`[${T}] кнопки поруч, однакові, зручні для пальця (≥ 46), написи цілі, ніщо їх не перекриває`, f0.tools.every(x => x.box.h >= 46 && x.seen && x.fit && x.box.l >= f0.body.l && x.box.r <= f0.body.r + 1) && Math.abs(f0.tools[0].box.w - f0.tools[1].box.w) <= 2 && Math.abs(f0.tools[0].box.t - f0.tools[1].box.t) <= 1 && f0.tools[0].box.r < f0.tools[1].box.l, JSON.stringify(f0.tools.map(x => ({ ...x.box, seen: x.seen, fit: x.fit }))));
-  ok(`[${T}] форма не стала довшою: кнопки стоять на місці заголовка «Новий рейс», «Прокласти рейс» — як і раніше, на видноті (без прокручування)`, !f0.newSec && f0.firstField.t - f0.tools[0].box.b <= 16 && (sc.n === 'tiny' || sc.n === 'land' || (f0.build.seen && f0.build.box.b <= f0.bottomTop)), JSON.stringify({ gap: f0.firstField.t - f0.tools[0].box.b, build: f0.build, bottomTop: f0.bottomTop }));
+  // на малих екранах кнопки під «Прокласти рейс» — нижче краю: доходимо до них прокручуванням, як водій пальцем
+  await app(page, () => document.getElementById('tripTools').scrollIntoView({ block: 'center' })); await sleep(200);
+  const f0s = await lay(); if (sc.n === 'tiny' || sc.n === 'land') await shot(page, '36-trip-tools-scrolled-' + sc.n);
+  await app(page, () => { document.getElementById('panelBody').scrollTop = 0; }); await sleep(150);
+  ok(`[${T}] кнопки поруч, однакові, зручні для пальця (≥ 46), написи цілі, ніщо їх не перекриває${sc.n === 'tiny' || sc.n === 'land' ? ' (після прокручування)' : ''}`, f0s.tools.every(x => x.box.h >= 46 && x.seen && x.fit && x.box.l >= f0s.body.l && x.box.r <= f0s.body.r + 1 && x.box.b <= f0s.bottomTop) && Math.abs(f0s.tools[0].box.w - f0s.tools[1].box.w) <= 2 && Math.abs(f0s.tools[0].box.t - f0s.tools[1].box.t) <= 1 && f0s.tools[0].box.r < f0s.tools[1].box.l, JSON.stringify({ tools: f0s.tools.map(x => ({ ...x.box, seen: x.seen, fit: x.fit })), bottomTop: f0s.bottomTop, body: f0s.body }));
+  ok(`[${T}] (1.1.18) кнопки — ПІД «Прокласти рейс» (у порядку дій), форма починається одразу з полів; «Прокласти рейс» на видноті без прокручування${sc.n === 'S10' || sc.n === 'tablet' ? ', і обидві кнопки теж' : ''}`, !f0.newSec && f0.tools[0].box.t > f0.build.box.b && f0.tools[0].box.t - f0.build.box.b <= 24 && f0.firstField.t - f0.body.t <= 24
+    && (sc.n === 'tiny' || sc.n === 'land' || (f0.build.seen && f0.build.box.b <= f0.bottomTop && f0.tools.every(x => x.seen && x.box.b <= f0.bottomTop))), JSON.stringify({ gapBuild: f0.tools[0].box.t - f0.build.box.b, firstField: f0.firstField.t - f0.body.t, build: f0.build, tools: f0.tools.map(x => x.box), bottomTop: f0.bottomTop }));
+  ok(`[${T}] (1.1.18) у кожної кнопки — кольоровий значок ліворуч від напису: синій годинник (архів, кількість рейсів — на значку), зелена дискета (зберегти; поки нічого зберігати — блідіша)`, f0.tools.every(x => x.ic && x.ic.svg && x.ic.left && x.ic.box.w >= 28 && x.ic.fg === 'rgb(255, 255, 255)') && f0.tools[0].ic.bg === 'rgb(47, 107, 255)' && f0.tools[1].ic.bg === 'rgb(47, 158, 98)'
+    && !!f0.tools[0].ic.badge && f0.tools[0].ic.badge.t < f0.tools[0].ic.box.t + 6 && f0.tools[0].ic.badge.r > f0.tools[0].ic.box.r - 2 && f0.tools[0].ic.badge.b >= f0.tools[0].box.t && f0.tools[1].ic.op < 0.8 && f0.tools[0].ic.op === 1, JSON.stringify(f0.tools.map(x => x.ic)));
   ok(`[${T}] «Зберегти рейс» поки бліда (нічого зберігати); торкнулись — підказка «Спершу вкажіть, куди їхати», рейсів не додалось`, !f0.tools[1].can && await (async () => { await page.click('#tripTools [data-act="saveTrip"]'); await sleep(300); const x = await lay(); return /Спершу вкажіть, куди їхати/.test(x.toast) && x.count === 14; })());
   if (await app(page, () => document.body.classList.contains('kb'))) { await app(page, () => document.activeElement && document.activeElement.blur()); await sleep(500); }
   // ---- архів: окремий екран ----
@@ -3021,6 +3030,13 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   await page.fill('#in_b', 'Полтава'); await sleep(900);
   const s2a = await lay();
   if (await app(page, () => document.body.classList.contains('kb'))) { await app(page, () => document.activeElement && document.activeElement.blur()); await sleep(500); }
+  if (sc.n === 'S10') {   // як виглядає ожила «Зберегти рейс» — і вдень, і вночі (значки мають читатися в обох темах)
+    const act = await app(page, () => { const b = document.querySelector('#tripTools [data-act="saveTrip"]'), ic = b.querySelector('.tt-ic'); b.scrollIntoView({ block: 'center' }); return { can: b.classList.contains('can'), op: +getComputedStyle(ic).opacity, border: getComputedStyle(b).borderColor }; });
+    await sleep(150); await shot(page, '36b-save-active-S10');
+    await app(page, () => { document.body.dataset.theme = 'night'; }); await sleep(200); await shot(page, '36c-trip-tools-night-S10');
+    await app(page, () => { document.body.dataset.theme = window.__app.S.theme === 'night' ? 'night' : 'day'; document.getElementById('panelBody').scrollTop = 0; }); await sleep(150);
+    ok(`[${T}] (1.1.18) фініш вписано — «Зберегти рейс» ожила: значок яскравий, жовта рамка`, act.can && act.op === 1 && act.border === 'rgb(245, 163, 0)', JSON.stringify(act));
+  }
   const reqN = routeReqs.length;
   await page.click('#tripTools [data-act="saveTrip"]');
   await page.waitForFunction(() => window.__app.route.getTrips().length === 15, null, { timeout: 15000 }).catch(() => {});
@@ -3030,7 +3046,7 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   // порожній архів
   await app(page, () => { const P = window.__app; for (const tr of P.route.getTrips().slice()) P.route.deleteTrip(tr.id); });
   // форма оновлюється не миттєво (перемальовування раз на 0,4 с), а на завантаженій машині ще пізніше — чекаємо саме на подію, а не «600 мс»
-  await page.waitForFunction(() => { return !document.querySelector('#tripTools [data-act="archive"] > i'); }, null, { timeout: 4000 }).catch(() => {}); await sleep(150);
+  await page.waitForFunction(() => { return !document.querySelector('#tripTools [data-act="archive"] i'); }, null, { timeout: 4000 }).catch(() => {}); await sleep(150);
   const e0 = await lay();
   await page.click('#tripTools [data-act="archive"]'); await sleep(300);
   const e1 = await lay();
