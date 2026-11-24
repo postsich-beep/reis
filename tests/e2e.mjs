@@ -3071,7 +3071,7 @@ if (process.env.REALVP && run('vpreal')) try {
   await ctx.close();
 } catch (e) { ok('знімки справжньої картотеки', false, String(e.message).split('\n')[0]); }
 
-/* ============ прохід 30 (1.1.19): тип карти — схема / супутник (лише з інтернетом), «Подивитися в Google» ============ */
+/* ============ прохід 30 (1.1.19, 1.1.20): тип карти — ОДИН ДОТИК: схема ↔ супутник (лише з інтернетом), без віконець і без виходу з програми ============ */
 // Квадрат «знімка» — однотонний PNG 256×256 (сервер знімків тут підмінено; справжній з тестової машини недоступний).
 const pngSolid = (w, h, [r, g, b]) => {
   const chunk = (type, data) => { const len = Buffer.alloc(4), tc = Buffer.concat([Buffer.from(type), data]), crc = Buffer.alloc(4); len.writeUInt32BE(data.length); crc.writeUInt32BE(crc32(tc) >>> 0); return Buffer.concat([len, tc, crc]); };
@@ -3088,54 +3088,45 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   await app(page, () => { const P = window.__app; P.map.view.follow = false; P.map.view.lastTouch = Date.now() + 3600e3; P.map.map.jumpTo({ center: [36.2304, 49.9935], zoom: 16, pitch: 0, bearing: 0 }); }); await sleep(600);
   const R = sel => app(page, sel => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(), x = r.left + r.width / 2, y = r.top + r.height / 2, h = document.elementFromPoint(x, y);
     return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), seen: !!h && (h === e || e.contains(h)), vw: innerWidth, vh: innerHeight }; }, sel);
-  const st = () => app(page, () => { const m = window.__app.map.map, ls = m.getStyle().layers.map(l => l.id), at = id => ls.indexOf(id), src = m.getSource('reis-sat');
+  const st = () => app(page, () => { const m = window.__app.map.map, ls = m.getStyle().layers.map(l => l.id), at = id => ls.indexOf(id), src = m.getSource('reis-sat'), b = document.getElementById('bMap');
     return { want: window.__app.S.mapType, sat: !!m.getLayer('reis-sat'), iSat: at('reis-sat'), iRough: at('rough-dot'), iRoute: at('route-line'), tiles: src ? src.tiles[0] : '', body: document.body.classList.contains('mapsat'),
-      attr: (document.getElementById('attr') || { dataset: {} }).dataset.full || '', thumb: (document.querySelector('#bMap .mt-thumb svg rect') || { getAttribute: () => '' }).getAttribute('fill'), nonet: document.getElementById('bMap').classList.contains('nonet'),
+      attr: (document.getElementById('attr') || { dataset: {} }).dataset.full || '', thumb: (b.querySelector('.mt-thumb svg rect') || { getAttribute: () => '' }).getAttribute('fill'), nonet: b.classList.contains('nonet'), pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label'),
+      popup: !document.getElementById('quick').hidden, ext: window.__nativeCalls.filter(x => /^openUrl:/.test(x)).length,
       net: window.__app.map.cacheStats().net, filter: getComputedStyle(document.querySelector('.maplibregl-canvas')).filter, toast: document.getElementById('toasts').textContent }; });
+  const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
   // а) кнопка справа вгорі — між швидкими налаштуваннями й «Що показувати на карті»
   const order = await app(page, () => [...document.querySelectorAll('#rail > button')].map(b => b.id)), bm = await R('#bMap'), s0 = await st();
-  ok(`[${T}] справа вгорі — кнопка «Тип карти» між швидкими налаштуваннями і «Що показувати»; на ній мініатюра супутника; її нічого не перекриває`, order.join() === 'bQuick,bMap,bLayers' && bm.seen && bm.w >= 44 && bm.h >= 44 && bm.r <= bm.vw && bm.b <= bm.vh && s0.thumb === '#3f5a35' && !s0.sat && s0.want === 'scheme', JSON.stringify({ order, bm, s0 }));
-  // б) віконце: «Схема» / «Супутник» і «Подивитися в Google»
-  await page.click('#bMap'); await sleep(300);
-  const q = await app(page, () => { const box = document.getElementById('quick'), r = box.getBoundingClientRect(), B = e => { const x = e.getBoundingClientRect(); return { l: Math.round(x.left), r: Math.round(x.right), t: Math.round(x.top), b: Math.round(x.bottom), h: Math.round(x.height) }; };
-    return { open: !box.hidden, title: box.querySelector('.q-head b').textContent, tiles: [...box.querySelectorAll('[data-mt]')].map(b => ({ k: b.dataset.mt, on: b.classList.contains('on'), dis: b.getAttribute('aria-disabled') === 'true', lab: b.querySelector('.q-l').textContent, s: b.querySelector('.q-s').textContent, ...B(b) })),
-      links: [...box.querySelectorAll('[data-g]')].map(b => ({ k: b.dataset.g, dis: b.disabled, lab: b.querySelector('b').textContent, ...B(b) })), box: { l: Math.round(r.left), r: Math.round(r.right), b: Math.round(r.bottom) }, vw: innerWidth, vh: innerHeight, sh: box.scrollHeight, ch: box.clientHeight, exp: document.getElementById('bMap').getAttribute('aria-expanded') }; });
-  await shot(page, '40-maptype-' + sc.n);
-  ok(`[${T}] дотик — віконце «Тип карти»: «Схема» (вибрана) і «Супутник»; нижче — «Google Maps — супутник» і «Панорама вулиць (Street View)»; усе на екрані, кнопки зручні для пальця`, q.open && q.title === 'Тип карти' && q.exp === 'true' && q.tiles.map(x => x.k + (x.on ? '*' : '')).join() === 'scheme*,sat' && !q.tiles[1].dis && q.tiles[1].lab === 'Супутник' && q.tiles[0].lab === 'Схема'
-    && q.links.map(x => x.k).join() === 'map,pano' && q.links.every(x => !x.dis && x.h >= 48) && /Street View/.test(q.links[1].lab) && /Google Maps/.test(q.links[0].lab) && q.box.l >= 0 && q.box.r <= q.vw && q.tiles.every(x => x.h >= 70), JSON.stringify(q));
-  // в) «Супутник»: знімки під лініями рейсу й підписами, напряму (не в наш кеш), підпис джерела, на кнопці — мініатюра схеми
-  const net0 = s0.net;
-  await page.click('[data-mt="sat"]'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
+  ok(`[${T}] справа вгорі — кнопка «Тип карти» між швидкими налаштуваннями і «Що показувати»; на ній мініатюра супутника; її нічого не перекриває`, order.join() === 'bQuick,bMap,bLayers' && bm.seen && bm.w >= 44 && bm.h >= 44 && bm.r <= bm.vw && bm.b <= bm.vh && s0.thumb === '#3f5a35' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && s0.label === 'Увімкнути супутник', JSON.stringify({ order, bm, s0 }));
+  // б) один дотик — супутник: жодного віконця, знімки під лініями рейсу й нашими значками, напряму (не в наш кеш), джерело підписано
+  const net0 = s0.net; await clearToasts();
+  await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
   for (let i = 0; i < 40 && !SAT.req.length; i++) await sleep(150); await sleep(500);
-  const s1 = await st(), q1 = await app(page, () => document.getElementById('quick').hidden);
+  const s1 = await st();
   await shot(page, '41-sat-' + sc.n);
-  ok(`[${T}] «Супутник»: знімки є (квадрати з сервера знімків), лежать ПІД лініями рейсу й нашими значками; віконце закрилось; на кнопці — тепер мініатюра схеми; джерело знімків підписано`, s1.want === 'sat' && s1.sat && s1.iSat >= 0 && s1.iSat < s1.iRough && s1.iRough < s1.iRoute && SAT.req.length > 0 && /\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/.test(SAT.req[0]) && q1 && s1.body && s1.thumb === '#eef0e7' && /Esri/.test(s1.attr), JSON.stringify({ s1, req: SAT.req.slice(0, 2), n: SAT.req.length }));
-  ok(`[${T}] знімки не осідають у власному кеші карти (там немає межі розміру) — їх кешує сам WebView`, s1.net === net0, JSON.stringify({ before: net0, after: s1.net }));
+  ok(`[${T}] один дотик — одразу супутник (як «2D / 3D»): жодного віконця з вибором; коротко «Супутник»; на кнопці — мініатюра схеми`, s1.want === 'sat' && s1.sat && !s1.popup && /^Супутник$/.test(s1.toast.trim()) && s1.thumb === '#eef0e7' && s1.pressed === 'true' && s1.label === 'Повернути схему', JSON.stringify(s1));
+  ok(`[${T}] знімки є (квадрати з сервера знімків), лежать ПІД лініями рейсу й нашими значками; джерело знімків підписано; у власний кеш карти не осідають`, s1.iSat >= 0 && s1.iSat < s1.iRough && s1.iRough < s1.iRoute && SAT.req.length > 0 && /\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/.test(SAT.req[0]) && s1.body && /Esri/.test(s1.attr) && s1.net === net0, JSON.stringify({ s1, req: SAT.req.slice(0, 2), n: SAT.req.length, net0 }));
+  // в) ще дотик — схема: знімки прибрано, сервер знімків більше не питаємо
+  await clearToasts(); await page.click('#bMap'); await sleep(250);
+  const s2t = (await st()).toast;                                         // коротке «Схема» тримається 1,5 с — читаємо одразу
+  SAT.req = []; await app(page, () => window.__app.map.map.panBy([300, 200], { duration: 0 })); await sleep(900);
+  const s2 = await st();
+  ok(`[${T}] ще дотик — назад схема: знімки прибрано, нових запитів немає; коротко «Схема»; на кнопці знову мініатюра супутника`, s2.want === 'scheme' && !s2.sat && !s2.body && !s2.popup && SAT.req.length === 0 && /^Схема$/.test(s2t.trim()) && s2.thumb === '#3f5a35', JSON.stringify({ s2, s2t, n: SAT.req.length }));
   if (main) {
+    await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
     // г) уночі знімок не «перевертається» фільтром нічної карти
     await app(page, () => { window.__app.S.theme = 'night'; window.__app.map.applyTheme(); }); await sleep(300);
     const n1 = await st(); await shot(page, '41b-sat-night-S10');
     await app(page, () => { window.__app.S.theme = 'day'; window.__app.map.applyTheme(); }); await sleep(200);
     ok(`[${T}] супутник уночі: без «перевертання» кольорів (лише трохи приглушено)`, !/invert/.test(n1.filter) && /brightness/.test(n1.filter), n1.filter);
-    // ґ) «Подивитися в Google»: офіційні посилання Google Maps на те місце, що в центрі карти
-    const c = await app(page, () => { const m = window.__app.map.map, x = m.getCenter(); return { ll: x.lat.toFixed(6) + ',' + x.lng.toFixed(6), z: Math.round(m.getZoom()) }; });
-    await page.click('#bMap'); await sleep(250); await page.click('[data-g="map"]'); await sleep(250);
-    await page.click('#bMap'); await sleep(250); await page.click('[data-g="pano"]'); await sleep(250);
-    const calls = await app(page, () => window.__nativeCalls.filter(x => /^openUrl:/.test(x)));
-    ok(`[${T}] «Google Maps — супутник» і «Панорама вулиць» відкривають застосунок Google Maps (офіційні посилання) на тому самому місці`, calls.includes('openUrl:https://www.google.com/maps/@?api=1&map_action=map&center=' + c.ll + '&zoom=' + c.z + '&basemap=satellite') && calls.includes('openUrl:https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + c.ll + '&heading=0'), JSON.stringify({ c, calls }));
-    // д) зникла мережа: сам показує завантажену карту й каже про це; у віконці супутник і Google — неактивні, з поясненням
-    await app(page, () => { document.getElementById('toasts').innerHTML = ''; }); await ctx.setOffline(true); await sleep(500);
+    // д) зникла мережа: сам показує завантажену карту й каже про це; вибір «супутник» запам'ятовано
+    await clearToasts(); await ctx.setOffline(true); await sleep(500);
     const o1 = await st();
-    ok(`[${T}] немає інтернету: знімки прибрано, видно звичайну карту; водієві сказано, що супутник повернеться сам; вибір «супутник» запам'ятовано; мініатюра на кнопці бліда`, !o1.sat && !o1.body && o1.want === 'sat' && /Немає інтернету — показую завантажену карту/.test(o1.toast) && o1.nonet, JSON.stringify(o1));
-    await page.click('#bMap'); await sleep(300);
-    const qo = await app(page, () => { const box = document.getElementById('quick'); return { tiles: [...box.querySelectorAll('[data-mt]')].map(b => b.dataset.mt + (b.classList.contains('on') ? '*' : '') + (b.getAttribute('aria-disabled') === 'true' ? '!' : '') + ':' + b.querySelector('.q-s').textContent), note: (box.querySelector('.mt-note') || { textContent: '' }).textContent, links: [...box.querySelectorAll('[data-g]')].map(b => b.disabled + ':' + b.querySelector('small').textContent) }; });
-    await shot(page, '42-maptype-offline-S10');
-    await page.click('[data-mt="sat"]', { force: true }); await sleep(300);          // неактивна (aria-disabled), але палець її натискає — має бути підказка
-    const o2 = await st();
-    ok(`[${T}] без інтернету у віконці: «Схема» вибрана, «Супутник — лише з інтернетом» неактивний, пояснення; Google — «Потрібен інтернет»; дотик до «Супутник» — підказка, а не сіра карта`, /^scheme\*:/.test(qo.tiles[0]) && qo.tiles[1] === 'sat!:лише з інтернетом' && /працює лише завантажена карта/.test(qo.note) && qo.links.every(x => /^true:Потрібен інтернет/.test(x)) && /Супутник працює лише з інтернетом/.test(o2.toast) && !o2.sat, JSON.stringify({ qo, toast: o2.toast }));
-    await page.click('#quick [data-q="close"]'); await app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+    ok(`[${T}] немає інтернету: знімки прибрано, видно звичайну карту; водієві сказано, що супутник повернеться сам; мініатюра супутника на кнопці бліда`, !o1.sat && !o1.body && o1.want === 'sat' && /Немає інтернету — показую завантажену карту/.test(o1.toast) && o1.nonet && o1.thumb === '#3f5a35', JSON.stringify(o1));
+    await clearToasts(); await page.click('#bMap'); await sleep(300);
+    const o2 = await st(); await shot(page, '42-sat-offline-tap-S10');
+    ok(`[${T}] без інтернету дотик до кнопки — лише підказка «супутник лише з інтернетом», карта лишається завантаженою (не сіра), жодних віконець`, /Супутник працює лише з інтернетом/.test(o2.toast) && !o2.sat && !o2.popup && o2.want === 'sat', JSON.stringify(o2));
     // е) мережа повернулась — знімки повертаються самі
-    SAT.req = []; await ctx.setOffline(false); await sleep(400);
+    await clearToasts(); SAT.req = []; await ctx.setOffline(false); await sleep(400);
     await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {}); await sleep(600);
     const o3 = await st();
     ok(`[${T}] інтернет повернувся — супутник знову сам, коротке повідомлення`, o3.sat && o3.body && !o3.nonet && /Інтернет є — знову супутник/.test(o3.toast), JSON.stringify(o3));
@@ -3147,12 +3138,10 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
     // ж) інша адреса знімків у «Налаштування → Джерела» (напр. з ключем) — береться одразу
     const f1 = await app(page, async () => { const S = window.__app.S, def = S.satUrl; S.satUrl = 'https://server.arcgisonline.com/key/{z}/{y}/{x}?token=abc'; await new Promise(r => setTimeout(r, 200)); const m = window.__app.map.map, t1 = m.getSource('reis-sat') && m.getSource('reis-sat').tiles[0]; S.satUrl = def; await new Promise(r => setTimeout(r, 200)); return { t1, t2: m.getSource('reis-sat') && m.getSource('reis-sat').tiles[0], def }; });
     ok(`[${T}] адресу знімків можна змінити в «Налаштуваннях» (напр. з ключем ArcGIS) — застосовується одразу`, f1.t1 === 'https://server.arcgisonline.com/key/{z}/{y}/{x}?token=abc' && f1.t2 === f1.def && /World_Imagery/.test(f1.def), JSON.stringify(f1));
-    // з) «Схема» — знімки прибрано, нових запитів немає
-    await page.click('#bMap'); await sleep(250); await page.click('[data-mt="scheme"]'); await sleep(300);
-    SAT.req = []; await app(page, () => window.__app.map.map.panBy([300, 200], { duration: 0 })); await sleep(900);
-    const z1 = await st();
-    ok(`[${T}] «Схема» — знімки прибрано, сервер знімків більше не питаємо`, z1.want === 'scheme' && !z1.sat && !z1.body && SAT.req.length === 0 && z1.thumb === '#3f5a35', JSON.stringify({ z1, n: SAT.req.length }));
   }
+  // з) жодного разу не відкрито нічого поза програмою
+  const fin = await st();
+  ok(`[${T}] за весь час — жодного виходу з програми (нічого не відкривалось у Google Maps чи браузері)`, fin.ext === 0, JSON.stringify({ ext: fin.ext }));
   ok(`[${T}] прохід 30 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`прохід 30 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }

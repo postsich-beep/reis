@@ -52,7 +52,7 @@ function staticLabels() {
   $('bCenter').innerHTML = ICON.center; $('bCenter').setAttribute('aria-label', t('qCenter'));
   $('bQuick').setAttribute('aria-label', t('quickTitle'));
   $('bLayers').innerHTML = ICON.layersPin; $('bLayers').setAttribute('aria-label', t('lyTitle'));
-  $('bMap').setAttribute('aria-label', t('mtBtn'));
+
   railState();
 }
 /* ---------- «Шари карти»: галочки, що показувати на карті; усе вимкнути — чиста карта ---------- */
@@ -98,44 +98,26 @@ function layersClick(e) {
 const Q_IDLE = 15000;
 let quickView = 'main', quickTimer = null, quickFrom = 'quick';   // quickFrom: шторку відкрили кнопкою швидких налаштувань чи «Шари» на головному екрані
 const THEME_NEXT = { auto: 'day', day: 'night', night: 'auto' };
-/* ---------- тип карти (1.1.19): кнопка справа вгорі, як у Google Maps ----------
-   На кнопці — мініатюра ТІЄЇ карти, на яку можна перейти (як у Google Maps): на схемі — знімок, на супутнику — схема.
-   Дотик — віконце: «Схема» / «Супутник» (лише з інтернетом) і «Подивитися в Google»: цей самий вид у Google Maps
-   (супутник Google) і панорами вулиць Street View — у застосунку Google Maps, офіційними посиланнями, без ключів і плати. */
+/* ---------- тип карти: кнопка справа вгорі, як у Google Maps ----------
+   1.1.19 — віконце з вибором і посиланнями в Google Maps; 1.1.20 (прохання Олексія) — ОДИН ДОТИК, як «2D / 3D»:
+   клац — супутник, ще клац — схема. Без віконець і без виходу з програми.
+   На кнопці — мініатюра ТІЄЇ карти, на яку перейдемо дотиком: на схемі — знімок, на супутнику — схема.
+   Без інтернету супутника немає: дотик лише пояснює це (карта лишається завантаженою). */
 const MT_PIC = {
   sat: '<svg viewBox="0 0 64 40" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="64" height="40" fill="#3f5a35"/><path d="M0 0h26l-8 17H0z" fill="#6c7d3f"/><path d="M30 0h34v14L40 22z" fill="#86764f"/><path d="M0 22l20-3 6 21H0z" fill="#2f4a2b"/><path d="M42 26l22-6v20H36z" fill="#5d6b38"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#d8d2c4" stroke-width="3.2" fill="none"/><rect x="44" y="27" width="6" height="5" fill="#bdb4a5"/><rect x="52" y="29" width="5" height="4" fill="#a59c8d"/><rect x="9" y="6" width="5" height="4" fill="#b9b1a2"/></svg>',
   scheme: '<svg viewBox="0 0 64 40" preserveAspectRatio="xMidYMid slice" aria-hidden="true"><rect width="64" height="40" fill="#eef0e7"/><path d="M0 0h22v14H0z" fill="#cfe4c2"/><path d="M44 26c6-2 14 0 20 4v10H40z" fill="#b8d4ee"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#c9ccd2" stroke-width="6" fill="none"/><path d="M-2 30C14 24 26 14 40 9s18-6 26-8" stroke="#f7cf5b" stroke-width="3.6" fill="none"/><path d="M30 0v40M0 16h64" stroke="#fff" stroke-width="2.4"/><rect x="36" y="20" width="6" height="5" fill="#dcd6cc"/><rect x="8" y="22" width="7" height="5" fill="#dcd6cc"/></svg>'
 };
 const mtShown = () => mapM.satOn() ? 'sat' : 'scheme';
-function mapTypeHtml(head) {
-  const net = P.online(), shown = mtShown();
-  const tile = (k, label, sub, dis) => `<button class="mt-tile${shown === k ? ' on' : ''}" data-mt="${k}" aria-pressed="${shown === k}"${dis ? ' aria-disabled="true"' : ''}><span class="mt-pic">${MT_PIC[k]}</span><span class="q-l">${label}</span><span class="q-s">${sub}</span></button>`;
-  const link = (k, cls, icon, title, sub) => `<button class="mt-link" data-g="${k}"${net ? '' : ' disabled'}><span class="mt-li ${cls}">${icon}</span><span class="grow"><b>${title}</b><small>${net ? sub : t('mtNeedNet')}</small></span>${ICON.ext}</button>`;
-  return head(t('mtTitle')) + `<div class="mt-row">${tile('scheme', t('mtScheme'), off.installed ? t('mtSchemeOff') : t('mtSchemeS'), false)}${tile('sat', t('mtSat'), net ? t('mtSatS') : t('mtSatNoNet'), !net)}</div>
-    ${net ? '' : `<div class="mt-note">${t('mtNoNetNote')}</div>`}
-    <div class="mt-sec">${t('mtGoogle')}</div>
-    ${link('map', 'gm', ICON.pin, t('mtGMap'), t('mtGMapS'))}${link('pano', 'sv', ICON.pano, t('mtPano'), t('mtPanoS'))}`;
-}
-/** Офіційні посилання Google Maps (Maps URLs): центр карти — те, що водій зараз бачить (у режимі «за рухом» — його машина). */
-function googleUrl(k) {
-  const m = mapM.map, c = m ? m.getCenter() : { lat: pos.lat ?? 49.0, lng: pos.lon ?? 31.3 }, ll = c.lat.toFixed(6) + ',' + c.lng.toFixed(6);
-  if (k === 'pano') { const h = m ? Math.round(((m.getBearing() % 360) + 360) % 360) : 0; return 'https://www.google.com/maps/@?api=1&map_action=pano&viewpoint=' + ll + '&heading=' + h; }
-  const z = m ? Math.max(3, Math.min(21, Math.round(m.getZoom()))) : 15;
-  return 'https://www.google.com/maps/@?api=1&map_action=map&center=' + ll + '&zoom=' + z + '&basemap=satellite';
-}
-function mapTypeClick(e) {
-  const b = e.target.closest('[data-mt],[data-g]'); if (!b) return false;
-  if (b.dataset.g) { if (!P.online()) { toast(t('mtNeedNet'), 'yellow', 4000); return true; } P.openUrl(googleUrl(b.dataset.g)); quickOpen(false); return true; }
-  const k = b.dataset.mt;
-  if (k === 'sat' && !P.online()) { toast(t('mtSatOffline'), 'yellow', 6000); return true; }
-  if (S.mapType !== k) S.mapType = k;                 // settings → map.applySat
-  quickOpen(false); railState();
-  return true;
+function mapTypeTap() {
+  if (!$('quick').hidden) quickOpen(false);
+  if (mtShown() === 'scheme' && !P.online()) { toast(t('mtSatOffline'), 'yellow', 5000); return; }   // супутник без інтернету — неможливо: пояснюємо, карту не чіпаємо
+  S.mapType = mtShown() === 'sat' ? 'scheme' : 'sat';                                                   // settings → map.applySat
+  toast(t(S.mapType === 'sat' ? 'mtToSat' : 'mtToScheme'), '', 1500);
+  railState();
 }
 function quickHtml() {
   const head = (title, back) => `<div class="q-head">${back ? `<button class="q-x" data-q="back" aria-label="${t('back')}">${ICON.back}</button>` : ''}<b>${title}</b><button class="q-x" data-q="close" aria-label="${t('close')}">${ICON.x}</button></div>`;
   if (quickView === 'layers') return head(t('lyTitle'), quickFrom === 'quick') + `<div class="q-ly">${layersHtml().replace(/^<div class="ly-head">.*?<\/div>/, '')}</div>`;
-  if (quickView === 'maptype') return mapTypeHtml(head);
   const tile = (k, icon, label, state, on, extra = '') => `<button class="q-tile${on ? ' on' : ''}${extra}" data-q="${k}" aria-pressed="${!!on}">${icon}<span class="q-l">${label}</span><span class="q-s">${state}</span></button>`;
   const th = S.theme || 'auto';
   return head(t('quickTitle')) + `<div class="q-grid">
@@ -155,17 +137,15 @@ function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => q
 // open: false — закрити; 'layers' — одразу «Що показувати на карті» (кнопка «Шари» справа); інше — плитки
 export function quickOpen(open) {
   const box = $('quick');
-  if (open) { quickFrom = quickView = open === 'layers' || open === 'maptype' ? open : 'main'; if (quickFrom === 'main') quickFrom = 'quick'; box.hidden = false; box.innerHTML = quickHtml(); $('spdPop').hidden = true; quickIdle(); }
+  if (open) { quickFrom = quickView = open === 'layers' ? 'layers' : 'main'; if (quickFrom === 'main') quickFrom = 'quick'; box.hidden = false; box.innerHTML = quickHtml(); $('spdPop').hidden = true; quickIdle(); }
   else { box.hidden = true; clearTimeout(quickTimer); }
   const q = !!open && quickFrom === 'quick', l = !!open && quickFrom === 'layers';
   $('bQuick').classList.toggle('on', q); $('bQuick').setAttribute('aria-expanded', String(q));
   $('bLayers').classList.toggle('on', l); $('bLayers').setAttribute('aria-expanded', String(l));
-  const mt = !!open && quickFrom === 'maptype'; $('bMap').classList.toggle('on', mt); $('bMap').setAttribute('aria-expanded', String(mt));
 }
 function quickClick(e) {
   quickIdle();
   if (quickView === 'layers' && layersClick(e)) { quickRender(); railState(); return; }
-  if (quickView === 'maptype' && mapTypeClick(e)) return;
   const b = e.target.closest('[data-q]'); if (!b) return;
   const k = b.dataset.q;
   if (k === 'close') return quickOpen(false);
@@ -195,7 +175,8 @@ function railState() {
   qb.classList.toggle('muted', !S.voice);
   $('bLayers').classList.toggle('off', !LAYERS.some(([k]) => layerOn(k)));   // усе вимкнено — значок блідий
   const mb = $('bMap'), alt = mtShown() === 'sat' ? 'scheme' : 'sat', key = alt + (P.online() ? '' : '-nonet');
-  if (mb.dataset.k !== key) { mb.dataset.k = key; mb.innerHTML = `<span class="mt-thumb">${MT_PIC[alt]}</span>`; mb.classList.toggle('nonet', !P.online()); }
+  if (mb.dataset.k !== key) { mb.dataset.k = key; mb.innerHTML = `<span class="mt-thumb">${MT_PIC[alt]}</span>`; mb.classList.toggle('nonet', !P.online() && alt === 'sat');
+    mb.setAttribute('aria-pressed', String(alt === 'scheme')); mb.setAttribute('aria-label', t(alt === 'sat' ? 'mtBtnToSat' : 'mtBtnToScheme')); }
   const c = $('bCenter'), need = !view.follow;
   if (c.hidden === need) { c.hidden = !need; c.classList.toggle('need', need); }
   quickRender();
@@ -1505,14 +1486,14 @@ export function initUI() {
   }; });
   $('bQuick').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden || quickFrom !== 'quick'); };
   $('bLayers').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden || quickFrom !== 'layers' ? 'layers' : false); };
-  $('bMap').onclick = e => { e.stopPropagation(); quickOpen($('quick').hidden || quickFrom !== 'maptype' ? 'maptype' : false); };
-  // мережа зникла / повернулась: мініатюра на кнопці, віконце (якщо відкрите) і — якщо вибрано супутник — коротко водієві
-  const netChanged = () => { railState(); if (!$('quick').hidden && quickView === 'maptype') quickRender(); };
+  $('bMap').onclick = e => { e.stopPropagation(); mapTypeTap(); };
+  // мережа зникла / повернулась: мініатюра на кнопці і — якщо вибрано супутник — коротко водієві
+  const netChanged = () => railState();
   window.addEventListener('online', netChanged); window.addEventListener('offline', netChanged);
   bus.on('mapType', netChanged);
   bus.on('satNet', on => toast(t(on ? 'mtNetBack' : 'mtNetLost'), on ? 'green' : 'yellow', on ? 3500 : 7000));
   $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
-  document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick,#bLayers,#bMap')) quickOpen(false); });
+  document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick,#bLayers')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
   $('tabRep').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); repOpen($('repSheet').hidden); };

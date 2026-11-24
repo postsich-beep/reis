@@ -913,33 +913,14 @@ body.pts-on #pick{z-index:14}   /* картка точки — поверх пл
   #spdPop{bottom:calc(var(--sb) + 130px)}
 }
 
-/* ---- 1.1.19: тип карти — кнопка справа вгорі (між швидкими налаштуваннями й «Що показувати»), віконце як у Google Maps ---- */
+/* ---- 1.1.19: тип карти — кнопка справа вгорі (між швидкими налаштуваннями й «Що показувати»); з 1.1.20 — один дотик: схема ↔ супутник ---- */
 #bMap{margin-top:9px;padding:0;overflow:hidden}
 #bMap .mt-thumb{display:block;width:42px;height:42px;border-radius:50%;overflow:hidden;box-shadow:0 0 0 2px #fff,0 0 0 3px rgba(19,23,28,.18)}
 #bMap .mt-thumb svg{display:block;width:100%;height:100%;filter:none!important}
-#bMap.on .mt-thumb{box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--route)}
+#bMap:active{transform:scale(.94)}
 #bMap.nonet .mt-thumb{opacity:.5;filter:grayscale(1)}
 @media (orientation:landscape) and (max-height:520px){ #bMap{margin-top:0;margin-right:9px} }
 /* низький екран (≤ 590): кнопок справа тепер три — коли відкрите меню точки на карті, вони не потрібні й не налазять на нього */
 @media (orientation:portrait) and (max-height:590px){ body:has(#pick:not([hidden])) #rail{visibility:hidden} }
-.mt-row{display:grid;grid-template-columns:1fr 1fr;gap:8px}
-.mt-tile{display:flex;flex-direction:column;align-items:center;gap:4px;min-width:0;padding:7px 6px 8px;border-radius:16px;border:3px solid transparent;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:center}
-.mt-tile.on{border-color:var(--route)}
-.mt-tile[aria-disabled="true"]{opacity:.5}
-.mt-tile[aria-disabled="true"] .mt-pic{filter:grayscale(1)}
-.mt-pic{display:block;width:100%;max-width:132px;aspect-ratio:16/10;border-radius:10px;overflow:hidden}
-.mt-pic svg{display:block;width:100%;height:100%}
-.mt-tile:active,.mt-link:active{transform:scale(.97)}
-.mt-note{margin:8px 2px 0;font-size:13px;line-height:1.35;color:var(--ink-2)}
-.mt-sec{margin:12px 4px 2px;font:600 12.5px/1.2 var(--f-ui);color:var(--ink-2);text-transform:uppercase;letter-spacing:.05em}
-.mt-link{display:flex;align-items:center;gap:10px;width:100%;min-height:54px;margin-top:6px;padding:6px 10px 6px 8px;border-radius:14px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:left}
-.mt-link[disabled]{opacity:.5}
-.mt-li{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;color:#fff}
-.mt-li svg{width:20px;height:20px}
-.mt-li.gm{background:#ea4335} .mt-li.sv{background:#f9ab00}
-.mt-link .grow{flex:1;min-width:0}
-.mt-link b{display:block;font:600 14.5px/1.2 var(--f-ui)} .mt-link small{display:block;margin-top:1px;font:400 12.5px/1.25 var(--f-ui);color:var(--ink-2)}
-.mt-link > svg{flex:none;width:19px;height:19px;color:var(--ink-2)}
-#quick .mt-tile,#quick .mt-link{text-shadow:none}
 /* супутник уночі: знімок не «перевертаємо» фільтром нічної карти — лише трохи приглушуємо */
 body[data-theme="night"].mapsat .maplibregl-canvas{filter:brightness(.8) saturate(.9)}
