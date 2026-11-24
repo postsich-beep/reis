@@ -33,6 +33,47 @@ function layoutVars() {
   const r = document.documentElement.style;
   r.setProperty('--th', Math.round($('top').getBoundingClientRect().height) + 'px');
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
+  tiltFit();
+}
+/* ---------- повзунок нахилу карти (1.1.21) ----------
+   Стоїть справа над «Моїм місцем». Угору — дивимось збоку (3D, до 60°), униз — згори (2D): те саме, що провести двома
+   пальцями вгору-вниз по карті. Повзунок завжди показує справжній кут карти, хоч би хто його змінив.
+   Висота — скільки є місця між «Моїм місцем» і тим, що вище в тій самій колонці (кнопки справа, верхня плашка); якщо
+   на зручний повзунок місця немає (низький екран) — його не показуємо: лишаються плитка «2D / 3D» і жест. */
+const TILT_H = 176, TILT_MIN = 112, TILT_THUMB = 36;
+function tiltFit() {
+  const el = $('tilt'); if (!el) return;
+  const z = $('zoom').getBoundingClientRect(), x1 = z.right, x0 = x1 - 50;
+  let top = Math.max(8, $('rail').getBoundingClientRect().top);
+  for (const id of ['top', 'rail']) { const o = $(id), r = o.getBoundingClientRect(); if (r.width && getComputedStyle(o).visibility !== 'hidden' && r.right > x0 + 1 && r.left < x1 - 1) top = Math.max(top, r.bottom + 10); }
+  const room = Math.floor(z.bottom - 50 - 9 - top), h = Math.min(TILT_H, room), show = h >= TILT_MIN;
+  if (el.hidden === show) el.hidden = !show;
+  if (show) el.style.height = h + 'px';
+}
+function tiltDraw(v) {
+  const el = $('tilt'); if (!el) return;
+  v = Math.max(0, Math.min(mapM.PITCH_MAX, Math.round(v))); const k = v / mapM.PITCH_MAX;
+  if (el.dataset.v === String(v)) return; el.dataset.v = String(v);
+  el.style.setProperty('--tv', k.toFixed(3));
+  el.setAttribute('aria-valuenow', String(v)); el.setAttribute('aria-valuetext', v < 3 ? t('tiltTop') : t('tiltDeg', v));
+  el.classList.toggle('flat', v < 3);
+  // маленька «карта» на бігунці сама нахиляється: квадрат (згори) → приплюснута трапеція (збоку)
+  const h = 13 - 7 * k, ins = 3.4 * k, y1 = (12 + h / 2).toFixed(1), y0 = (12 - h / 2).toFixed(1);
+  el.querySelector('.tl-plane').setAttribute('points', `5,${y1} 19,${y1} ${(19 - ins).toFixed(1)},${y0} ${(5 + ins).toFixed(1)},${y0}`);
+  el.querySelector('.tl-road').setAttribute('d', `M12 ${y1}V${y0}`);
+}
+function tiltInit() {
+  const el = $('tilt'); if (!el) return;
+  el.setAttribute('aria-label', t('tiltAria'));
+  const tr = el.querySelector('.tl-track'); let drag = false, val = 0;
+  const fromY = y => { const r = tr.getBoundingClientRect(), f = 1 - Math.min(1, Math.max(0, (y - r.top - TILT_THUMB / 2) / Math.max(1, r.height - TILT_THUMB)));
+    let v = Math.round(f * mapM.PITCH_MAX); if (v <= 3) v = 0; else if (v >= mapM.PITCH_MAX - 2) v = mapM.PITCH_MAX; return v; };
+  el.addEventListener('pointerdown', e => { drag = true; try { el.setPointerCapture(e.pointerId); } catch (_) {} el.classList.add('drag'); val = fromY(e.clientY); mapM.setTilt(val, true); e.preventDefault(); });
+  el.addEventListener('pointermove', e => { if (!drag) return; const v = fromY(e.clientY); if (v !== val) { val = v; mapM.setTilt(v, true); } });
+  const end = () => { if (!drag) return; drag = false; el.classList.remove('drag'); mapM.setTilt(val, false); };
+  el.addEventListener('pointerup', end); el.addEventListener('pointercancel', end); el.addEventListener('lostpointercapture', end);
+  el.addEventListener('keydown', e => { const d = e.key === 'ArrowUp' ? 5 : e.key === 'ArrowDown' ? -5 : 0; if (d) { e.preventDefault(); mapM.setTilt(mapM.tiltShown() + d, false); } });
+  bus.on('tilt', tiltDraw); tiltDraw(mapM.tiltShown());
 }
 
 function staticLabels() {
@@ -1490,6 +1531,7 @@ export function initUI() {
   $('quick').onclick = e => { e.stopPropagation(); quickClick(e); };
   document.addEventListener('pointerdown', e => { if (!$('quick').hidden && !e.target.closest('#quick,#bQuick')) quickOpen(false); });
   $('bCenter').onclick = () => setFollow(true);
+  tiltInit();
   // позначити подію на дорозі (як у навігаторах для водіїв): три великі кнопки
   $('tabRep').onclick = e => { e.stopPropagation(); if (tsOpen()) tsHide(false); repOpen($('repSheet').hidden); };
 

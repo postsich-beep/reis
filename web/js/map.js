@@ -172,6 +172,8 @@ export function initMap() {
   cont.addEventListener('pointerdown', down, true); cont.addEventListener('touchstart', down, { capture: true, passive: true });
   for (const ev of ['pointerup', 'pointercancel', 'touchend', 'touchcancel']) window.addEventListener(ev, up, true);
   map.on('moveend', e => { if (e.originalEvent) view.lastTouch = Date.now(); });
+  map.on('pitch', () => bus.emit('tilt', Math.round(map.getPitch())));
+  map.on('pitchend', e => { if (e.originalEvent && pitchLive == null) tiltCommit(Math.round(map.getPitch())); });
   setupLongPress();
   puckEl = document.createElement('div'); puckEl.className = 'puck';
   puckEl.innerHTML = '<svg viewBox="0 0 48 48"><path class="puck-halo" d="M24 3 42 43 24 34 6 43Z"/><path class="puck-body" d="M24 8 37.5 38 24 31 10.5 38Z"/></svg>';
@@ -507,6 +509,30 @@ export function applyTheme() {
   bus.emit('view', view);
 }
 
+/* ---------- нахил карти (1.1.21): повзунок справа і жест двома пальцями — одне й те саме ----------
+   Нахил — це кут, під яким дивимось на карту: 0° — згори (2D), до 60° — збоку (3D). Раніше було лише «2D / 3D» (0° або 52°).
+   Тепер кут можна виставити повзунком (або двома пальцями вгору-вниз по карті) — і він лишається: і коли карта стежить
+   за машиною, і після перезапуску. Плитка «2D / 3D» у швидких налаштуваннях працює, як і раніше: 3D — це останній виставлений кут. */
+export const PITCH_MAX = 60, PITCH_3D = 52;
+let pitchLive = null;                         // поки палець тягне повзунок — кут звідси; у налаштування пишемо, коли відпустили
+export const pitchNow = () => pitchLive != null ? pitchLive : (S.view3d ? clamp(Math.round(+S.pitch) || PITCH_3D, 3, PITCH_MAX) : 0);
+/** Кут, який карта показує просто зараз (повзунок малює саме його). */
+export const tiltShown = () => { try { return map ? Math.round(map.getPitch()) : pitchNow(); } catch (_) { return pitchNow(); } };
+function tiltCommit(v) {
+  if (v < 3) { if (S.view3d) S.view3d = false; return; }               // майже згори — це «2D»
+  if (S.pitch !== v) S.pitch = v;
+  if (!S.view3d) S.view3d = true;
+}
+/** Виставити нахил. live — палець іще тягне повзунок (карта нахиляється одразу, налаштування не чіпаємо). */
+export function setTilt(v, live = false) {
+  v = clamp(Math.round(v), 0, PITCH_MAX);
+  pitchLive = live ? v : null;
+  if (!live) tiltCommit(v);
+  let moved = false;
+  try { if (map && Math.abs(map.getPitch() - v) > 0.05) { map.setPitch(v); moved = true; } } catch (_) {}
+  if (!moved) bus.emit('tilt', v);                                     // карта вже під цим кутом (або її ще немає) — повзунок однаково перемальовуємо
+}
+
 /* ---------- позиція і камера ---------- */
 // Як у звичайному навігаторі: у режимі «за рухом» стрілка стоїть в одній точці екрана — посередині по ширині,
 // у нижній частині вільної карти — і дивиться строго вгору; рухається й повертається карта під нею.
@@ -574,7 +600,7 @@ function follow(force) {
   if (!map || !cam.cur || !view.follow || (document.hidden && !force)) return;
   if (!force && camFree()) return;
   const z = targetZoom(); cam.z = z; cam.pad = camPadding();
-  map.easeTo({ center: [cam.cur.lon, cam.cur.lat], zoom: z, bearing: view.north ? 0 : cam.brg, pitch: S.view3d ? 52 : 0, padding: cam.pad, duration: 400 });
+  map.easeTo({ center: [cam.cur.lon, cam.cur.lat], zoom: z, bearing: view.north ? 0 : cam.brg, pitch: pitchNow(), padding: cam.pad, duration: 400 });
   cam.blendUntil = performance.now() + 430; kick();
 }
 function kick() { if (!cam.raf) cam.raf = requestAnimationFrame(frame); }
@@ -619,7 +645,7 @@ function frame(ts) {
     for (const k of ['top', 'bottom']) { const d = pad[k] - cam.pad[k]; if (Math.abs(d) > 0.5) { cam.pad = { ...cam.pad, [k]: cam.pad[k] + d * (1 - Math.exp(-dt / 250)) }; padMove = true; } else cam.pad = { ...cam.pad, [k]: pad[k] }; }
     if (ts - cam.drawT >= 22 || !more) {          // не частіше ~45 кадрів/с — батарея
       cam.drawT = ts;
-      map.jumpTo({ center: [cam.cur.lon, cam.cur.lat], zoom: cam.z, bearing: view.north ? 0 : cam.brg, pitch: S.view3d ? 52 : 0, padding: cam.pad });
+      map.jumpTo({ center: [cam.cur.lon, cam.cur.lat], zoom: cam.z, bearing: view.north ? 0 : cam.brg, pitch: pitchNow(), padding: cam.pad });
     }
     if (cam.z !== tz || padMove) more = true;
   }
