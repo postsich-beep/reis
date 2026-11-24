@@ -784,8 +784,11 @@ const PT_NAME = { a: 'ptStart', v: 'ptVia', b: 'ptFinish' };
 let pm = null;                                   // { arm: 'a'|'v'|'b'|null — яка точка чекає дотику до карти, form: відкрили з «Рейсу» }
 const startIsMe = () => !plan.a || !!plan.a.me;  // старт — моє місце (живий GPS), а не вказана точка
 // «Їхати сюди» — завжди від мого місця. Якщо старт уже вказано на карті чи адресою, кнопка чесно зветься «Фініш тут»: старт лишається.
-const ptBtnsHtml = () => `<button class="btn pri pt-b pt-go" data-k="b">${ptTag('b', 'rp-t')}${t(startIsMe() ? 'ptGoHere' : 'ptFinishHere')}</button>
-  <button class="btn pt-b" data-k="a">${ptTag('a', 'rp-t')}${t('ptStartHere')}</button><button class="btn pt-b" data-k="v">${ptTag('v', 'rp-t')}${t('ptVia')}</button>`;
+// Порядок (1.1.22, як попросив Олексій): Старт · Через · Їхати сюди — так, як рейс і складається. short — у меню точки на карті:
+// там усе в один ряд значками, тож підписи найкоротші («Старт», «Через», «Їхати»), а повна назва — для озвучення.
+const ptBtnsHtml = (short = false) => { const go = startIsMe() ? 'ptGoHere' : 'ptFinishHere', lb = k => `<span>${t(short ? k + 'S' : k)}</span>`, al = k => short ? ` aria-label="${t(k)}"` : '';
+  return `<button class="btn pt-b" data-k="a"${al('ptStartHere')}>${ptTag('a', 'rp-t')}${lb('ptStartHere')}</button><button class="btn pt-b" data-k="v"${al('ptViaHere')}>${ptTag('v', 'rp-t')}${short ? lb('ptViaHere') : `<span>${t('ptVia')}</span>`}</button>
+  <button class="btn pri pt-b pt-go" data-k="b"${al(go)}>${ptTag('b', 'rp-t')}${lb(go)}</button>`; };
 const ptsMe = () => startIsMe() && pos.lat != null ? { lat: pos.lat, lon: pos.lon } : null;
 function ptsDist() {
   const pts = [startIsMe() ? ptsMe() : plan.a, plan.v, plan.b].filter(Boolean); if (pts.length < 2) return null;
@@ -1258,16 +1261,15 @@ function onMapPick(p) {
     if (l && l.off <= Math.max(150, mpp * 70)) { placeAtD(l.d); setFollow(true); toast(t('snapPress'), 'green', 5000); return; }
   }
   showPick(p);
-  const box = $('pick'); box.hidden = false;
-  const pts = g.active ? '' : ptBtnsHtml();
-  box.innerHTML = `<div class="muted">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row">
-    ${pts}${pts ? '' : `<button class="btn" data-k="here">${t('iAmHere')}</button>`}<button class="btn" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>
-    <div class="row">${pts ? `<button class="btn sm" data-k="here">${ICON.here}${t('iAmHere')}</button>` : ''}<button class="btn sm" data-k="shower">${ICON.shower}${t('showerMarkAction')}</button></div>`;
+  // (1.1.22) Меню точки — один ряд значків: Старт · Через · Їхати сюди · Я тут · ✕. Тло майже прозоре — карту під ним видно.
+  // «Я бачив тут душ» звідси прибрано (душ позначають на картці місця: АЗС, стоянка).
+  const box = $('pick'); box.hidden = false; box.className = 'pick-pt';
+  box.innerHTML = `<div class="pk-cap">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row pk-row">
+    ${g.active ? '' : ptBtnsHtml(true)}<button class="btn pt-b pt-me" data-k="here" aria-label="${t('iAmHereFull')}">${ptTag('me', 'rp-t')}<span>${t('iAmHere')}</span></button><button class="btn pk-x" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
     const k = b.dataset.k; if (k === 'x') { showPick(null); return; }
-    if (k === 'shower') { showPick(null); showers.toggleShower(p, ''); toast(t('showerMarked'), 'green', 4000); return; }
     if (k === 'here') { showPick(null); setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return; }
     showPick(null); ptsSet(k, { lat: p.lat, lon: p.lon });
   };
@@ -1278,7 +1280,7 @@ function onMarkTap(id) {
   const m = showers.myShowers().find(x => x.id === id); if (!m) return;
   const p = { lat: m.lat, lon: m.lon, label: m.name || t('showerMineTitle') };
   const dist = pos.lat != null ? ' · ' + fmtDist(hav(pos, m)) + ' ' + t('fromYou') : '';
-  const box = $('pick'); box.hidden = false; showPick(null);
+  const box = $('pick'); box.hidden = false; box.className = ''; showPick(null);
   const btns = g.active ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
     : ptBtnsHtml();
   box.innerHTML = `<div class="row" style="margin-top:0"><span class="sdot" style="background:#06b6d4"></span><div class="grow"><div class="t">${esc(m.name || t('showerMineTitle'))}</div>
@@ -1337,7 +1339,7 @@ function onStopTap(x) {
   const title = ty === 'c' ? t('camera') + (extra ? ' · ' + extra + ' ' + t('kmh') : '') : (name || kindL);
   const p = { lat, lon, label: name || kindL };
   const inf = stopInfoHtml(x.i, r);
-  const box = $('pick'); box.hidden = false; showPick(null);
+  const box = $('pick'); box.hidden = false; box.className = ''; showPick(null);
   const btns = ty === 'c' ? '' : g.active
     ? `<button class="btn pri" data-k="via">${t('stopVia')}</button>`
     : ptBtnsHtml();

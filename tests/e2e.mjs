@@ -2383,23 +2383,31 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const b5b = await bar(); await page.click('#pts [data-pt="del"]'); await sleep(300);
   const b6 = await bar();
   ok(`[${T}] «Через» ще раз → «Без „через“»: проміжну точку прибрано`, /Без «через»/.test(b5b.ctx) && b5b.ctxFit && b6.wp.length === 1 && b6.line === 2 && /не треба/.test(chipT(b6, 'v')), JSON.stringify({ ctx: b5b.ctx, wp: b6.wp }));
-  // довге натискання на карті: «Їхати сюди» (головна) · «Старт тут» · «Через»
+  // довге натискання на карті (1.1.22): ОДИН ряд значків у порядку Старт · Через · Їхати сюди (головна) · Я тут · ✕; тло майже прозоре; «душу» тут немає
   await app(page, () => window.__app.bus.emit('mapPick', { lat: 49.985, lon: 36.21 })); await sleep(350);
-  const pk = await app(page, () => ({ b: [...document.querySelectorAll('#pick .pt-b')].map(b => { const r = b.getBoundingClientRect(); return { k: b.dataset.k, t: b.textContent.trim(), svg: !!b.querySelector('svg'), pri: b.classList.contains('pri'), h: Math.round(r.height), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), sw: b.scrollWidth, cw: b.clientWidth }; }),
-    other: [...document.querySelectorAll('#pick button:not(.pt-b)')].map(b => b.dataset.k), box: (r => ({ l: Math.round(r.left), r: Math.round(r.right), b: Math.round(r.bottom) }))(document.getElementById('pick').getBoundingClientRect()) }));
-  ok(`[${T}] затримали палець на карті: «Їхати сюди» (головна, перша), «Старт тут», «Через» — зі значками, вміщаються; «Я тут» і душ на місці`, pk.b.map(x => x.t).join() === 'Їхати сюди,Старт тут,Через' && pk.b[0].pri && !pk.b[1].pri && pk.b[0].w > pk.b[1].w && pk.b.every(x => x.svg && x.h >= 44 && x.l >= pk.box.l && x.r <= pk.box.r && x.sw <= x.cw + 1) && pk.box.r <= sc.w && pk.other.includes('here') && pk.other.includes('shower') && pk.other.includes('x'), JSON.stringify(pk));
+  const pk = await app(page, () => { const box = document.getElementById('pick'), al = c => { const m = String(c).match(/rgba?\(([^)]+)\)/); const a = m ? m[1].split(/[,/ ]+/).filter(Boolean).map(Number) : []; return a.length >= 4 ? a[3] : (m ? 1 : 0); };
+    const bs = [...box.querySelectorAll('button')].map(b => { const r = b.getBoundingClientRect(), ic = b.querySelector('.rp-t'), sp = b.querySelector('span'); return { k: b.dataset.k, t: b.textContent.trim(), label: b.getAttribute('aria-label'), svg: !!b.querySelector('svg'), ic: ic ? Math.round(ic.getBoundingClientRect().width) : 0, icBg: ic ? getComputedStyle(ic).backgroundColor : '', pri: b.classList.contains('pri'),
+      h: Math.round(r.height), t0: Math.round(r.top), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), fit: !sp || sp.scrollWidth <= sp.clientWidth + 1, bg: al(getComputedStyle(b).backgroundColor) }; });
+    const r = box.getBoundingClientRect(), cap = box.querySelector('.pk-cap');
+    return { b: bs, box: { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), h: Math.round(r.height), bg: al(getComputedStyle(box).backgroundColor), blur: getComputedStyle(box).backdropFilter, shadow: getComputedStyle(box).boxShadow }, cap: cap ? cap.textContent : '', capFs: cap ? parseFloat(getComputedStyle(cap).fontSize) : 0, text: box.textContent }; });
+  ok(`[${T}] затримали палець на карті — один ряд значків у порядку «Старт · Через · Їхати (головна) · Я тут» і хрестик; усі на одній лінії, з підписами, вміщаються`, pk.b.map(x => x.k).join() === 'a,v,b,here,x' && pk.b.slice(0, 4).map(x => x.t).join() === 'Старт,Через,Їхати,Я тут' && pk.b[2].pri && !pk.b[0].pri && !pk.b[3].pri
+    && new Set(pk.b.map(x => x.t0)).size === 1 && pk.b.every((x, i) => x.svg && x.h >= 56 && x.w >= 44 && x.l >= pk.box.l && x.r <= pk.box.r && x.fit && (!i || x.l >= pk.b[i - 1].r + 4)) && pk.b.slice(0, 4).every(x => x.ic === 32) && pk.box.r <= sc.w, JSON.stringify(pk.b));
+  ok(`[${T}] значки меню точки зрозумілі: зелений прапорець — старт, сіре кільце — через, червоний картатий прапор — їхати сюди, синя стрілка (як машина на карті) — «я тут»; для озвучення — повні назви`, pk.b[0].icBg === 'rgb(47, 158, 98)' && pk.b[1].icBg === 'rgb(95, 106, 117)' && /^rgb\(2[0-9]{2}, \d{2}, \d{2}\)$/.test(pk.b[2].icBg) && pk.b[3].icBg === 'rgb(47, 107, 255)'
+    && pk.b[0].label === 'Старт тут' && pk.b[1].label === 'Їхати через цю точку' && pk.b[2].label === 'Їхати сюди' && /^Я тут: поставити моє місце/.test(pk.b[3].label), JSON.stringify(pk.b.map(x => [x.k, x.icBg, x.label])));
+  ok(`[${T}] тло меню точки майже прозоре (${pk.box.bg}) і без розмиття — карту під ним видно; самі кнопки щільні (${pk.b[0].bg}); меню вдвічі нижче, ніж було (${pk.box.h} пікселів); кнопки «душ» тут більше немає`, pk.box.bg > 0 && pk.box.bg <= 0.15 && pk.box.blur === 'none' && pk.box.shadow === 'none' && pk.b.every(x => x.bg >= 0.8) && pk.box.h <= 100 && !/душ/.test(pk.text) && /^Точка на карті: 49\.98500, 36\.21000$/.test(pk.cap) && pk.capFs >= 12, JSON.stringify(pk.box) + ' ' + pk.cap);
+  ok(`[${T}] меню точки: усе читається`, (await readCheck(page, '#pick')).length === 0, JSON.stringify(await readCheck(page, '#pick')));
   if (sc.n === 'S10' || sc.n === 'tiny') await shot(page, '30-pick-' + sc.n);
   await page.click('#pick [data-k="a"]'); await sleep(500);
   const b7 = await bar();
   ok(`[${T}] «Старт тут» — старт у цій точці; лишаємось на карті з плашкою (фініш уже є — ніщо не чекає)`, b7.vis && b7.panel && b7.pick && !b7.st.me && b7.wp.some(w => w.cls === 'wp-a') && b7.st.arm === null, JSON.stringify({ st: b7.st, wp: b7.wp }));
   // старт уже вказано вручну → на картці не «Їхати сюди», а «Фініш тут»: фініш переїжджає, старт лишається, де поставили
   await app(page, () => window.__app.bus.emit('mapPick', { lat: 49.9856, lon: 36.2112 })); await sleep(350);
-  const pk2 = await app(page, () => [...document.querySelectorAll('#pick .pt-b')].map(b => ({ t: b.textContent.trim(), pri: b.classList.contains('pri'), sw: b.scrollWidth, cw: b.clientWidth })));
+  const pk2 = await app(page, () => [...document.querySelectorAll('#pick .pt-b')].map(b => ({ t: b.textContent.trim(), label: b.getAttribute('aria-label'), pri: b.classList.contains('pri'), sw: b.scrollWidth, cw: b.clientWidth })));
   if (sc.n === 'S10') await shot(page, '30-pick-finish-' + sc.n);
   const a7 = b7.wp.find(w => w.cls === 'wp-a');
   await page.click('#pick [data-k="b"]'); await sleep(500);
   const b7b = await bar(), a7b = b7b.wp.find(w => w.cls === 'wp-a');
-  ok(`[${T}] старт уже вказано вручну — на картці «Фініш тут» (а не «Їхати сюди»): фініш переїхав, старт на місці`, pk2.map(x => x.t).join() === 'Фініш тут,Старт тут,Через' && pk2[0].pri && pk2.every(x => x.sw <= x.cw + 1)
+  ok(`[${T}] старт уже вказано вручну — у меню «Фініш» (а не «Їхати»; для озвучення «Фініш тут»): фініш переїхав, старт на місці`, pk2.map(x => x.t).join() === 'Старт,Через,Фініш,Я тут' && pk2[2].pri && pk2[2].label === 'Фініш тут' && pk2.every(x => x.sw <= x.cw + 1)
     && !b7b.st.me && !!a7 && !!a7b && b7b.wp.some(w => w.cls === 'wp-b') && b7b.st.arm === null, JSON.stringify({ pk2, st: b7b.st, wp: b7b.wp }));
   // «Прибрати всі точки» → з чистого аркуша: «Старт тут», і фініш одразу чекає дотику (поставив першу — одразу другу)
   await page.click('#pts [data-pt="reset"]'); await sleep(300);
