@@ -671,7 +671,8 @@ function ptsRender() {
   const any = !isMe || plan.v || plan.b;
   // що зробить наступний дотик до карти — і (для старту) другий спосіб: «з мого місця»
   const armLine = arm ? `<div class="pt-arm ${arm}" id="ptArm">${ICON.pin}<span>${t('ptArmHint', t(PT_NAME[arm]).toLowerCase())}</span></div>` : '';
-  const ctx = arm === 'a' ? `<button class="btn pt-ctx${isMe ? ' on' : ''}" data-pt="me">${ICON.here}<span>${t(isMe ? 'ptFromMeOn' : 'ptFromMeBtn')}</span></button>`
+  // та сама пара, що й у формі «Рейс»: «З мого місця» (зелена, коли вибрано) — або дотик до карти
+  const ctx = arm === 'a' ? `<button class="btn pt-ctx${isMe ? ' on' : ''}" data-pt="me" aria-pressed="${isMe}">${ICON.here}<span>${t('ptFromMeBtn')}</span></button>`
     : arm === 'v' && plan.v ? `<button class="btn pt-ctx" data-pt="del">${ICON.x}<span>${t('ptViaDel')}</span></button>` : '';
   box.innerHTML = `<div class="aim-bar pt-bar">
     <div class="pt-chips">${chip('a')}${chip('v')}${chip('b')}</div>

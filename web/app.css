@@ -355,7 +355,9 @@ body[data-theme="night"]{
 .pt-bar .btn{min-height:50px;padding:0 10px;white-space:nowrap;min-width:0}
 .pt-bar .btn span{overflow:hidden;text-overflow:ellipsis}
 .pt-bar .btn[data-pt="route"]{flex:1 1 0}
-.pt-bar .btn.pt-ctx{flex:1.3 1 0;gap:6px}
+/* «З мого місця» / «Без „через“»: напис не обрізаємо — на вузькій плашці (телефон набік) він стає у два рядки */
+.pt-bar .btn.pt-ctx{flex:1.3 1 0;gap:6px;padding:0 8px;font-size:15px}
+.pt-bar .btn.pt-ctx span{white-space:normal;line-height:1.12;text-align:left;overflow:visible}
 .pt-bar .btn.pt-ctx svg{width:20px;height:20px;flex:none}
 .pt-bar .btn.pt-ctx.on{background:rgba(47,158,98,.16);color:var(--ink);box-shadow:inset 0 0 0 2px #2f9e62}
 /* «ця точка чекає дотику до карти» — кольорова смужка з підказкою */

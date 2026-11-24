@@ -2223,7 +2223,7 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
     const P = window.__app, br = document.querySelector('#pts .pt-bar'); if (!br) return null; const src = P.map.map.getSource('plan-line')._data;
     return { vis: !document.getElementById('pts').hidden, panel: document.getElementById('panel').hidden, cross: !!document.querySelector('#pts .aim-cross'), put: !!document.querySelector('#pts [data-pt="put"]'),
       chips: [...document.querySelectorAll('#pts .pt-chip')].map(c => ({ k: c.dataset.pt, on: c.classList.contains('on'), set: c.classList.contains('set'), txt: c.textContent.trim(), ...R(c), sw: c.scrollWidth, cw: c.clientWidth })),
-      sum: document.getElementById('ptSum').textContent.trim(), arm: (document.getElementById('ptArm') || { textContent: '' }).textContent.trim(), ctx: (document.querySelector('#pts .pt-ctx') || { textContent: '' }).textContent.trim(), ctxOn: !!document.querySelector('#pts .pt-ctx.on'),
+      sum: document.getElementById('ptSum').textContent.trim(), arm: (document.getElementById('ptArm') || { textContent: '' }).textContent.trim(), ctx: (document.querySelector('#pts .pt-ctx') || { textContent: '' }).textContent.trim(), ctxOn: !!document.querySelector('#pts .pt-ctx.on'), ctxFit: (e => !e || e.scrollWidth <= e.clientWidth + 1)(document.querySelector('#pts .pt-ctx span')),
       btns: [...document.querySelectorAll('#pts .row .btn, #pts .pt-ic')].map(b => ({ k: b.dataset.pt, dis: b.disabled, ...R(b) })), bar: R(br), st: P.ui.ptsState(), aiming: document.body.classList.contains('aiming'),
       wp: [...document.querySelectorAll('.wp-plan')].map(e => { const r = e.getBoundingClientRect(); return { cls: (/wp-[avb]/.exec(e.className) || [''])[0], x: Math.round(r.left + r.width / 2), y: Math.round(r.bottom) }; }),
       line: src && src.geometry ? src.geometry.coordinates.length : 0, vw: innerWidth, vh: innerHeight, botTop: Math.round(document.getElementById('bottom').getBoundingClientRect().top), pick: document.getElementById('pick').hidden }; });
@@ -2251,18 +2251,18 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   // старт: два способи — на карті (дотиком) або «з мого місця»
   await page.click('#pts [data-pt="a"]'); await sleep(300);
   const b2 = await bar();
-  if (sc.n === 'S10') await shot(page, '29b-start-armed');
-  ok(`[${T}] торкнулись «Старт» — він чекає дотику до карти; поруч другий спосіб: «Старт — моє місце» (зараз вибрано)`, b2.st.arm === 'a' && b2.chips[0].on && /там буде старт/.test(b2.arm) && /Старт — моє місце/.test(b2.ctx) && b2.ctxOn && b2.aiming, JSON.stringify({ arm: b2.arm, ctx: b2.ctx }));
+  if (sc.n === 'S10' || sc.n === 'land') await shot(page, '29b-start-armed-' + sc.n);
+  ok(`[${T}] торкнулись «Старт» — він чекає дотику до карти; поруч другий спосіб: «З мого місця» (зараз вибрано, зелена); напис вміщається цілком`, b2.st.arm === 'a' && b2.chips[0].on && /там буде старт/.test(b2.arm) && b2.ctx === 'З мого місця' && b2.ctxOn && b2.ctxFit && b2.aiming, JSON.stringify({ arm: b2.arm, ctx: b2.ctx, fit: b2.ctxFit }));
   const sx = cx - 45, sy = cy + 40, gA = await geoAt(sx, sy);
   await page.mouse.click(sx, sy); await sleep(600);
   const b3 = await bar();
   ok(`[${T}] торкнулись карти — старт там (зелений прапорець під пальцем); відстань тепер між двома точками`, b3.wp.some(w => w.cls === 'wp-a' && Math.abs(w.x - sx) <= 2 && Math.abs(w.y - sy) <= 2) && b3.wp.length === 2 && !b3.st.me && Math.abs(b3.st.dist.total - hav(gA, gB)) < 3 && /по прямій$/.test(b3.sum) && b3.st.arm === null, JSON.stringify({ wp: b3.wp, sum: b3.sum, st: b3.st }));
   await page.click('#pts [data-pt="a"]'); await sleep(250);
   const b3b = await bar();
-  if (sc.n === 'S10') await shot(page, '29c-start-set-armed');
+  if (sc.n === 'S10' || sc.n === 'land') await shot(page, '29c-start-set-armed-' + sc.n);
   await page.click('#pts [data-pt="me"]'); await sleep(350);
   const b4 = await bar();
-  ok(`[${T}] «Старт» ще раз → кнопка «З мого місця»: старт знову моє місце (мітка зникла, відстань — «від вашого місця»)`, /З мого місця/.test(b3b.ctx) && !b3b.ctxOn && b4.st.me && b4.wp.length === 1 && /Моє місце/.test(chipT(b4, 'a')) && /від вашого місця/.test(b4.sum) && b4.st.arm === null, JSON.stringify({ ctx: b3b.ctx, sum: b4.sum, wp: b4.wp }));
+  ok(`[${T}] «Старт» ще раз → кнопка «З мого місця»: старт знову моє місце (мітка зникла, відстань — «від вашого місця»)`, b3b.ctx === 'З мого місця' && !b3b.ctxOn && b3b.ctxFit && b4.st.me && b4.wp.length === 1 && /Моє місце/.test(chipT(b4, 'a')) && /від вашого місця/.test(b4.sum) && b4.st.arm === null, JSON.stringify({ ctx: b3b.ctx, sum: b4.sum, wp: b4.wp }));
   // «через»
   await page.click('#pts [data-pt="v"]'); await sleep(250);
   const vx = cx + 50, vy = cy + 45, gV = await geoAt(vx, vy);
@@ -2273,7 +2273,7 @@ if (run('24')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   await page.click('#pts [data-pt="v"]'); await sleep(250);
   const b5b = await bar(); await page.click('#pts [data-pt="del"]'); await sleep(300);
   const b6 = await bar();
-  ok(`[${T}] «Через» ще раз → «Без „через“»: проміжну точку прибрано`, /Без «через»/.test(b5b.ctx) && b6.wp.length === 1 && b6.line === 2 && /не треба/.test(chipT(b6, 'v')), JSON.stringify({ ctx: b5b.ctx, wp: b6.wp }));
+  ok(`[${T}] «Через» ще раз → «Без „через“»: проміжну точку прибрано`, /Без «через»/.test(b5b.ctx) && b5b.ctxFit && b6.wp.length === 1 && b6.line === 2 && /не треба/.test(chipT(b6, 'v')), JSON.stringify({ ctx: b5b.ctx, wp: b6.wp }));
   // довге натискання на карті: «Їхати сюди» (головна) · «Старт тут» · «Через»
   await app(page, () => window.__app.bus.emit('mapPick', { lat: 49.985, lon: 36.21 })); await sleep(350);
   const pk = await app(page, () => ({ b: [...document.querySelectorAll('#pick .pt-b')].map(b => { const r = b.getBoundingClientRect(); return { k: b.dataset.k, t: b.textContent.trim(), svg: !!b.querySelector('svg'), pri: b.classList.contains('pri'), h: Math.round(r.height), l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), sw: b.scrollWidth, cw: b.clientWidth }; }),
