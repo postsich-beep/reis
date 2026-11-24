@@ -55,10 +55,18 @@ jobs:
       - name: Шрифти й значки для офлайн-карти (Protomaps)
         run: |
           git clone --depth 1 https://github.com/protomaps/basemaps-assets /tmp/bma
+          # Набори літер для підписів: по файлу на кожні 256 символів Юнікоду. Кладемо лише потрібні для України;
+          # якого набору немає — застосунок підставляє порожній (1.1.15), карта малюється, бракує лише цих літер.
+          # 0-255 латинка й цифри · 256-511 латинка сусідів · 512-767 апостроф «ʼ» · 1024-1279 кирилиця · 8192-8447 тире, лапки
           for f in "Noto Sans Regular" "Noto Sans Medium" "Noto Sans Italic"; do
             mkdir -p "web/vendor/glyphs/$f"
-            for r in 0-255 256-511 1024-1279 8192-8447; do cp "/tmp/bma/fonts/$f/$r.pbf" "web/vendor/glyphs/$f/" || echo "немає $f/$r"; done
+            for r in 0-255 256-511 512-767 1024-1279 8192-8447; do cp "/tmp/bma/fonts/$f/$r.pbf" "web/vendor/glyphs/$f/" || echo "немає $f/$r"; done
           done
+          # лише звичайний шрифт (назви закладів і вулиць): 8448-8703 — знак «№» («Школа №5»); 768-1023 — наголоси, грецька;
+          # 1280-1535 — вірменська, іврит; 4096-4351 — грузинська (усе це карта просила у Львові й Києві)
+          for r in 768-1023 1280-1535 4096-4351 8448-8703; do cp "/tmp/bma/fonts/Noto Sans Regular/$r.pbf" "web/vendor/glyphs/Noto Sans Regular/" || echo "немає Regular/$r"; done
+          # без основних наборів карта була б узагалі без підписів — тоді збірку зупиняємо
+          for f in "Noto Sans Regular" "Noto Sans Medium" "Noto Sans Italic"; do for r in 0-255 1024-1279; do test -s "web/vendor/glyphs/$f/$r.pbf" || { echo "::error::немає набору літер $f/$r"; exit 1; }; done; done
           mkdir -p web/vendor/sprites
           cp /tmp/bma/sprites/v4/light.json /tmp/bma/sprites/v4/light.png /tmp/bma/sprites/v4/light@2x.json /tmp/bma/sprites/v4/light@2x.png web/vendor/sprites/ || echo "значків немає"
           cp /tmp/bma/sprites/v4/dark.json /tmp/bma/sprites/v4/dark.png /tmp/bma/sprites/v4/dark@2x.json /tmp/bma/sprites/v4/dark@2x.png web/vendor/sprites/ || echo "нічних значків немає"

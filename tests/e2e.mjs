@@ -15,12 +15,29 @@ const SHOTS = process.argv.includes('--shots') ? process.argv[process.argv.index
 if (SHOTS) mkdirSync(SHOTS, { recursive: true });
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.json': 'application/json', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.png': 'image/png', '.webmanifest': 'application/manifest+json' };
 let rangeHits = 0;
-const PM = { old: false, rangeBroken: false, failFrom: null, q: 0, range: 0 };   // як поводиться «оболонка» з файлом офлайн-карти
+const PM = { old: false, rangeBroken: false, failFrom: null, q: 0, range: 0, file: 'tiny' };   // як поводиться «оболонка» з файлом офлайн-карти
+// Файли карти для перевірок: tiny — крихітний (піраміда до Харкова); city — СПРАВЖНІЙ квадрат Львова (tools/make_city_fixture.mjs);
+// blank — той самий заголовок, але у квадраті немає жодного об'єкта («файл читається, а малювати нічого»).
+const pmFiles = {};
+async function pmFile(name) {
+  if (pmFiles[name]) return pmFiles[name];
+  const fx = n => readFile(join(ROOT, '..', 'tests', 'fixtures', n + '.pmtiles'));
+  if (name !== 'blank') return (pmFiles[name] = await fx(name));
+  const city = await fx('city'), { gzipSync } = await import('node:zlib');
+  const rv = (b, o) => { let v = 0n, sh = 0n; for (;;) { const x = b[o++]; v |= BigInt(x & 0x7f) << sh; if (!(x & 0x80)) break; sh += 7n; } return [v, o]; };
+  const wv = n => { const out = []; let x = BigInt(n); do { let c = Number(x & 0x7fn); x >>= 7n; if (x > 0n) c |= 0x80; out.push(c); } while (x > 0n); return out; };
+  const [, o1] = rv(city, 127), [id] = rv(city, o1);                                     // номер квадрата з каталогу справжнього файлу
+  const tile = gzipSync(Buffer.from([0x1a, 0x09, 0x0a, 0x02, 0x7a, 0x7a, 0x28, 0x80, 0x20, 0x78, 0x02]));   // шар «zz» без об'єктів
+  const dir = Buffer.from([...wv(1), ...wv(id), ...wv(1), ...wv(tile.length), ...wv(1)]), H = Buffer.from(city.subarray(0, 127));
+  const u64 = (o, v) => H.writeBigUInt64LE(BigInt(v), o), meta = Buffer.from('{}'), dataOff = 127 + dir.length + meta.length;
+  u64(8, 127); u64(16, dir.length); u64(24, 127 + dir.length); u64(32, meta.length); u64(40, dataOff); u64(48, 0); u64(56, dataOff); u64(64, tile.length);
+  return (pmFiles[name] = Buffer.concat([H, dir, meta, tile]));
+}
 const server = createServer(async (rq, rs) => {
   try {
     const p = decodeURIComponent(new URL(rq.url, 'http://x').pathname);
     if (p === '/offline/ukraine.pmtiles') {                     // як оболонка: файл карти шматками
-      const b = await readFile(join(ROOT, '..', 'tests', 'fixtures', 'tiny.pmtiles'));
+      const b = await pmFile(PM.file);
       const hd = { 'content-type': 'application/octet-stream', 'accept-ranges': 'bytes' };
       // оболонка №7+: шматок задано в адресі (?r=початок-кінець) — рівно ці байти, відповідь 200
       const q = /[?&]r=(\d+)-(\d+)/.exec(rq.url || '');
@@ -36,6 +53,9 @@ const server = createServer(async (rq, rs) => {
       rs.writeHead(206, { ...hd, 'content-range': `bytes ${s}-${e}/${b.length}`, 'content-length': e - s + 1 });
       rs.end(b.subarray(s, e + 1)); return;
     }
+    // Набори літер для підписів офлайн-карти: у сховищі їх немає (збірка бере їх із Protomaps), тож тут — як на телефоні,
+    // де потрібного набору не знайшлося: 404. Один «тестовий» набір є — щоб перевірити й звичайний шлях.
+    if (p === '/vendor/glyphs/Test Font/0-255.pbf') { rs.writeHead(200, { 'content-type': 'application/x-protobuf' }); rs.end(Buffer.from('GLYF')); return; }
     const f = join(ROOT, p === '/' ? 'index.html' : p);
     const b = await readFile(f); rs.writeHead(200, { 'content-type': MIME[extname(f)] || 'application/octet-stream' }); rs.end(b);
   } catch (_) { rs.writeHead(404); rs.end('nf'); }
@@ -184,7 +204,7 @@ async function newPage(native, opts = {}) {
         else status = 404;
         cb('http', { id, status, body });
       },
-      offlineStatus: () => JSON.stringify({ installed: !!offline, size: 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
+      offlineStatus: () => JSON.stringify({ installed: !!offline, size: window.__pmSize || 505, date: '20261120', free: 5e9, dl: { state: 'none' } }),
       offlineCheck() { cb('offline', { remote: { date: '20261120', size: 1100000000, maxzoom: 14 } }); }, offlineDownload() {}, offlineCancel() {}, offlineDelete() {}, apkInBrowser() { window.__nativeCalls.push('apkInBrowser'); },
       // якісні голоси: стан пакета живе в window.__voice
       voiceStatus: () => JSON.stringify(window.__voice || { packs: {} }), setVoice(p, sid, l) { window.__nativeCalls.push('setVoice:' + p + ':' + sid + ':' + l); },
@@ -2573,7 +2593,7 @@ if (run('3')) try {
   // ---- 1.1.13: «карти так і не підтягнулись» — на справжньому телефоні з файлу читався лише початок, тайли — ні ----
   const offState = () => app(page, () => { const P = window.__app, O = P.offline.off, m = P.map.map; return { ok: O.ok, bad: O.bad, mode: O.mode, reads: O.reads, errs: O.errs, last: O.lastErr, active: P.offline.offlineActive(), src: !!(m && m.getSource && m.getSource('protomaps')),
     toast: document.getElementById('toasts').textContent, log: P.core.getLog().slice(-30).map(l => l.msg || l.text || '').join(' | ') }; });
-  const boot = async rev => { await page.addInitScript(r => { window.__nativeRev = r; }, rev); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline, null, { timeout: 20000 }); };
+  const boot = async rev => { const size = (await pmFile(PM.file)).length; await page.addInitScript(([r, n]) => { window.__nativeRev = r; window.__pmSize = n; }, [rev, size]); await page.reload(); await page.waitForFunction(() => window.__app && window.__app.map && window.__app.map.map && window.__app.offline, null, { timeout: 20000 }); };
   const o0 = await offState();
   ok('файл карти перевірено читанням із середини (а не лише заголовка); спосіб читання відомий', o0.ok && o0.mode === 'range' && o0.active && o0.src && o0.reads > 0 && o0.errs === 0, JSON.stringify({ ...o0, log: undefined, toast: undefined }));
   // а) телефон зі старою оболонкою (до №7): початок файлу читається, усе інше — ні. Раніше це була «сіра карта» мовчки
@@ -2605,6 +2625,46 @@ if (run('3')) try {
   await sleep(21000);
   const od = await offState();
   ok('карта малюється — сторож мовчить і через 20 с: офлайн-карта лишається', od.ok && !od.bad && od.active && od.src && od.errs === 0, JSON.stringify({ ...od, log: od.log.slice(-300) }));
+  // ---- 1.1.15: «після оновлення карти знову зникли» — файл уже читався, але бракувало наборів літер для підписів ----
+  // Бібліотека карти, не знайшовши ОДНОГО набору (наприклад, зі знаком «№»), викидала весь квадрат: сіре тло без доріг.
+  const jump = (lat, lon, z) => app(page, ([lat, lon, z]) => { const P = window.__app; P.map.view.follow = false; P.map.view.lastTouch = Date.now() + 3600e3; P.map.map.jumpTo({ center: [lon, lat], zoom: z, pitch: 0, bearing: 0 }); }, [lat, lon, z]);
+  const drawn = () => app(page, () => { const P = window.__app, m = P.map.map, O = P.offline.off, n = l => { try { return m.querySourceFeatures('protomaps', { sourceLayer: l }).length; } catch (e) { return -1; } };
+    return { roads: n('roads'), earth: n('earth'), buildings: n('buildings'), rendered: (() => { try { return m.queryRenderedFeatures().filter(f => f.source === 'protomaps').length; } catch (e) { return -1; } })(),
+      miss: O.glyphMiss.slice(), bounds: O.bounds, zooms: O.zooms, glyphs: String(m.getStyle().glyphs || ''), active: P.offline.offlineActive(), bad: O.bad }; });
+  // д) набір літер: є файл — віддаємо його; немає — порожній набір (а не помилка) і запис, якого саме бракує
+  const gl = await app(page, async () => { const O = window.__app.offline, u = n => 'reisglyph://' + location.origin + '/vendor/glyphs/' + n + '.pbf';
+    const a = await O.glyphLoad({ url: u('Test%20Font/0-255') }, new AbortController()), b = await O.glyphLoad({ url: u('Test%20Font/256-511') }, new AbortController()), b2 = await O.glyphLoad({ url: u('Test%20Font/256-511') }, new AbortController());
+    return { a: a.data.byteLength, b: b.data.byteLength, b2: b2.data.byteLength, miss: O.off.glyphMiss.filter(x => /Test Font/.test(x)) }; });
+  ok('набір літер є — віддаємо його; немає (404) — порожній набір замість помилки, і в журналі видно, якого бракує (один раз)', gl.a === 4 && gl.b === 0 && gl.b2 === 0 && gl.miss.length === 1 && gl.miss[0] === 'Test Font 256-511', JSON.stringify(gl));
+  // е) справжній квадрат міста (Львів, Сихів) і ЖОДНОГО набору літер (у тестах їх немає — усі 404): карта має намалюватись
+  PM.file = 'city'; await boot(7); await jump(49.807, 24.045, 15.3);
+  await page.waitForFunction(() => { try { return window.__app.map.map.querySourceFeatures('protomaps', { sourceLayer: 'roads' }).length > 0; } catch (e) { return false; } }, null, { timeout: 15000 }).catch(() => {});
+  await sleep(1500);
+  const dc = await drawn();
+  await shot(page, '12b-offline-city');
+  ok('справжній квадрат міста без наборів літер: дороги, суша й забудова НАМАЛЬОВАНІ (раніше — порожнє сіре тло)', dc.roads > 50 && dc.earth > 0 && dc.buildings > 0 && dc.rendered > 50 && dc.active && !dc.bad, JSON.stringify({ ...dc, miss: dc.miss.length }));
+  ok('…набори літер ідуть через наш завантажувач (reisglyph://), бракує — записано які', /^reisglyph:\/\//.test(dc.glyphs) && dc.miss.length > 0 && dc.miss.every(x => /^Noto Sans (Regular|Medium|Italic) \d+-\d+$/.test(x)), JSON.stringify({ glyphs: dc.glyphs.slice(0, 40), miss: dc.miss.slice(0, 4) }));
+  ok('із заголовка файлу прочитано межі карти й масштаби', Array.isArray(dc.bounds) && Math.abs(dc.bounds[0] - 22.1) < 0.01 && Math.abs(dc.bounds[3] - 52.4) < 0.01 && dc.zooms[0] === 0 && dc.zooms[1] === 14, JSON.stringify({ b: dc.bounds, z: dc.zooms }));
+  await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#offSec');
+  ok('у «Налаштуваннях» у рядку діагностики видно, скількох наборів літер бракує', await app(page, () => /бракує наборів літер: [1-9]/.test(document.getElementById('offDiag').textContent)), await app(page, () => document.getElementById('offDiag').textContent));
+  await page.click('#panelClose');
+  await page.waitForFunction(() => window.__app.core.getLog().some(l => /офлайн-карта малюється/.test(l.msg || l.text || '')), null, { timeout: 30000 }).catch(() => {});
+  const oe = await offState();
+  ok('сторож бачить намальовані об\'єкти: «офлайн-карта малюється», офлайн лишається', /офлайн-карта малюється/.test(oe.log) && oe.active && !oe.bad, JSON.stringify({ ...oe, log: oe.log.slice(-200) }));
+  // є) квадрат у файлі є, читається без жодної помилки, а на карті — нічого (як було на телефоні): сторож не вірить
+  //    «завантажилось без помилок», а дивиться, чи щось намальовано, — і повертає онлайн-карту з поясненням
+  PM.file = 'blank'; await boot(7); await jump(49.807, 24.045, 15.3);
+  const of0 = await offState();
+  await page.waitForFunction(() => window.__app.offline.off.bad === 'tiles', null, { timeout: 40000 }).catch(() => {});
+  await sleep(1200);
+  const of1 = await offState();
+  ok('квадрат читається без помилок, а на карті порожньо — сторож повертає онлайн-карту й каже про це (раніше мовчки лишалось сіре тло)', of0.active && of1.bad === 'tiles' && !of1.active && !of1.src && of1.errs === 0 && /квадрат у файлі є/.test(of1.last) && /Офлайн-карта не малюється/.test(of1.toast), JSON.stringify({ ...of1, log: of1.log.slice(-200) }));
+  // ж) а якщо під цим місцем у файлі карти просто немає (водій за межами карти) — це не збій: офлайн лишається
+  PM.file = 'tiny'; await boot(7); await jump(49.807, 24.045, 12.5);
+  await page.waitForFunction(() => window.__app.core.getLog().some(l => /під цим місцем у файлі карти немає/.test(l.msg || l.text || '')), null, { timeout: 40000 }).catch(() => {});
+  const og = await offState();
+  ok('під цим місцем у файлі карти немає — сторож не зчиняє тривоги: офлайн лишається, у журналі — «це не збій»', og.active && !og.bad && og.src && /під цим місцем у файлі карти немає/.test(og.log), JSON.stringify({ ...og, log: og.log.slice(-200) }));
+  PM.file = 'tiny';
   { const er = errors.filter(e => !/офлайн-карта не (читається|малюється)/.test(e) && !/status of (416|500)/.test(e)); ok('прохід офлайн-карти без помилок JS (крім очікуваних записів про файл, що не читається)', er.length === 0, er.join(' | ')); }
   await ctx.close();
 } catch (e) { ok('сценарій 3 дійшов до кінця', false, String(e.message).split('\n')[0]); }

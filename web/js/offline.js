@@ -3,7 +3,7 @@ import { bus, log, S } from './core.js';
 import * as P from './platform.js';
 
 export const off = { supported: P.isNative && P.offlineSupported(), installed: false, size: 0, date: '', free: 0, dl: { state: 'none' }, remote: null, remoteErr: '',
-  ok: false, bad: '', mode: '', reads: 0, errs: 0, lastErr: '' };
+  ok: false, bad: '', mode: '', reads: 0, errs: 0, lastErr: '', glyphMiss: [], bounds: null, zooms: null };
 let timer = null, wasInstalled = false;
 
 export function refreshStatus() {
@@ -61,6 +61,8 @@ async function doVerify() {
     const buf = await readBytes('range', 0, 256), head = new Uint8Array(buf), v = new DataView(buf);
     if (head.length < 127 || String.fromCharCode(...head.subarray(0, 7)) !== 'PMTiles') throw new Error('це не файл карти');
     const u = o => Number(v.getBigUint64(o, true)), need = Math.max(u(8) + u(16), u(24) + u(32), u(40) + u(48), u(56) + u(64));
+    off.zooms = [head[100], head[101]];                                                     // найдрібніший і найбільший масштаб у файлі
+    off.bounds = [102, 106, 110, 114].map(o => v.getInt32(o, true) / 1e7);                  // межі карти: захід, південь, схід, північ
     if (off.size && off.size < need) bad = 'short:' + Math.round(off.size / 1e6) + '/' + Math.round(need / 1e6);
     else {
       const from = 128, n = Math.min(128, head.length - from), want = head.subarray(from, from + n), why = [];
@@ -126,13 +128,38 @@ const NIGHT = {
   city_label: '#eef1f4', city_label_halo: '#0f1317', subplace_label: '#98a2ae', subplace_label_halo: '#0f1317', state_label: '#6c7682', state_label_halo: '#0f1317', country_label: '#8a94a1',
   ocean_label: '#6f9ccb', address_label: '#8f99a6', address_label_halo: '#0f1317'
 };
+/* ---------- набори літер для підписів офлайн-карти (1.1.15) ----------
+   Підписи малюються з наборів літер (гліфів): по файлу на кожні 256 символів Юнікоду. У застосунку лежать лише
+   потрібні для України набори, а на карті трапляється що завгодно («№», грузинська назва ресторану, грецька літера).
+   Бібліотека карти, не знайшовши ОДНОГО набору, викидає ВЕСЬ квадрат карти — з дорогами, водою й забудовою:
+   так у 1.1.13–1.1.14 офлайн-карта в місті лишалась порожнім сірим тлом, хоч файл уже читався правильно.
+   Тепер набори йдуть через наш завантажувач: немає файлу — віддаємо порожній набір. Такої літери в підписі не буде,
+   але карта намалюється. */
+function glyphMissed(url, why) {
+  const m = /([^/]+)\/(\d+-\d+)\.pbf/.exec(decodeURIComponent(url)), key = m ? m[1] + ' ' + m[2] : url;
+  if (off.glyphMiss.includes(key)) return;
+  off.glyphMiss.push(key);
+  log('warn', 'офлайн-карта: немає набору літер «' + key + '» (' + why + ') — підписи з такими літерами пропускаю');
+}
+export async function glyphLoad(params, abortController) {
+  const url = String(params && params.url || '').replace(/^reisglyph:\/\//, ''), signal = abortController && abortController.signal;
+  try {
+    const r = await fetch(url, signal ? { signal } : undefined);
+    if (r.ok) { const data = await r.arrayBuffer(); if (data.byteLength) return { data }; glyphMissed(url, 'порожній файл'); }
+    else glyphMissed(url, 'HTTP ' + r.status);
+  } catch (e) {
+    if (signal && signal.aborted) throw e;
+    glyphMissed(url, String(e && e.message || e).slice(0, 60));
+  }
+  return { data: new ArrayBuffer(0) };
+}
 export function offlineStyle(night = false) {
   const base = location.origin + '/';
   const lang = S.lang === 'ru' ? 'ru' : 'uk';
   const flavor = { ...basemaps.namedFlavor(night ? 'dark' : 'light'), ...(night ? NIGHT : DAY) };
   return {
     version: 8,
-    glyphs: base + 'vendor/glyphs/{fontstack}/{range}.pbf',
+    glyphs: 'reisglyph://' + base + 'vendor/glyphs/{fontstack}/{range}.pbf',
     sprite: base + 'vendor/sprites/' + (night ? 'dark' : 'light'),
     metadata: { reisNight: !!night },
     sources: { protomaps: { type: 'vector', url: 'pmtiles://' + base + 'offline/ukraine.pmtiles', attribution: '© OpenStreetMap · Protomaps' } },
@@ -140,11 +167,22 @@ export function offlineStyle(night = false) {
   };
 }
 
+/** Чи є у файлі квадрат карти під цим місцем: повертає його розмір у байтах (0 — немає; null — не вдалося прочитати).
+ *  Сторож «карта не малюється» питає це перед вироком: квадрат є, а на екрані порожньо — отже, збій малювання. */
+let pmFile = null;
+export async function tileBytesAt(lat, lon, zoom) {
+  if (!pmFile) return null;
+  const Z = off.zooms || [0, 14], z = Math.max(Z[0], Math.min(Z[1], Math.floor(zoom))), n = 2 ** z, r = lat * Math.PI / 180;
+  const x = Math.min(n - 1, Math.max(0, Math.floor((lon + 180) / 360 * n))), y = Math.min(n - 1, Math.max(0, Math.floor((1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * n)));
+  try { const t = await pmFile.getZxy(z, x, y); return t && t.data ? t.data.byteLength : 0; } catch (_) { return null; }
+}
+
 export function init() {
   if (typeof pmtiles !== 'undefined') {
-    try { const proto = new pmtiles.Protocol(); proto.add(new pmtiles.PMTiles(new PmSource())); maplibregl.addProtocol('pmtiles', proto.tile); }
+    try { const proto = new pmtiles.Protocol(); pmFile = new pmtiles.PMTiles(new PmSource()); proto.add(pmFile); maplibregl.addProtocol('pmtiles', proto.tile); }
     catch (e) { log('warn', 'pmtiles: ' + e.message); }
   }
+  try { maplibregl.addProtocol('reisglyph', glyphLoad); } catch (e) { log('warn', 'набори літер: ' + e.message); }
   bus.on('native:offline', d => {
     if (d && d.remote) { off.remote = d.remote; off.remoteErr = ''; }
     if (d && d.error) off.remoteErr = d.error;
