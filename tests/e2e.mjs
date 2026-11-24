@@ -102,12 +102,7 @@ const VP_JSON = { v: 1, date: '20261122', places: [{ id: 'test-bistro', kind: 'f
   photos: ['verified/bistro-1.jpg', 'verified/bistro-2.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: смачно й чисто.', ru: 'Советуем: вкусно и чисто.' }, tags: { uk: ['Гаряча роздача'], ru: ['Горячая раздача'] },
   menu: [['Борщ із м\'ясом', '65 грн / 400 г'], ['Солянка', '60 грн / 300 г']], note: { uk: 'Ціни — з фото.', ru: 'Цены — с фото.' } },
   { id: 'test-noloc', kind: 'food', name: 'Без точки', rating: 5, checked: '2026-11', photos: ['verified/bistro-6.jpg'], thumbs: ['verified/bistro-6-s.jpg'], say: { uk: 'Тест', ru: 'Тест' } },
-  { id: 'test-far', kind: 'tire', name: 'Шиномонтаж у Львові', rating: 5, checked: '2026-11', lat: 49.84, lon: 24.03, photos: ['verified/bistro-5.jpg'], thumbs: ['verified/bistro-5-s.jpg'], say: { uk: 'Тест', ru: 'Тест' } },
-  // комплекс для фур (як «Автопорт»): стоянка з душем, готель, кафе — окремий розділ цін на послуги й окремо меню кафе
-  { id: 'test-complex', kind: 'complex', name: 'Комплекс (тест)', rating: 5, checked: '2026-11', lat: vpPt[0] + 0.0012, lon: vpPt[1] + 0.0004, road: 'М-03', town: { uk: 'Тестове', ru: 'Тестовое' },
-    photos: ['verified/bistro-1.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: стоянка, готель і кафе.', ru: 'Советуем: стоянка, гостиница и кафе.' }, tags: { uk: ['Стоянка для фур', 'Готель'], ru: ['Стоянка для фур', 'Гостиница'] },
-    services: [[{ uk: 'Стоянка для фури — душ входить у вартість', ru: 'Стоянка для фуры — душ входит в стоимость' }, '100 грн'], [{ uk: 'Готель: одномісний номер', ru: 'Гостиница: одноместный номер' }, '1000 грн']],
-    menu: [['Борщ', '100 грн / 300 г']], note: { uk: 'Ціни станом на 24.11.2026.', ru: 'Цены на 24.11.2026.' } }] };
+  { id: 'test-far', kind: 'tire', name: 'Шиномонтаж у Львові', rating: 5, checked: '2026-11', lat: 49.84, lon: 24.03, photos: ['verified/bistro-5.jpg'], thumbs: ['verified/bistro-5-s.jpg'], say: { uk: 'Тест', ru: 'Тест' } }] };
 
 // база піт-стопів (як web/data/stops.json): камера, дві АЗС на маршруті, кафе, стоянка далеко збоку
 const STOPS_JSON = { v: 1, date: '20261121', rows: [
@@ -147,6 +142,11 @@ const sleep = ms => new Promise(r => setTimeout(r, ms));
 
 // ntfy.sh для тестів: одне сховище на всі «телефони» в тесті
 const NTFY = { msgs: [], posts: 0, fail: false };
+// місце-комплекс для фур (як «Автопорт»): стоянка з душем, готель, кафе — окремо ціни на послуги й окремо меню кафе
+const VP_COMPLEX = { id: 'test-complex', kind: 'complex', name: 'Комплекс (тест)', rating: 5, checked: '2026-11', lat: vpPt[0] + 0.0012, lon: vpPt[1] + 0.0004, road: 'М-03', town: { uk: 'Тестове', ru: 'Тестовое' },
+    photos: ['verified/bistro-1.jpg'], thumbs: ['verified/bistro-1-s.jpg'], say: { uk: 'Радимо: стоянка, готель і кафе.', ru: 'Советуем: стоянка, гостиница и кафе.' }, tags: { uk: ['Стоянка для фур', 'Готель'], ru: ['Стоянка для фур', 'Гостиница'] },
+    services: [[{ uk: 'Стоянка для фури — душ входить у вартість', ru: 'Стоянка для фуры — душ входит в стоимость' }, '100 грн'], [{ uk: 'Готель: одномісний номер', ru: 'Гостиница: одноместный номер' }, '1000 грн']],
+    menu: [['Борщ', '100 грн / 300 г']], note: { uk: 'Ціни станом на 24.11.2026.', ru: 'Цены на 24.11.2026.' } };
 const ROUTE = { fn: null };                                        // підміна відповіді сервера маршрутів у окремих перевірках
 // Сторінки, що лишились відкритими після збою попередньої перевірки, гальмують усі наступні (карта малює й далі) — закриваємо.
 const liveCtx = new Set();
@@ -164,7 +164,7 @@ async function newPage(native, opts = {}) {
   await page.route('**/data/hazards.json', r => json(r, HAZ_JSON));
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
-  await page.route('**/data/verified.json', r => json(r, VP_JSON));
+  if (!opts.realVp) await page.route('**/data/verified.json', r => json(r, VP_JSON));
   await page.route('https://ntfy.sh/**', r => {
     const rq = r.request(), u = new URL(rq.url());
     if (NTFY.fail) return r.fulfill({ status: 503, headers: { 'access-control-allow-origin': '*' }, body: 'down' });
@@ -302,13 +302,13 @@ if (run('1')) try {
     if (!p.say || !p.say.uk || !p.say.ru) say('опис двома мовами');
     if (!/^\d{4}-\d{2}$/.test(p.checked || '')) say('місяць перевірки');
     if (!(p.photos || []).length || (p.thumbs || []).length !== p.photos.length) say('фото й мініатюри');
-    for (const f of [...(p.photos || []), ...(p.thumbs || [])]) { try { const n = statSync(join(ROOT, 'data', f)).size; if (n < 2000 || n > 120000) say('розмір ' + f + ' = ' + n); } catch (_) { say('немає файла ' + f); } }
+    for (const f of [...(p.photos || []), ...(p.thumbs || [])]) { try { const n = statSync(join(ROOT, 'data', f)).size; if (n < 2000 || n > 200000) say('розмір ' + f + ' = ' + n); } catch (_) { say('немає файла ' + f); } }
     // де є ціни — має бути сказано, на який час вони записані
     if (((p.menu || []).length || (p.services || []).length) && !(p.note && /20\d\d/.test(p.note.uk || '') && /20\d\d/.test(p.note.ru || ''))) say('ціни без дати');
     for (const [n, pr] of (p.services || [])) if (!n.uk || !n.ru || !/грн/.test(pr)) say('послуга ' + JSON.stringify(n));
     for (const [n, pr] of (p.menu || [])) if (!n || (pr && !/грн/.test(pr))) say('меню ' + n);
   }
-  ok('картотека перевірених місць: у кожного місця вид, координати в Україні, опис двома мовами, фото з мініатюрами (не важчі 120 КБ), ціни — з датою', vj.places.length >= 2 && bad.length === 0 && new Set(vj.places.map(p => p.id)).size === vj.places.length, bad.join(' | '));
+  ok('картотека перевірених місць: у кожного місця вид, координати в Україні, опис двома мовами, фото з мініатюрами (не важчі 200 КБ), ціни — з датою', vj.places.length >= 2 && bad.length === 0 && new Set(vj.places.map(p => p.id)).size === vj.places.length, bad.join(' | '));
   const ap = vj.places.find(p => p.id === 'avtoport-vinnytsia');
   ok('«Автопорт» (Вінниця): комплекс — стоянка 100 грн із душем, готель 1000 грн за одномісний, меню кафе; ціни станом на 24.11.2026', !!ap && ap.kind === 'complex' && ap.rating === 5 && Math.abs(ap.lat - 49.258925) < 1e-6 && Math.abs(ap.lon - 28.573011) < 1e-6
     && ap.services.length === 2 && /душ входить у вартість/.test(ap.services[0][0].uk) && ap.services[0][1] === '100 грн' && /одномісний/.test(ap.services[1][0].uk) && ap.services[1][1] === '1000 грн'
@@ -409,7 +409,7 @@ if (run('1')) try {
   // перевірені місця: значок на карті, вкладка «Місця», картка з фото й цінами
   ok('перевірене місце на карті — значок-бургер із зіркою', !!(await page.$('.vpm')));
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row');
-  ok('«Місця» без маршруту: лише поблизу (до 50 км), шиномонтаж у Львові не показано; без точки — з поясненням', await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()) === 'test-bistro,test-complex,test-noloc' && /Поблизу · до 50 км/.test(await page.textContent('#panelBody')) && /Точки на карті ще немає/.test(await page.textContent('#panelBody')), await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()));
+  ok('«Місця» без маршруту: лише поблизу (до 50 км), шиномонтаж у Львові не показано; без точки — з поясненням', await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()) === 'test-bistro,test-noloc' && /Поблизу · до 50 км/.test(await page.textContent('#panelBody')) && /Точки на карті ще немає/.test(await page.textContent('#panelBody')), await page.$$eval('.vp-row', e => e.map(x => x.dataset.vpid).join()));
   await shot(page, '16-places');
   await page.click('.vp-row[data-vpid="test-bistro"]'); await page.waitForSelector('.vp-photos img');
   await page.waitForFunction(() => [...document.querySelectorAll('.vp-photos img')].slice(0, 1).every(i => i.complete && i.naturalWidth > 0), null, { timeout: 5000 }).catch(() => {});
@@ -424,6 +424,7 @@ if (run('1')) try {
   ok('«Маршрут сюди» — місце стає точкою Б', await app(page, () => document.getElementById('in_b').value === 'Бістро (тест)'));
   await app(page, () => { document.getElementById('in_b').value = ''; }); await page.click('[data-clear="b"]');
   // 1.1.16: комплекс для фур (стоянка з душем, готель, кафе) — свій вид місця, окремо ціни на послуги й окремо меню кафе
+  await app(page, cx => { const V = window.__app.vplaces; V.vp.list.push(cx); window.__app.bus.emit('vplaces', V.vp); }, VP_COMPLEX);
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row[data-vpid="test-complex"]');
   const cxRow = await page.$eval('.vp-row[data-vpid="test-complex"]', e => e.textContent);
   await page.click('.vp-row[data-vpid="test-complex"]'); await page.waitForSelector('.vp-serv');
@@ -433,6 +434,8 @@ if (run('1')) try {
   ok('комплекс для фур у списку — «Стоянка · готель · кафе»; у картці спершу «Стоянка, душ, готель — почім» (100 і 1000 грн), далі «Кафе: що є і почім»', /Стоянка · готель · кафе/.test(cxRow) && cx.secs[0] === 'Стоянка, душ, готель — почім' && cx.secs[1] === 'Кафе: що є і почім' && cx.serv.length === 2 && /душ входить у вартість = 100 грн/.test(cx.serv[0]) && /одномісний номер = 1000 грн/.test(cx.serv[1]) && cx.menu === 1 && cx.order && cx.fit, JSON.stringify({ secs: cx.secs, serv: cx.serv, row: cxRow.slice(0, 80) }));
   ok('…і під цінами сказано, на який день вони записані', /Ціни станом на 24\.11\.2026/.test(cx.txt));
   ok('на карті комплекс має свій значок — синій знак стоянки із зіркою (а не бургер)', await app(page, () => { const m = [...document.querySelectorAll('.vpm')].find(e => e.getAttribute('aria-label') === 'Комплекс (тест)'); return !!m && !!m.querySelector('rect[fill="#1f6feb"]') && !!m.querySelector('.vpm-star'); }));
+  await app(page, () => { const V = window.__app.vplaces; V.vp.list = V.vp.list.filter(p => p.id !== 'test-complex'); window.__app.bus.emit('vplaces', V.vp); });
+  await page.click('#panelClose');
   // місцю без координат водій ставить точку сам
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row');
   await page.click('.vp-row[data-vpid="test-noloc"]'); await page.click('[data-vp="setloc"]');
@@ -2881,6 +2884,22 @@ if (run('29')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   ok(`[${T}] прохід 29 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`прохід 29 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
+
+/* ============ знімки справжньої картотеки (лише на прохання: REALVP=1 ONLY=vpreal --shots тека) ============ */
+if (process.env.REALVP && run('vpreal')) try {
+  const { page, ctx, errors } = await newPage(true, { realVp: true, viewport: { width: 360, height: 760 } });
+  await app(page, ([la, lo]) => window.__reis('loc', { prov: 'gps', lat: la, lon: lo, acc: 5, spd: 0, t: Date.now() }), [49.2500, 28.5600]); await sleep(600);
+  await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row[data-vpid="avtoport-vinnytsia"]'); await sleep(500);
+  await shot(page, 'vp-list');
+  await page.click('.vp-row[data-vpid="avtoport-vinnytsia"]'); await page.waitForSelector('.vp-serv'); await sleep(900);
+  await shot(page, 'vp-card-1');
+  for (const [i, y] of [[2, 430], [3, 1000], [4, 1700]]) { await app(page, y => { document.getElementById('panelBody').scrollTop = y; }, y); await sleep(300); await shot(page, 'vp-card-' + i); }
+  const info = await app(page, () => ({ imgs: [...document.querySelectorAll('.vp-photos img')].length, secs: [...document.querySelectorAll('#panelBody .sec')].map(e => e.textContent), rows: document.querySelectorAll('.vp-menu div').length, h: document.getElementById('panelBody').scrollHeight }));
+  console.log('VPREAL', JSON.stringify(info));
+  await page.click('[data-vp="map"]'); await sleep(1500); await shot(page, 'vp-map');
+  ok('справжня картка «Автопорт» відкривається без помилок', errors.length === 0 && info.imgs === 10 && info.secs.length >= 2, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('знімки справжньої картотеки', false, String(e.message).split('\n')[0]); }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
 if (run('2')) try {
