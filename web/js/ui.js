@@ -26,7 +26,7 @@ import { t } from './i18n.js';
 import { PT_SVG, ptTag } from './pticons.js';
 import { labOpen, closeLab } from './lab.js';
 import { reps, report, undo as repUndo, vote as repVote, REP_TYPES, REP_SVG, repName, repAgo, repStamp, repsAhead } from './reports.js';
-import { calibOpen } from './ui_calib.js';
+import { calibOpen, calibClose } from './ui_calib.js';
 import { calFresh, calGet } from './calib.js';
 import { limitNow, overLimit } from './limits.js';
 
@@ -698,8 +698,8 @@ function repOpen(open) {
   if (open) {
     aimEnd();
     // (1.1.22) значок «Мітки» горить зеленим — отже, є позначки попереду: показуємо їх тут же, найближчі перші; дотик — показати на карті
-    const near = repsAhead().slice(0, 4), trip = g.active && g.idx && pos.rd != null;
-    const nearHtml = near.length ? `<div class="rep-near"><div class="rep-sub">${t(trip ? 'repAheadTitle' : 'repNearTitle')}</div>${near.map(x => `<button class="rep-row" data-repgo="${esc(x.r.id)}"><span class="rep-ri">${REP_SVG[x.r.t]}</span><span class="grow"><b>${esc(repName(x.r))}</b><small>${esc(repAgo(x.r))}</small></span><span class="rep-d">${esc(x.ahead != null ? (x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead))) : fmtDist(x.dist))}</span></button>`).join('')}</div>` : '';
+    const near = repsAhead().slice(0, 4);
+    const nearHtml = near.length ? `<div class="rep-near"><div class="rep-sub">${t('repAheadTitle')}</div>${near.map(x => `<button class="rep-row" data-repgo="${esc(x.r.id)}"><span class="rep-ri">${REP_SVG[x.r.t]}</span><span class="grow"><b>${esc(repName(x.r))}</b><small>${esc(repAgo(x.r))}</small></span><span class="rep-d">${esc(x.ahead < 150 ? t('plHere') : t('plAhead', fmtDist(x.ahead)))}</span></button>`).join('')}</div>` : '';
     box.innerHTML = `<div class="q-head"><b>${t('repTitle')}</b><button class="q-x" data-rep="x" aria-label="${t('close')}">${ICON.x}</button></div>${nearHtml}
       <div class="rep-grid">${Object.keys(REP_TYPES).map(k => `<button data-rep="${k}"><span class="rep-ic">${REP_SVG[k]}</span><span>${t('rep_' + k)}</span></button>`).join('')}</div>
       <div class="muted rep-hint">${t('repHint')}</div>`;
@@ -1553,6 +1553,7 @@ export function initUI() {
   });
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
+    if (!$('calib').hidden) { calibClose(); return true; }
     if (labOpen()) { closeLab(); return true; }
     if (!$('quick').hidden) { quickOpen(false); return true; }
     if (!$('repSheet').hidden) { repOpen(false); return true; }

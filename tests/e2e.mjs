@@ -357,7 +357,7 @@ if (run('1')) try {
   ok('Ліма відкинута: позиція лишилась в Україні, чип «Підміна GPS»', sp0.lat > 49 && sp0.mode === 'approx' && sp0.chip === 'Підміна GPS', JSON.stringify(sp0));
   ok('без справжнього GPS спідометр не бреше нулем', (await page.textContent('#spdVal')) === '—', await page.textContent('#spdVal'));
   ok('коло похибки без заливки', await app(page, () => !window.__app.map.map.getLayer('acc-fill') && !!window.__app.map.map.getLayer('acc-line')));
-  await page.click('#tabs button[data-panel="gps"]'); await page.waitForSelector('#panelBody .item');
+  await page.click('#spdGps'); await page.waitForSelector('#panelBody .item');
   ok('панель GPS: стан і супутники', /Приблизно/.test(await page.textContent('#panelBody')) && /Супутники/.test(await page.textContent('#panelBody')));
   await page.click('#panelClose');
   // підміна «в Бєлгород»: усередині старого прямокутника, але за кордоном — тепер ловиться за контуром України
@@ -368,7 +368,7 @@ if (run('1')) try {
     const u = window.__app.core.inUkraine;
     return u({ lat: 44.95, lon: 34.1 }) && u({ lat: 50.91, lon: 34.8 }) && u({ lat: 48.43, lon: 22.2 }) && u({ lat: 45.35, lon: 28.84 }) && !u({ lat: 50.6, lon: 36.59 }) && !u({ lat: 52.44, lon: 30.99 }) && !u({ lat: 47.01, lon: 28.86 });
   }));
-  await page.click('#tabs button[data-panel="gps"]'); await page.waitForSelector('[data-act="journal"]');
+  await page.click('#spdGps'); await page.waitForSelector('[data-act="journal"]');
   await page.click('[data-act="journal"]'); await sleep(200);
   const jr = await app(page, () => { const n = window.__nativeCalls.find(x => /^saveFile:reis-gps-\d{8}-\d{4}\.json$/.test(x)); let j = null; try { j = JSON.parse(window.__savedText); } catch (_) {} return { n, cnt: j ? j.entries.length : 0, rej: j ? j.entries.filter(e => /^rej:/.test(e.v)).map(e => e.v) : [] }; });
   ok('журнал GPS зберігається файлом і показує, що відкинуто й чому', !!jr.n && jr.cnt >= 4 && jr.rej.includes('rej:bounds'), JSON.stringify(jr));
@@ -669,7 +669,7 @@ if (run('1')) try {
   const rd0 = await app(page, () => { window.__app.sim.setLost(true); return window.__app.nav.pos.rd; });
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 12000 });
   await sleep(3200);
-  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, noLine: !document.getElementById('lostLine') && !/GPS ✕/.test(document.getElementById('tripbar').innerText), nudge: !document.getElementById('nudge').hidden, chip: document.getElementById('tabGps').getAttribute('aria-label'), gbad: document.getElementById('tabGps').classList.contains('g-bad') }));
+  const dr = await app(page, () => ({ mode: window.__app.nav.pos.mode, reason: window.__app.nav.pos.reason, rd: window.__app.nav.pos.rd, noLine: !document.getElementById('lostLine') && !/GPS ✕/.test(document.getElementById('tripbar').innerText), nudge: !document.getElementById('nudge').hidden, chip: document.getElementById('spdGps').getAttribute('aria-label'), gbad: document.getElementById('spdGps').classList.contains('g-bad') }));
   ok('GPS зник → режим розрахунку, компактні кнопки ±100, кружечок GPS червоний', dr.mode === 'dr' && dr.reason === 'timeout' && dr.nudge && dr.chip.startsWith('GPS ✕') && dr.gbad, JSON.stringify(dr));
   ok('1.1.6: червоного рядка про GPS під часом прибуття немає (подробиці — у підписі кружечка GPS)', dr.noLine, JSON.stringify(dr));
   ok('без GPS позиція рухається маршрутом і надолужує паузу', dr.rd > rd0 + 110, `rd ${Math.round(rd0)} → ${Math.round(dr.rd)}`);
@@ -682,12 +682,12 @@ if (run('1')) try {
   ok('↓100 двічі зсуває назад (200 м мінус рух за час натискань)', up - dn > 110 && up - dn <= 201, `${Math.round(up - dn)} м`);
   await app(page, () => window.__app.sim.setLost(false));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'gps', null, { timeout: 12000 });
-  ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано, кружечок GPS зелений', await app(page, () => document.getElementById('nudge').hidden && document.getElementById('tabGps').classList.contains('g-ok')));
+  ok('GPS повернувся → знову веде GPS, кнопки ±100 сховано, кружечок GPS зелений', await app(page, () => document.getElementById('nudge').hidden && document.getElementById('spdGps').classList.contains('g-ok')));
 
   // підміна GPS («Ліма»)
   await app(page, () => window.__app.sim.setSpoof(true));
   await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
-  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('tabGps').getAttribute('aria-label') }));
+  const sp = await app(page, () => ({ reason: window.__app.nav.pos.reason, lat: window.__app.nav.pos.lat, why: document.getElementById('spdGps').getAttribute('aria-label') }));
   ok('підміну GPS відкинуто, позиція лишилась в Україні', sp.reason === 'spoof' && sp.lat > 49 && /підмін/.test(sp.why), JSON.stringify(sp));
   await sleep(4500);
   ok('під час підміни координати Ліми не прийнято', await app(page, () => window.__app.nav.pos.mode === 'dr' && window.__app.nav.pos.lat > 49));
@@ -720,8 +720,8 @@ if (run('1')) try {
   { const bb = await app(page, () => { const bs = [...document.querySelectorAll('#tabs > button')], r = bs.map(b => b.getBoundingClientRect());
       return { order: bs.map(b => b.dataset.panel || b.id).join(), labels: bs.map(b => b.textContent.trim()).join('|'), ltr: r.every((x, i) => !i || x.left >= r[i - 1].right - 1),
         noSettings: !document.querySelector('#tabs [data-panel="settings"]'), oldGone: !document.getElementById('bGps') && !document.getElementById('bReport'), mic: !!document.getElementById('bMic') || !!document.querySelector('[data-panel="chat"]') }; });
-    ok('нижня панель зліва направо: GPS · Події · Рейс · Місця · Мітки; «Параметри» прибрано; чату й мікрофона немає', bb.order === 'gps,feed,trip,places,tabRep' && bb.ltr && bb.noSettings && bb.oldGone && !bb.mic && /^(±|GPS|Без GPS).*\|Події\d*\|Рейс\|Місця\|Мітки$/.test(bb.labels), JSON.stringify(bb)); }
-  ok('кружечок GPS: є сигнал — зелений', await app(page, () => document.getElementById('tabGps').classList.contains('g-ok')), await app(page, () => document.getElementById('tabGps').className + ' ' + window.__app.nav.pos.mode));
+    ok('нижня панель зліва направо: Телефон (калібрування) · Події · Рейс · Місця · Мітки (GPS із 1.1.22 — кружечок біля круга швидкості); «Параметри» прибрано; чату й мікрофона немає', bb.order === 'tabCal,feed,trip,places,tabRep' && bb.ltr && bb.noSettings && bb.oldGone && !bb.mic && /^Телефон\|Події\d*\|Рейс\|Місця\|Мітки\d*$/.test(bb.labels), JSON.stringify(bb)); }
+  ok('кружечок GPS: є сигнал — зелений', await app(page, () => document.getElementById('spdGps').classList.contains('g-ok')), await app(page, () => document.getElementById('spdGps').className + ' ' + window.__app.nav.pos.mode));
   ok('«Параметри» відкриваються зі швидких налаштувань (кнопка вгорі праворуч)', await (async () => { await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); const ok1 = await app(page, () => /Налаштування/.test(document.getElementById('panelTitle').textContent)); await page.click('#panelClose'); return ok1; })());
 
   // лабораторія (тепер у Параметрах), ніч
@@ -1143,7 +1143,7 @@ const layoutCheck = () => {
     const els = [...document.querySelectorAll(sel)].filter(vis);
     for (let i = 0; i < els.length; i++) for (let j = i + 1; j < els.length; j++) if (inter(R(els[i]), R(els[j]))) out.push('накладаються: ' + nm(els[i]) + ' і ' + nm(els[j]));
   }
-  for (const b of [...document.querySelectorAll('#bQuick,#bMap,#tilt,#bCenter,#speed,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
+  for (const b of [...document.querySelectorAll('#bQuick,#bMap,#tilt,#bCenter,#speed,#spdGps,#strip,#tabs > button,#bFwd100,#bBack100,#gpsChip,#manSnap,#bAcceptGps,#updGo,#updX')].filter(vis)) {
     const r = R(b), hit = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2);
     if (!hit || !(b === hit || b.contains(hit))) out.push('перекрита: ' + nm(b) + ' ← ' + (hit ? nm(hit) : '—'));
     if (!((r.width >= 40 && r.height >= 36) || (r.width >= 120 && r.height >= 28))) out.push('замала для пальця: ' + nm(b) + ' ' + Math.round(r.width) + '×' + Math.round(r.height));   // широка смуга може бути нижчою
@@ -1756,7 +1756,7 @@ if (run('14')) for (const [sc, th] of SCREENS.filter(x => ['S10', 'tiny', 'land'
   await app(page, () => document.querySelectorAll('#panelBody details').forEach(d => { d.open = true; }));   // «Щоденник голосу» розгорнуто — його теж перевіряємо
   await R('«Параметри» (з прокруткою, щоденник голосу розгорнуто)', '#panel', '#panelBody'); await page.click('#panelClose');
   await app(page, () => { window.__app.S.ttsVoice = 'system'; });
-  await page.click('#tabs button[data-panel="gps"]'); await R('GPS', '#panel', '#panelBody'); await page.click('#panelClose');
+  await page.click('#spdGps'); await R('GPS', '#panel', '#panelBody'); await page.click('#panelClose');
   await page.click('#tabRep'); await R('«Що на дорозі?»', '#repSheet'); await page.click('#repSheet [data-rep="x"]');
   await page.click('#bQuick'); await R('швидкі налаштування', '#quick'); await page.click('#quick [data-q="close"]');
   await emitN('update', { apk: { code: 250, name: '1.1.9.50' } }); await sleep(200); await R('плашка оновлення', '#bottom', null);
@@ -1993,7 +1993,7 @@ if (run('18')) try {
   ok('без GPS масштаб той самий, що з GPS — не віддаляємо карту', lost.z > 15 && Math.abs(lost.z - zG) < 0.6, JSON.stringify({ zG, zD: lost.z, acc: lost.acc, spd: lost.spd }));
   ok('без GPS на рейсі — без кілометрового кола похибки', lost.accN === 0, JSON.stringify({ accN: lost.accN, acc: lost.acc }));
   await shot(page, '18-dr-cps');
-  await page.click('#tabGps'); await sleep(400);
+  await page.click('#spdGps'); await sleep(400);
   const gpsTxt = await page.textContent('#panelBody');
   ok('у панелі GPS — де наступна звірка', /Звірка на повороті.*(м|км) · перехрестя чи різкий поворот ліворуч/.test(gpsTxt.replace(/\s+/g, ' ')), gpsTxt.replace(/\s+/g, ' ').slice(0, 400));
   await page.click('#panelClose');
@@ -3266,6 +3266,339 @@ if (run('31')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   ok(`[${T}] прохід 31 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`прохід 31 (${sc.n}) дійшов до кінця`, false, String(e.message).split('\n')[0]); }
+
+/* ============ прохід 32 (1.1.22): GPS — кружечок біля круга швидкості; «Калібрування телефона» на весь екран (три кроки);
+   «Мітки» — кашкет, що світиться зеленим, коли на маршруті є позначки ============ */
+// Датчики телефона підмінено: «рука» повертає телефон на заданий кут навколо заданої осі, гіроскоп і акселерометр показують
+// те, що показали б насправді (з похибкою масштабу, дрейфом, тремтінням руки — як задано).
+// Рух — як у руки: плавно розганяється й плавно зупиняється; гіроскоп віддає миттєву кутову швидкість (як справжній).
+const gyInstall = page => app(page, () => {
+  if (window.__gy) return;
+  const T = window.__app.sensors._test, D = Math.PI / 180, G = { up: [0, 1, 0], scale: 1, bias: [0, 0, 0], noise: 0, on: false, mv: null, axis: null, timer: 0, yawN: 0, native: true };
+  const rotv = (v, a, deg) => { const c = Math.cos(deg * D), s = Math.sin(deg * D), d = a[0] * v[0] + a[1] * v[1] + a[2] * v[2], cr = [a[1] * v[2] - a[2] * v[1], a[2] * v[0] - a[0] * v[2], a[0] * v[1] - a[1] * v[0]];
+    return [v[0] * c + cr[0] * s + a[0] * d * (1 - c), v[1] * c + cr[1] * s + a[1] * d * (1 - c), v[2] * c + cr[2] * s + a[2] * d * (1 - c)]; };
+  const tick = () => {
+    const now = performance.now(); if (!G.on) return;
+    let w = [0, 0, 0];
+    if (G.mv) { const m = G.mv, s = Math.min(1, (now - m.t0) / 1000 / m.T), ang = m.deg * (1 - Math.cos(Math.PI * s)) / 2, d = ang - m.done, a = G.axis || G.up; m.done = ang;
+      G.yawN -= d * G.scale * (G.axis ? G.axis[0] * G.up[0] + G.axis[1] * G.up[1] + G.axis[2] * G.up[2] : 1);      // те, що нарахує служба: навколо вертикалі, без пропусків
+      if (G.axis) G.up = rotv(G.up, G.axis, -d);
+      const inst = s < 1 ? m.deg * Math.PI / (2 * m.T) * Math.sin(Math.PI * s) : 0; w = a.map(x => x * inst); if (s >= 1) G.mv = null; }
+    const nz = () => G.noise ? G.noise * (Math.random() - 0.5) * 3.46 : 0;
+    if (G.raw !== false) T.onMotion({ rotationRate: { beta: w[0] * G.scale + G.bias[0] + nz(), gamma: w[1] * G.scale + G.bias[1] + nz(), alpha: w[2] * G.scale + G.bias[2] + nz() },
+      accelerationIncludingGravity: { x: 9.81 * G.up[0], y: 9.81 * G.up[1], z: 9.81 * G.up[2] }, timeStamp: now });
+  };
+  G.start = o => { Object.assign(G, { mv: null, axis: null, raw: true, native: true }, o || {}); { const m = Math.hypot(...G.up); G.up = G.up.map(x => x / m); } G.on = true; if (!G.timer) { G.timer = setInterval(tick, 16); setInterval(() => { if (G.on && G.native) window.__reis('sens', { var: 0.05, yaw: G.yawN }); }, 1000); } };
+  G.stop = () => { G.on = false; };
+  // поворот на deg градусів (проти годинникової, тобто ЛІВОРУЧ — плюс) із середньою швидкістю rate °/с; axis — вісь в осях телефона (нічого — навколо справжньої вертикалі)
+  G.turn = (deg, rate = 80, axis = null) => { G.axis = axis; G.mv = { deg, T: Math.abs(deg) / rate, t0: performance.now(), done: 0 }; };
+  window.__gy = G;
+});
+const calSt = page => app(page, () => { const C = window.__app.uiCalib.calibState(), box = document.getElementById('calib'), q = s => box.querySelector(s), tx = s => { const e = q(s); return e ? e.textContent.trim().replace(/\s+/g, ' ') : ''; };
+  const r = box.getBoundingClientRect(), ph = q('#cbPhone'), nd = q('#cbBead');
+  return { open: C.open, step: C.step, view: C.view, st: C.st && { step: C.st.step, angle: Math.round(C.st.angle * 10) / 10, want: C.st.want, first: C.st.first, hint: C.st.hint, prog: Math.round(C.st.prog * 100) / 100, left: C.st.left, right: C.st.right, hz: C.st.hz, n: C.st.n, result: C.st.result },
+    box: { l: Math.round(r.left), t: Math.round(r.top), w: Math.round(r.width), h: Math.round(r.height), vw: innerWidth, vh: innerHeight, sw: box.scrollWidth, cw: box.clientWidth },
+    steps: [...box.querySelectorAll('.cb-steps li')].map(li => (li.classList.contains('done') ? '✓' : li.classList.contains('cur') ? '▶' : '·') + li.textContent.trim()).join(' | '),
+    title: tx('#cbTitle') || tx('.cb-res .cb-title'), text: tx('#cbText') || tx('.cb-res .cb-text'), hint: tx('#cbHint'), ang: tx('#cbAng'), prog: q('#cbProg') ? q('#cbProg').style.width : '', foot: tx('.cb-foot'),
+    phone: ph ? ph.style.transform : '', needle: nd ? nd.getAttribute('transform') : '', rest: q('#cbRest') ? q('#cbRest').dataset.to + ':' + (q('#cbRest').getAttribute('d') ? 1 : 0) : '', arc: q('#cbArc') ? q('#cbArc').getAttribute('d') : '', side: q('#cbPh3d') ? q('#cbPh3d').classList.contains('side') : null,
+    rows: [...box.querySelectorAll('.cb-rows > div')].map(d => d.querySelector('span').textContent.trim() + ' = ' + d.querySelector('b').textContent.trim()).join(' | '), btns: [...box.querySelectorAll('.cb-btns button')].map(b => b.textContent.trim()).join(' | '),
+    spoken: (window.__spoken || []).slice(-6), sfx: window.__app.sfx.sfxLog.map(x => x.kind).filter(k => /^cal-/.test(k)).join(), saved: window.__app.S.gyroCal, tab: document.getElementById('tabCal').className, tabLbl: document.getElementById('tabCal').getAttribute('aria-label') }; });
+const waitCal = async (page, fn, ms = 9000) => { let s = null; for (let i = 0; i < ms / 100; i++) { s = await calSt(page); if (fn(s)) return s; await sleep(100); } return s; };
+
+if (run('32')) try {
+  /* ---- А. Логіка калібрування на синтетичних замірах (без екрана й реального часу) ---- */
+  { const { page, ctx, errors } = await newPage(true, { viewport: { width: 360, height: 670 } });
+    const U = await app(page, () => {
+      const C = window.__app.calib, D = Math.PI / 180;
+      const rotv = (v, a, deg) => { const c = Math.cos(deg * D), s = Math.sin(deg * D), d = a[0] * v[0] + a[1] * v[1] + a[2] * v[2], cr = [a[1] * v[2] - a[2] * v[1], a[2] * v[0] - a[0] * v[2], a[0] * v[1] - a[1] * v[0]];
+        return [v[0] * c + cr[0] * s + a[0] * d * (1 - c), v[1] * c + cr[1] * s + a[1] * d * (1 - c), v[2] * c + cr[2] * s + a[2] * d * (1 - c)]; };
+      // Телефон у руці: гіроскоп має похибку масштабу (scale), дрейф (bias), тремтіння (noise). Заміри для екрана — 60 разів на секунду,
+      // але частина може пропасти («екран заїкнувся» — op 'lost'). Служба навігації (o.native) рахує той самий поворот без пропусків,
+      // лише навколо вертикалі, і звітує раз на секунду (o.natScale — якщо вона раптом рахує не так).
+      const sim = o => {
+        const cal = C.newCal(), dt = 1 / 60, sc = o.scale || 1, bias = o.bias || [0, 0, 0]; let t = 100, u = o.up || [0, 1, 0], yawN = 0, k = 0; { const m = Math.hypot(...u); u = u.map(x => x / m); }
+        let seed = 7; const rnd = () => (seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648 - 0.5, nz = () => o.noise ? o.noise * rnd() * 3.46 : 0;
+        const step = (w, lost) => { t += dt; const m = [w[0] * sc + bias[0] + nz(), w[1] * sc + bias[1] + nz(), w[2] * sc + bias[2] + nz()];
+          yawN -= (m[0] * u[0] + m[1] * u[1] + m[2] * u[2]) * dt * (o.natScale || 1);
+          if (!lost) cal.feed({ t, w: m, g: u.map(x => 9.81 * x) });
+          if (o.native && ++k % 60 === 0) cal.native(yawN); };
+        const rest = s => { for (let i = 0; i < Math.round(s * 60); i++) step([0, 0, 0]); };
+        const turn = (deg, s, axis, lost) => { const n = Math.round(s * 60), st = deg / n; for (let i = 0; i < n; i++) { const a = axis || u; step(a.map(x => x * st / dt), lost); if (axis) u = rotv(u, axis, -st); } };
+        const log = [];
+        for (const [op, a, b, c] of o.ops) { if (op === 'rest') rest(a); else if (op === 'turn') turn(a, b, c); else if (op === 'lost') turn(a, b, c, true); else if (op === 'gap') t += a;
+          log.push({ step: cal.st.step, hint: cal.st.hint, ang: Math.round(cal.st.angle * 10) / 10, prog: Math.round(cal.st.prog * 100) / 100, want: cal.st.want }); }
+        const s = cal.st; return { step: s.step, hint: s.hint, left: s.left, right: s.right, first: s.first, want: s.want, pose: s.pose, rigid: s.rigid, bias: s.bias, hz: s.hz, r: s.result, log };
+      };
+      // звичайний хід: 3 с нерухомо → ліворуч на L → затримати → праворуч через пряме на R → затримати
+      const std = (L, R, axis) => [['rest', 3], ['turn', L, 1.2, axis], ['rest', 1.4], ['turn', -(L + R), 2, axis], ['rest', 1.4]];
+      const c25 = Math.cos(25 * D), s25 = Math.sin(25 * D), out = {};
+      out.exact = sim({ ops: std(90, 90) });
+      out.s92 = sim({ scale: 0.92, ops: std(90, 90) });
+      out.s98 = sim({ scale: 0.98, ops: std(90, 90) });
+      out.s955 = sim({ scale: 0.955, ops: std(90, 90) }); out.s965 = sim({ scale: 0.965, ops: std(90, 90) });
+      out.s108 = sim({ scale: 1.08, ops: std(90, 90) });
+      out.leanOwn = sim({ up: [0, c25, s25], ops: std(90, 90, [0, 1, 0]) });          // нахилений телефон повертають навколо його власної довгої осі
+      out.leanVert = sim({ up: [0, c25, s25], ops: std(90, 90) });                    // …і навколо вертикалі (як у тримачі)
+      out.leanOwn92 = sim({ up: [0, c25, s25], scale: 0.92, ops: std(90, 90, [0, 1, 0]) });
+      out.land = sim({ up: [1, 0, 0], ops: std(90, 90) }); out.land2 = sim({ up: [-0.94, 0, 0.34], ops: std(90, 90) });
+      out.offCentre = sim({ ops: std(82, 98) });                                      // «прямо» на початку було на 8° убік — розмах той самий
+      out.rightFirst = sim({ ops: [['rest', 3], ['turn', -90, 1.2], ['rest', 1.4], ['turn', 180, 2], ['rest', 1.4]] });
+      out.early = sim({ ops: [['rest', 3], ['turn', 55, 1], ['rest', 1.6], ['turn', 35, 0.6], ['rest', 1.4]] });
+      out.asym = sim({ ops: std(75, 100) });
+      out.range = sim({ ops: std(72, 72) });
+      out.flat = sim({ up: [0, 0.3, 0.954], ops: [['rest', 4]] });
+      out.moving = sim({ ops: [['turn', 40, 4]] });
+      out.rigidBias = sim({ bias: [0, 0.5, 0], ops: std(90, 90) });
+      out.hand = sim({ bias: [0, 0.4, 0], noise: 1, ops: std(90, 90) });
+      out.drift = sim({ bias: [0, 2, 0], ops: [['rest', 12]] });
+      out.gap = sim({ ops: [['rest', 3], ['turn', 40, 0.6], ['gap', 1.5], ['rest', 0.2]] });
+      // екран «заїкнувся» на 0,3 с посеред повороту (заміри пропали, телефон повертався далі) — кут не загублено
+      out.stutter = sim({ ops: [['rest', 3], ['turn', 30, 0.4], ['lost', 22.5, 0.3], ['turn', 37.5, 0.5], ['rest', 1.4]] });
+      // …а якщо в заїканні телефон саме смикнули швидше (20° за 0,15 с), екран недорахує ~9° за кожен такий раз:
+      const jerky = (L, R, axis) => [['rest', 3.2], ['turn', 40, 0.53, axis], ['lost', 20, 0.15, axis], ['turn', L - 60, (L - 60) / 75, axis], ['rest', 1.8], ['turn', -(L + R - 60), (L + R - 60) / 75, axis], ['lost', -20, 0.15, axis], ['turn', -40, 0.53, axis], ['rest', 1.8]];
+      out.jankWeb = sim({ ops: jerky(90, 90) });                                         // служби немає — звіритись нема з чим
+      out.jankNat = sim({ native: true, ops: jerky(90, 90) });                           // служба є — розмах беремо в неї
+      out.jankNat92 = sim({ native: true, scale: 0.92, ops: jerky(90, 90) });
+      const stdN = (L, R, axis) => [['rest', 3.2], ['turn', L, 1.2, axis], ['rest', 1.8], ['turn', -(L + R), 2, axis], ['rest', 1.8]];
+      out.nat = sim({ native: true, ops: stdN(90, 90) }); out.nat92 = sim({ native: true, scale: 0.92, ops: stdN(90, 90) });
+      out.natLeanOwn = sim({ native: true, up: [0, c25, s25], ops: stdN(90, 90, [0, 1, 0]) });
+      out.natWrong = sim({ native: true, natScale: 0.5, scale: 0.92, ops: stdN(90, 90) });   // служба рахує щось не те — їй не віримо
+      out.natBias = sim({ native: true, bias: [0, 0.5, 0], ops: stdN(90, 90) });
+      out.tooFar = sim({ ops: [['rest', 3], ['turn', 131, 1.6], ['rest', 1.4]] });
+      out.laidDown = sim({ ops: [['rest', 3], ['turn', 80, 1.2, [1, 0, 0]], ['rest', 0.5]] });      // на другому кроці телефон поклали екраном догори
+      out.judge = [C.judge({ left: 86.6, right: 86.6 }), C.judge({ left: 87, right: 87 }), C.judge({ left: 93.5, right: 93.5 }), C.judge({ left: 94, right: 94 }), C.judge({ left: 78, right: 78 }), C.judge({ left: 77, right: 77 }), C.judge({ left: 104, right: 104 }), C.judge({ left: 105, right: 105 })].map(r => [r.ok, r.fine, r.k, r.why].join(':'));
+      out.pose = [C.poseOf([0, 1, 0]), C.poseOf([0, Math.cos(35 * D), Math.sin(35 * D)]), C.poseOf([0, 0, 1]), C.poseOf([1, 0, 0.1])].map(p => p.kind + ':' + p.lean + ':' + p.side);
+      // навігація: кут від служби множиться на поправку, без стрибка в мить, коли поправка змінилась
+      const N = window.__app.nav, S = window.__app.S; S.gyroCal = null;
+      const y = [N.calYaw(10), N.calYaw(100)]; S.gyroCal = { v: 1, k: 1.1, at: Date.now() }; y.push(N.calYaw(100), N.calYaw(190)); S.gyroCal = null; y.push(N.calYaw(190), N.calYaw(100));
+      out.calYaw = y.map(v => Math.round(v * 10) / 10).join();
+      out.fresh = [C.calFresh(), (S.gyroCal = { v: 1, k: 1, at: Date.now() - 80 * 864e5 }, C.calFresh()), (S.gyroCal = { v: 1, k: 1, at: Date.now() - 91 * 864e5 }, C.calFresh()), (S.gyroCal = { v: 1, k: 7, at: Date.now() }, C.gyroK())].join(); S.gyroCal = null;
+      return out; });
+    const near = (v, x, e = 0.3) => v != null && Math.abs(v - x) <= e;
+    const R = k => U[k].r || {};
+    ok('калібрування, логіка: точний гіроскоп, рівно тримають — три кроки, 90° телефон бачить як 90,0°, поправка не потрібна (k = 1); 60 замірів/с', U.exact.step === 4 && R('exact').ok && R('exact').fine && R('exact').k === 1 && near(R('exact').seen90, 90, 0.1) && near(U.exact.left, 90, 0.1) && near(U.exact.right, 90, 0.1) && U.exact.first === -1 && U.exact.pose.kind === 'upright' && U.exact.hz >= 58 && U.exact.hz <= 62, JSON.stringify(U.exact));
+    ok('калібрування, логіка: гіроскоп занижує на 8 % (90° бачить як 82,8°) — поправка ×1,087; завищує на 8 % (97,2°) — ×0,926', R('s92').ok && !R('s92').fine && near(R('s92').seen90, 82.8, 0.1) && near(R('s92').k, 1.087, 0.002) && near(R('s92').pct, 8.7, 0.15) && R('s108').ok && !R('s108').fine && near(R('s108').k, 0.9259, 0.002), JSON.stringify([R('s92'), R('s108')]));
+    ok('калібрування, логіка: відхилення до ±4 % (тут 2 %: 88,2°) — «гіроскоп у нормі», поправка 1: неточність руки не псує точний датчик; межа — між 3,5 % і 4,5 %', R('s98').ok && R('s98').fine && R('s98').k === 1 && near(R('s98').seen90, 88.2, 0.1) && near(R('s98').kRaw, 1.0204, 0.001) && R('s965').fine && R('s965').k === 1 && !R('s955').fine && near(R('s955').k, 1.0471, 0.001), JSON.stringify([R('s98'), R('s965'), R('s955')]));
+    ok('калібрування, логіка: межі оцінки — 86,6°…93,5° ще норма, 87° теж, 94° уже поправка; 78°…104° приймаємо, 77° і 105° — «повторіть»', U.judge.join(' ') === 'true:true:1:' + ' true:true:1:' + ' true:true:1:' + ' true:false:0.9574:' + ' true:false:1.1538:' + ' false:false:1.1688:range' + ' true:false:0.8654:' + ' false:false:0.8571:range', U.judge.join(' '));
+    ok('калібрування, логіка: телефон із нахилом 25° — хоч навколо вертикалі (як у тримачі), хоч навколо власної довгої осі (як зручно руці): однаково 90,0° — нахил не дає хибної поправки (раніше було б 81,6°, тобто +10 %)',
+      R('leanOwn').ok && R('leanOwn').fine && near(R('leanOwn').seen90, 90, 0.15) && R('leanVert').fine && near(R('leanVert').seen90, 90, 0.15) && U.leanOwn.pose.kind === 'tilted' && U.leanOwn.pose.lean === 25 && !R('leanOwn92').fine && R('leanOwn92').seen90 > 82.5 && R('leanOwn92').seen90 < 84 && near(R('leanOwn92').k, 1.08, 0.01), JSON.stringify([R('leanOwn'), R('leanVert'), R('leanOwn92')]));
+    ok('калібрування, логіка: телефон набік (альбомно), рівно чи з нахилом 20° — так само 90,0°; у результаті позначено «набік»', R('land').ok && near(R('land').seen90, 90, 0.15) && U.land.pose.side === true && U.land.pose.kind === 'upright' && R('land2').ok && near(R('land2').seen90, 90, 0.15) && U.land2.pose.side === true && U.land2.pose.kind === 'tilted', JSON.stringify([U.land.pose, R('land'), U.land2.pose, R('land2')]));
+    ok('калібрування, логіка: «прямо» на початку було на 8° убік (ліворуч 82°, праворуч 98°) — розмах той самий 180°, результат 90,0°', R('offCentre').ok && R('offCentre').fine && near(R('offCentre').left, 82, 0.2) && near(R('offCentre').right, 98, 0.2) && near(R('offCentre').seen90, 90, 0.1), JSON.stringify(R('offCentre')));
+    ok('калібрування, логіка: спершу повернули праворуч — теж зараховано (перший бік — праворуч, далі просимо ліворуч)', R('rightFirst').ok && U.rightFirst.first === 1 && near(U.rightFirst.left, 90, 0.2) && near(U.rightFirst.right, 90, 0.2), JSON.stringify({ first: U.rightFirst.first, log: U.rightFirst.log }));
+    ok('калібрування, логіка: зупинились на 55° — не зараховано, підказка «ще трохи»; довели до 90° — зараховано', U.early.log[2].step === 2 && U.early.log[2].hint === 'more' && U.early.log[4].step === 3 && near(U.early.left, 90, 0.2), JSON.stringify(U.early.log));
+    ok('калібрування, логіка: ліворуч 75°, праворуч 100° — надто по-різному: «повторіть» (asym); обидва боки по 72° — це не 90°: «повторіть» (range)', U.asym.step === 4 && !R('asym').ok && R('asym').why === 'asym' && !R('range').ok && R('range').why === 'range', JSON.stringify([R('asym'), R('range')]));
+    ok('калібрування, логіка: телефон лежить — крок 1 не йде, підказка «поставте вертикально»; телефон рухають — «тримайте нерухомо»; на кроці 2 поклали екраном догори — теж «вертикально»', U.flat.step === 1 && U.flat.hint === 'upright' && U.moving.step === 1 && U.moving.hint === 'hold' && U.moving.log[0].prog === 0 && U.laidDown.step === 2 && U.laidDown.hint === 'upright' && U.laidDown.left == null, JSON.stringify([U.flat.log, U.moving.log, U.laidDown.log]));
+    ok('калібрування, логіка: повернули на 131° — забагато, не зараховано; заміри урвались на 1,5 с посеред повороту (програму згорнули) — починаємо з кроку 1', U.tooFar.step === 2 && U.tooFar.hint === 'tooFar' && U.tooFar.left == null && U.gap.step === 1 && U.gap.left == null, JSON.stringify([U.tooFar.log, U.gap.log]));
+    ok('калібрування, логіка: екран «заїкнувся» на 0,3 с посеред рівного повороту — кут не загублено (90,0°), крок зараховано', U.stutter.step === 3 && near(U.stutter.left, 90, 0.5), JSON.stringify([U.stutter.left, U.stutter.log]));
+    ok('калібрування, логіка: є кут від служби навігації — розмах беремо в неї (та сама відповідь: 90,0° і 82,8°), затримка довша — 1,5 с', R('nat').ok && R('nat').src === 'native' && near(R('nat').seen90, 90, 0.2) && R('nat').fine && R('nat92').src === 'native' && near(R('nat92').seen90, 82.8, 0.2) && near(R('nat92').k, 1.087, 0.003), JSON.stringify([R('nat'), R('nat92')]));
+    ok(`калібрування, логіка: у заїканні телефон смикнули — заміри екрана недорахували (${R('jankNat').web}° на бік замість 90°), але служба нічого не губить: результат 90,0°, гіроскоп «у нормі» (без служби тут вийшла б хибна поправка +${Math.round((90 / R('jankNat').web - 1) * 100)} %)`, R('jankNat').ok && R('jankNat').src === 'native' && R('jankNat').web < 87 && near(R('jankNat').seen90, 90, 0.3) && R('jankNat').fine && R('jankNat').k === 1 && near(R('jankNat92').seen90, 82.8, 0.4) && !R('jankNat92').fine, JSON.stringify([R('jankNat'), R('jankNat92')]));
+    ok('калібрування, логіка: те саме без служби (браузер) — звіритись нема з чим, заїкань забагато: чесно «повторіть, повертайте повільніше», а не хибна поправка', U.jankWeb.step === 4 && !R('jankWeb').ok && R('jankWeb').why === 'jank' && R('jankWeb').src === 'web' && R('jankWeb').loss > 20, JSON.stringify(R('jankWeb')));
+    ok('калібрування, логіка: нахилений телефон повертають навколо власної осі — служба бачить менше (163°: вона рахує навколо вертикалі), але заміри екрана знають, як повертали: 90,0°', R('natLeanOwn').ok && R('natLeanOwn').src === 'native' && near(R('natLeanOwn').native, 163.1, 0.6) && near(R('natLeanOwn').seen90, 90, 0.3), JSON.stringify(R('natLeanOwn')));
+    ok('калібрування, логіка: служба нарахувала вдвічі менше, ніж екран (щось не те) — їй не віримо, рахуємо із замірів екрана; дрейф служби 0,5 °/с на закріпленому телефоні — виміряно в спокої й віднято', R('natWrong').ok && R('natWrong').src === 'web' && near(R('natWrong').seen90, 82.8, 0.2) && R('natBias').src === 'native' && near(R('natBias').seen90, 90, 0.4), JSON.stringify([R('natWrong'), R('natBias')]));
+    ok('калібрування, логіка: телефон закріплено (шуму немає), гіроскоп дрейфує 0,5 °/с — дрейф виміряно й віднято: 90,0°', U.rigidBias.rigid === true && R('rigidBias').ok && near(R('rigidBias').seen90, 90, 0.1) && near(Math.abs(R('rigidBias').bias), 0.5, 0.02), JSON.stringify([U.rigidBias.rigid, R('rigidBias')]));
+    ok('калібрування, логіка: телефон у руці (тремтіння 1 °/с, рука «пливе» 0,4 °/с) — це не дрейф датчика, не віднімаємо; результат у межах 90 ± 1,5°, «у нормі»', U.hand.rigid === false && R('hand').ok && R('hand').fine && near(R('hand').seen90, 90, 1.5), JSON.stringify([U.hand.rigid, R('hand')]));
+    ok('калібрування, логіка: телефон увесь час повертається на 2 °/с — крок 1 не зараховано чотири рази поспіль, далі чесно: «не тримали нерухомо або гіроскоп пливе»', U.drift.step === 4 && !R('drift').ok && R('drift').why === 'bias' && near(R('drift').bias, 2, 0.05), JSON.stringify([U.drift.log, R('drift')]));
+    ok('калібрування, логіка: положення телефона — вертикально (0°), з нахилом 35°, лежить (90°), набік', U.pose.join(' ') === 'upright:0:false tilted:35:false flat:90:false upright:6:true', U.pose.join(' '));
+    ok('ведення: кут повороту від служби множиться на поправку телефона (k = 1,1: 90° → 99°), без стрибка в мить, коли поправку змінено', U.calYaw === '10,100,100,199,199,109', U.calYaw);
+    ok('калібрування «свіже» 90 днів (80 днів — так, 91 — ні); нісенітна поправка зі сховища (×7) не застосовується', U.fresh === 'false,true,false,1', U.fresh);
+    ok('прохід 32 (логіка) без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+
+  /* ---- Б. Екран: кружечок GPS, нижня стрічка, калібрування від початку до кінця ---- */
+  for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 'tablet', 'xiaomi'].includes(x.n)), { n: 'tabland', w: 1272, h: 702, dpr: 1, title: 'планшет набік 1272×702' }].filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) {
+    const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+    const T = sc.title, main = sc.n === 'S10', emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    const land = sc.w > sc.h;
+    const box = sel => app(page, sel => { const e = document.querySelector(sel); if (!e) return null; const r = e.getBoundingClientRect(), cs = getComputedStyle(e), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+      return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height), cx: Math.round(r.left + r.width / 2), cy: Math.round(r.top + r.height / 2), seen: !!h && (h === e || e.contains(h)), color: cs.color, bg: cs.backgroundColor, border: cs.borderTopColor, vis: cs.visibility !== 'hidden' && cs.display !== 'none' && r.width > 0, cls: e.className, label: e.getAttribute('aria-label') }; }, sel);
+    // а) GPS ще немає: кружечок біля круга швидкості червоний; нижня стрічка спокійна
+    await sleep(500);
+    const g0 = await box('#spdGps'), spd = await box('#speed'), bt = await box('#bottom');
+    ok(`[${T}] GPS — кружечок праворуч унизу від круга швидкості (як знак обмеження — праворуч угорі): 44×44, виступає за коло, не лягає на нижню плашку, нічим не перекритий`, g0.w === 44 && g0.h === 44 && g0.seen && g0.cx > spd.r - 12 && g0.cx < spd.r + 16 && g0.cy > spd.cy + 20 && (bt.t >= spd.b ? g0.b <= bt.t - 2 : g0.b <= sc.h - 4) && g0.b <= spd.b + 10 && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ g0, spd, bt: bt.t, lay: await page.evaluate(layoutCheck) }));
+    ok(`[${T}] GPS немає — кружечок червоний, для озвучення «${g0.label}»`, /g-bad/.test(g0.cls) && /rgb\(2\d\d, \d\d, \d\d\)/.test(g0.bg) && !!g0.label && !/^GPS ±/.test(g0.label), JSON.stringify(g0));
+    await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(900);
+    const g1 = await box('#spdGps');
+    ok(`[${T}] GPS є — кружечок зелений («${g1.label}»)`, /g-ok/.test(g1.cls) && g1.color === 'rgb(47, 158, 98)' && /^GPS ±/.test(g1.label), JSON.stringify(g1));
+    // знак обмеження праворуч угорі й кружечок GPS праворуч унизу — один над одним, не накладаються
+    await app(page, () => { const e = document.getElementById('spdLim'); e.hidden = false; e.textContent = '50'; });
+    const lim = await box('#spdLim'), g1b = await box('#spdGps');
+    ok(`[${T}] знак обмеження «50» — праворуч угорі, кружечок GPS — праворуч унизу: один під одним, не торкаються`, Math.abs(lim.cx - g1b.cx) <= 6 && g1b.t - lim.b >= 8, JSON.stringify({ lim, g1b }));
+    await app(page, () => { document.getElementById('spdLim').hidden = true; });
+    await shot(page, '45-gps-badge-' + sc.n);
+    if (main) {
+      await page.click('#spdGps'); await sleep(350);
+      const p1 = await app(page, () => ({ title: document.getElementById('panelTitle').textContent, open: !document.getElementById('panel').hidden, body: document.getElementById('panelBody').textContent.slice(0, 200) }));
+      ok(`[${T}] дотик до кружечка GPS відкриває панель GPS (те саме, що раніше відкривала вкладка внизу)`, p1.open && /GPS/.test(p1.title) && /Супутники/.test(await page.textContent('#panelBody')), JSON.stringify(p1));
+      await page.click('#panelClose'); await sleep(250);
+      // попередження про камеру стоїть правіше й кружечка не зачіпає
+      await app(page, () => { const c = document.getElementById('cam'); c.hidden = false; document.getElementById('camMax').textContent = '50'; document.getElementById('camDist').textContent = '300 м'; document.getElementById('camLbl').textContent = 'камера'; });
+      const cam = await box('#cam'), g2 = await box('#spdGps');
+      ok(`[${T}] попередження про камеру — правіше кружечка GPS, не накладаються; у межах екрана`, cam.l >= g2.r + 4 && cam.r <= sc.w - 4, JSON.stringify({ cam, g2 }));
+      await app(page, () => { document.getElementById('cam').hidden = true; });
+    }
+    // б) нижня стрічка: значки лінією, один колір; «Телефон» і «Мітки» не світяться
+    const tb = await app(page, () => { const bs = [...document.querySelectorAll('#tabs > button')]; return { order: bs.map(b => b.dataset.panel || b.id).join(), labels: bs.map(b => b.textContent.trim()).join('|'),
+      colors: bs.filter(b => !b.classList.contains('main')).map(b => getComputedStyle(b).color), tc: bs.filter(b => b.querySelector('.tc')).map(b => getComputedStyle(b.querySelector('.tc')).backgroundColor), fills: [...document.querySelectorAll('#tabCal svg [fill]:not([fill="none"]):not([fill="currentColor"]), #tabRep svg [fill]:not([fill="none"]):not([fill="currentColor"])')].length,
+      cal: document.getElementById('tabCal').className, calLbl: document.getElementById('tabCal').getAttribute('aria-label'), rep: document.getElementById('tabRep').className, repLbl: document.getElementById('tabRep').getAttribute('aria-label'), badge: !!document.querySelector('#tabRep .badge') }; });
+    ok(`[${T}] нижня стрічка: Телефон · Події · Рейс · Місця · Мітки; значки «Телефон» (телефон зі стрілками) і «Мітки» (кашкет) — лінією, без кольорових плям, того самого кольору, що й сусідні`, tb.order === 'tabCal,feed,trip,places,tabRep' && /^Телефон\|Події\d*\|Рейс\|Місця\|Мітки$/.test(tb.labels) && new Set(tb.colors).size === 1 && tb.tc.every(c => c === 'rgba(0, 0, 0, 0)') && tb.fills === 0, JSON.stringify(tb));
+    ok(`[${T}] калібрування ще не робили — значок не світиться («${tb.calLbl}»); позначок на маршруті немає — «Мітки» не світяться, числа немає`, !/cal-ok/.test(tb.cal) && /ще не робили/.test(tb.calLbl) && !/has/.test(tb.rep) && !tb.badge && tb.repLbl === 'Позначити подію на дорозі', JSON.stringify(tb));
+    ok(`[${T}] нижня стрічка: нічого не накладається й не обрізано`, (await page.evaluate(layoutCheck)).length === 0 && (await readCheck(page, '#tabs')).length === 0, JSON.stringify([await page.evaluate(layoutCheck), await readCheck(page, '#tabs')]));
+
+    // в) калібрування: відкривається на весь екран
+    await gyInstall(page);
+    const up = sc.n === 'tabland' || sc.n === 'land' ? [1, 0, 0.2] : [0, 0.94, 0.34];           // телефон сторч із нахилом 20°; планшет і «телефон набік» — альбомно
+    await app(page, ([up, scale]) => window.__gy.start({ up, scale, noise: 0.4 }), [up, main ? 0.9 : 1]);
+    await sleep(700);
+    await app(page, () => { window.__spoken.length = 0; window.__vib = []; window.ReisNative.vibrate = ms => { window.__vib.push(ms); }; });
+    await page.click('#tabCal'); await sleep(450);
+    const c1 = await calSt(page);
+    ok(`[${T}] «Телефон» відкриває калібрування на ВЕСЬ екран: заголовок, кроки «1 Тримати · 2 Ліворуч · 3 Праворуч · Готово», крок 1 підсвічено`, c1.open && c1.box.l === 0 && c1.box.t === 0 && c1.box.w === c1.box.vw && c1.box.h === c1.box.vh && c1.box.sw <= c1.box.cw + 1 && c1.steps === '▶1Тримати | ·2Ліворуч | ·3Праворуч | ·Готово' && c1.step === 1, JSON.stringify(c1));
+    ok(`[${T}] крок 1: «Тримайте телефон нерухомо» — як у тримачі; унизу пояснено, навіщо це (коли зникає GPS)`, /^Крок 1\. Тримайте телефон нерухомо$/.test(c1.title) && /як він стоїть у тримачі/.test(c1.text) && (land && sc.h <= 520 ? true : /коли зникає GPS/.test(c1.foot)), JSON.stringify({ title: c1.title, text: c1.text, foot: c1.foot }));
+    ok(`[${T}] крок 1: усе читається (не дрібніше 12, не обрізано, не перекрито)`, (await readCheck(page, '#calib')).length === 0, JSON.stringify(await readCheck(page, '#calib')));
+    await shot(page, '46-calib-1-' + sc.n);
+    // крок 1 зараховано через ~2,5 с: звук, вібрація, голос; на екрані — куди повертати
+    const c2 = await waitCal(page, s => s.step === 2, 6000); await sleep(250);
+    const c2b = await calSt(page), nat2 = await app(page, () => window.__vib.join());
+    ok(`[${T}] нерухомо 2,5 с — крок 1 зараховано: сигнал, голос «Тепер поверніть ліворуч…», крок 2 підсвічено`, c2.step === 2 && /cal-ok/.test(c2b.sfx) && c2b.spoken.some(x => /поверніть ліворуч на девʼяносто/.test(x)) && c2b.steps === '✓1Тримати | ▶2Ліворуч | ·3Праворуч | ·Готово', JSON.stringify({ steps: c2b.steps, sfx: c2b.sfx, spoken: c2b.spoken, nat2 }));
+    ok(`[${T}] крок 2: «Поверніть ліворуч на 90°», пояснено як («лівий край до себе…», до положення «ребром»); на шкалі ціль — 90° ліворуч, пунктир до неї показує, куди й скільки повертати${land ? '; телефон на екрані — набік, як і справжній' : ''}`, /^Крок 2\. Поверніть ліворуч на 90°$/.test(c2b.title) && /лівий край до себе, правий від себе/.test(c2b.text) && /ребром/.test(c2b.text) && c2b.rest === 'l:1' && c2b.side === (up[0] === 1)
+      && await app(page, () => getComputedStyle(document.getElementById('cbGoalL')).display !== 'none' && getComputedStyle(document.getElementById('cbGoalR')).display === 'none'), JSON.stringify({ title: c2b.title, text: c2b.text, rest: c2b.rest, side: c2b.side }));
+    ok(`[${T}] крок 2: усе читається`, (await readCheck(page, '#calib')).length === 0, JSON.stringify(await readCheck(page, '#calib')));
+    // повертаємо ліворуч; на півдорозі телефон на екрані й стрілка шкали повернуті так само
+    await app(page, () => window.__gy.turn(45, 45)); await sleep(1400);
+    const c3 = await calSt(page);
+    await shot(page, '46-calib-2-' + sc.n);
+    const kS = main ? 0.9 : 1, a45 = 45 * kS;
+    ok(`[${T}] телефон повернули ліворуч на 45° — телефон на екрані повертається разом зі справжнім, жовта дуга й кулька на шкалі показують кут (${c3.ang}); ще не зараховано`, c3.step === 2 && Math.abs(c3.st.angle + a45) < 3 && Math.abs(parseFloat((c3.phone.match(/rotateY\(([-\d.]+)deg/) || [])[1]) - a45) < 3 && /^translate\(-/.test(c3.needle) && /^M-/.test(c3.arc) && /ліворуч$/.test(c3.ang) && c3.st.left == null, JSON.stringify({ ang: c3.ang, phone: c3.phone, bead: c3.needle, arc: c3.arc, st: c3.st }));
+    if (main) {
+      // зупинились на 55° і стоїмо: підказка на екрані й голосом (екрана «ребром» не видно)
+      await app(page, () => window.__gy.turn(10, 20)); await sleep(3000);
+      const h1 = await calSt(page);
+      ok(`[${T}] зупинились на 55° — не зараховано; підказка «Ще трохи — до положення „ребром“» на екрані й голосом`, h1.step === 2 && h1.st.hint === 'more' && /Ще трохи/.test(h1.hint) && h1.spoken.some(x => /Ще трохи/.test(x)), JSON.stringify({ hint: h1.hint, spoken: h1.spoken, st: h1.st }));
+      await app(page, () => window.__gy.turn(35, 45));
+    } else await app(page, () => window.__gy.turn(45, 45));
+    const c4 = await waitCal(page, s => s.step === 3, 6000); await sleep(250);
+    const c4b = await calSt(page);
+    ok(`[${T}] довернули до 90° й затримали на секунду — зафіксовано: сигнал, голос «Ліворуч є. Тепер праворуч», крок 3`, c4.step === 3 && Math.abs(c4.st.left - 90 * kS) < 3 && c4b.spoken.some(x => /Ліворуч є\. Тепер праворуч/.test(x)) && c4b.sfx.split(',').length >= 2 && c4b.steps === '✓1Тримати | ✓2Ліворуч | ▶3Праворуч | ·Готово' && /^Крок 3\. Тепер праворуч на 90°$/.test(c4b.title) && /правий край до себе/.test(c4b.text) && /^r:/.test(c4b.rest), JSON.stringify({ st: c4.st, steps: c4b.steps, title: c4b.title, spoken: c4b.spoken, sfx: c4b.sfx }));
+    await shot(page, '46-calib-3-' + sc.n);
+    await app(page, () => window.__gy.turn(-180, 60));
+    const c5 = await waitCal(page, s => s.step === 4, 9000); await sleep(300);
+    const c5b = await calSt(page), r5 = c5b.st.result || {};
+    await shot(page, '46-calib-4-' + sc.n);
+    if (main) {
+      ok(`[${T}] праворуч через пряме до 90° і затримали — «Телефон відкалібровано»: 90° цей телефон бачить як ${r5.seen90}° (гіроскоп занижує на 10 %), поправка +11 %; голос «Готово…»`, c5.step === 4 && r5.ok && !r5.fine && Math.abs(r5.seen90 - 81) < 2.5 && Math.abs(r5.k - 1.111) < 0.035 && /Телефон відкалібровано/.test(c5b.title) && /бачить як = 8\d,\d° \| Поправка = \+1\d,\d % \| Телефон тримали = з нахилом 20°/.test(c5b.rows) && c5b.spoken.some(x => /Готово\. Телефон відкалібровано/.test(x)) && /cal-done/.test(c5b.sfx) && c5b.btns === 'Готово | Повторити' && c5b.steps === '✓1Тримати | ✓2Ліворуч | ✓3Праворуч | ✓Готово', JSON.stringify({ r5, rows: c5b.rows, title: c5b.title, spoken: c5b.spoken, sfx: c5b.sfx, btns: c5b.btns, steps: c5b.steps }));
+      ok(`[${T}] кожен зарахований крок — ще й вібрацією (екрана «ребром» не видно): коротко, коротко, довго`, /(^|,)160,(.*,)?160,(.*,)?350$/.test(await app(page, () => window.__vib.join())), await app(page, () => window.__vib.join()));
+    } else ok(`[${T}] праворуч через пряме до 90° і затримали — «Телефон відкалібровано»: гіроскоп точний (90° бачить як ${r5.seen90}°), поправка не потрібна; телефон тримали ${up[0] === 1 ? 'набік' : 'з нахилом'}`, c5.step === 4 && r5.ok && r5.fine && r5.k === 1 && Math.abs(r5.seen90 - 90) < 2.5 && /Поправка = не потрібна/.test(c5b.rows) && (up[0] === 1 ? /набік/.test(c5b.rows) : /з нахилом 20°/.test(c5b.rows)) && /Гіроскоп цього телефона точний/.test(c5b.text), JSON.stringify({ r5, rows: c5b.rows, text: c5b.text }));
+    ok(`[${T}] результат: усе читається, кнопки «Готово» й «Повторити» в межах екрана`, (await readCheck(page, '#calib')).length === 0 && (b => b.w >= 120 && b.h >= 48 && b.b <= sc.h && b.r <= sc.w)(await box('#calib [data-cb="save"]')), JSON.stringify([await readCheck(page, '#calib'), await box('#calib [data-cb="save"]')]));
+    // «Готово» — збережено, значок зелений
+    await page.click('#calib [data-cb="save"]'); await sleep(500);
+    const d1 = await calSt(page), tabC = await box('#tabCal'), tcBg = await app(page, () => getComputedStyle(document.querySelector('#tabCal .tc')).backgroundColor), toast1 = await page.textContent('#toasts');
+    ok(`[${T}] «Готово» — екран закрито, калібрування збережено, значок «Телефон» унизу зелений («${d1.tabLbl}»), коротке підтвердження`, !d1.open && d1.saved && d1.saved.v === 1 && Math.abs(d1.saved.k - (main ? 1.111 : 1)) < 0.035 && Date.now() - d1.saved.at < 20000 && /cal-ok/.test(d1.tab) && tabC.color === 'rgb(47, 158, 98)' && tcBg !== 'rgba(0, 0, 0, 0)' && /зроблено/.test(d1.tabLbl) && /Калібрування збережено/.test(toast1), JSON.stringify({ saved: d1.saved, tab: d1.tab, color: tabC.color, tcBg, lbl: d1.tabLbl, toast1 }));
+    await shot(page, '46-calib-5-done-' + sc.n);
+    ok(`[${T}] після калібрування головний екран цілий: нічого не накладається`, (await page.evaluate(layoutCheck)).length === 0, JSON.stringify(await page.evaluate(layoutCheck)));
+    if (main) {
+      // поправка працює у веденні: служба нарахувала 90° — ведення бере 100° (стільки фура повернула насправді)
+      const y = await app(page, async () => { const N = window.__app.nav; window.__reis('sens', { var: 0.05, yaw: 0 }); const a = N.debugState().yawNow; window.__reis('sens', { var: 0.05, yaw: 90 }); return [a, N.debugState().yawNow]; });
+      ok(`[${T}] у веденні: служба нарахувала поворот 90° — з поправкою цього телефона це ${(y[1] - y[0]).toFixed(1)}° (стільки фура повернула насправді)`, Math.abs((y[1] - y[0]) - 90 * d1.saved.k) < 0.2 && Math.abs((y[1] - y[0]) - 100) < 3, JSON.stringify(y));
+      // перезапуск: збережено
+      await page.reload(); await page.waitForFunction(() => window.__app && document.getElementById('boot') === null, null, { timeout: 15000 }); await sleep(500);
+      const rl = await app(page, () => ({ k: window.__app.S.gyroCal && window.__app.S.gyroCal.k, tab: document.getElementById('tabCal').className, gk: window.__app.calib.gyroK() }));
+      ok(`[${T}] після перезапуску калібрування на місці: значок зелений, поправка та сама`, /cal-ok/.test(rl.tab) && Math.abs(rl.k - d1.saved.k) < 1e-6 && rl.gk === rl.k, JSON.stringify(rl));
+      // минуло понад 90 днів — значок знову блідий: варто повторити
+      await app(page, () => { const S = window.__app.S; S.gyroCal = { ...S.gyroCal, at: Date.now() - 91 * 864e5 }; window.__app.bus.emit('calib', S.gyroCal); }); await sleep(200);
+      const old = await box('#tabCal');
+      ok(`[${T}] калібруванню понад 90 днів — значок знову не світиться («${old.label}»); поправка у веденні лишається`, !/cal-ok/.test(old.cls) && /давно/.test(old.label) && await app(page, () => window.__app.calib.gyroK() > 1.08), JSON.stringify(old));
+      // «Повторити» і хрестик: без «Готово» нічого не змінюється
+      await gyInstall(page); await app(page, () => window.__gy.start({ up: [0, 1, 0], scale: 1, noise: 0.3, native: false })); await sleep(500);      // тут — без служби навігації: лише заміри екрана
+      await page.click('#tabCal'); await waitCal(page, s => s.step === 2, 6000);
+      // спершу праворуч — теж зараховано; кроки вгорі міняються місцями
+      await app(page, () => window.__gy.turn(-90, 60));
+      const rf = await waitCal(page, s => s.step === 3, 7000); await sleep(250); const rfb = await calSt(page);
+      ok(`[${T}] спершу повернули праворуч — зараховано без суперечок: «Праворуч є. Тепер ліворуч», кроки вгорі «2 Праворуч ✓ · 3 Ліворуч»`, rf.step === 3 && rf.st.first === 1 && rfb.steps === '✓1Тримати | ✓2Праворуч | ▶3Ліворуч | ·Готово' && /^Крок 3\. Тепер ліворуч на 90°$/.test(rfb.title) && rfb.spoken.some(x => /Праворуч є\. Тепер ліворуч/.test(x)) && /^l:/.test(rfb.rest), JSON.stringify({ st: rf.st, steps: rfb.steps, title: rfb.title, spoken: rfb.spoken }));
+      // другий бік не довели (лише 75°) — «Не вийшло», чесно пояснено; «Повторити» починає з кроку 1
+      await app(page, () => window.__gy.turn(162, 60));
+      const bad = await waitCal(page, s => s.step === 4, 9000); await sleep(300); const badb = await calSt(page);
+      ok(`[${T}] в один бік 90°, в інший лише 72° — «Не вийшло»: пояснено чому й що зробити; голос «Не вийшло…»; кнопки «Повторити» і «Закрити»`, bad.step === 4 && bad.st.result && !bad.st.result.ok && bad.st.result.why === 'asym' && /Не вийшло/.test(badb.title) && /надто по-різному/.test(badb.text) && /ребром/.test(badb.text) && badb.spoken.some(x => /Не вийшло/.test(x)) && /cal-bad/.test(badb.sfx) && badb.btns === 'Повторити | Закрити', JSON.stringify({ r: bad.st.result, title: badb.title, text: badb.text, btns: badb.btns, sfx: badb.sfx }));
+      await shot(page, '46-calib-bad-' + sc.n);
+      ok(`[${T}] «Не вийшло»: усе читається`, (await readCheck(page, '#calib')).length === 0, JSON.stringify(await readCheck(page, '#calib')));
+      await page.click('#calib [data-cb="again"]'); await sleep(300);
+      const ag = await calSt(page);
+      ok(`[${T}] «Повторити» — знову крок 1`, ag.open && ag.step === 1 && /^Крок 1/.test(ag.title), JSON.stringify({ step: ag.step, title: ag.title }));
+      await page.click('#calib [data-cb="x"]'); await sleep(250);
+      const cl = await calSt(page);
+      ok(`[${T}] хрестик закриває; без «Готово» збережене калібрування не змінилось`, !cl.open && Math.abs(cl.saved.k - d1.saved.k) < 1e-6, JSON.stringify(cl.saved));
+      await page.click('#tabCal'); await sleep(300);
+      const bk = await app(page, () => { const was = !document.getElementById('calib').hidden, r = window.__reisBack(); return { was, r, open: !document.getElementById('calib').hidden, again: window.__reisBack() }; });
+      ok(`[${T}] системна кнопка «Назад» закриває калібрування (а не згортає програму)`, bk.was && bk.r === true && !bk.open && bk.again === false, JSON.stringify(bk));
+      // датчики мовчать — чесно кажемо; ожили — продовжуємо
+      await app(page, () => window.__gy.stop());
+      await page.click('#tabCal'); await sleep(4200);
+      const ns = await calSt(page);
+      ok(`[${T}] датчики руху мовчать 3,5 с — не чекаємо вічно: «Датчики руху мовчать», пояснено, що буде без калібрування`, ns.open && ns.view === 'nosens' && /Датчики руху мовчать/.test(ns.title) && /за швидкістю й кнопкою «Поворот»/.test(ns.text) && (await readCheck(page, '#calib')).length === 0, JSON.stringify({ view: ns.view, title: ns.title, text: ns.text, read: await readCheck(page, '#calib') }));
+      await app(page, () => window.__gy.start({ up: [0, 0.2, 0.98] })); await sleep(900);
+      const fl = await calSt(page);
+      ok(`[${T}] датчики ожили, але телефон лежить — крок 1 не йде, підказка «Поставте телефон вертикально, екраном до себе»`, fl.view === 'step1' && fl.step === 1 && fl.st.hint === 'upright' && /Поставте телефон вертикально/.test(fl.hint) && fl.st.prog === 0, JSON.stringify({ view: fl.view, hint: fl.hint, st: fl.st }));
+      // поки триває калібрування, ведення не сприймає «повороти» телефона в руках
+      const busy = await app(page, () => { const N = window.__app.nav; for (let i = 0; i < 4; i++) window.__reis('sens', { var: 0.05, yaw: 100 + i * 30 }); return { busy: window.__app.calib.calBusy(), hist: N.debugState().yawHist.length }; });
+      await page.click('#calib [data-cb="x"]'); await sleep(200);
+      const free = await app(page, () => { const N = window.__app.nav; window.__reis('sens', { var: 0.05, yaw: 300 }); return { busy: window.__app.calib.calBusy(), hist: N.debugState().yawHist.length }; });
+      // екран (WebView) датчиків не віддає зовсім, а служба навігації кут рахує — калібруємо лише за нею (раз на секунду)
+      await app(page, () => { window.__gy.start({ up: [0, 1, 0], scale: 0.9, raw: false, native: true }); window.__spoken.length = 0; }); await sleep(300);
+      await page.click('#tabCal');
+      const sl2 = await waitCal(page, s => s.step === 2, 9000);
+      await app(page, () => window.__gy.turn(90, 45)); const sl3 = await waitCal(page, s => s.step === 3, 9000);
+      await app(page, () => window.__gy.turn(-180, 60)); const sl4 = await waitCal(page, s => s.step === 4, 11000); await sleep(300);
+      const sl4b = await calSt(page), rs = sl4b.st.result || {};
+      ok(`[${T}] екран датчиків не віддає, але служба навігації кут рахує — калібрування все одно проходить (за її кутом, раз на секунду): 90° телефон бачить як ${rs.seen90}°, поправка +11 %`, sl2.step === 2 && sl3.step === 3 && sl4.step === 4 && rs.ok && rs.src === 'native' && Math.abs(rs.seen90 - 81) < 1.5 && Math.abs(rs.k - 1.111) < 0.025 && /Телефон відкалібровано/.test(sl4b.title) && !/Телефон тримали/.test(sl4b.rows) && sl4b.spoken.some(x => /Готово\. Телефон відкалібровано/.test(x)), JSON.stringify({ steps: [sl2.step, sl3.step, sl4.step], rs, rows: sl4b.rows, st: sl4.st }));
+      await page.click('#calib [data-cb="x"]'); await sleep(200);
+      ok(`[${T}] поки відкрите калібрування, ведення не рахує повороти телефона в руках за повороти фури; закрили — рахує знову`, busy.busy === true && busy.hist === 0 && free.busy === false && free.hist >= 1, JSON.stringify({ busy, free }));
+    }
+    ok(`[${T}] прохід 32 (екран) без помилок JS`, errors.length === 0, errors.join(' | '));
+    await ctx.close();
+  }
+
+  /* ---- В. «Мітки»: світяться зеленим, коли на маршруті попереду є позначки ---- */
+  { const { page, ctx, errors } = await newPage(true, { viewport: { width: 360, height: 670 } });
+    const n = coords.length, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    const trip = { id: 't-rep32', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+      route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+    const me = coords[turnIdx[2] + 10];
+    const tabR = () => app(page, () => { const b = document.getElementById('tabRep'), bd = b.querySelector('.badge'), tc = b.querySelector('.tc'); return { has: b.classList.contains('has'), n: bd ? bd.textContent : '', color: getComputedStyle(b).color, tc: getComputedStyle(tc).backgroundColor, badgeBg: bd ? getComputedStyle(bd).backgroundColor : '', label: b.getAttribute('aria-label'), ahead: window.__app.reports.repsAhead().map(x => x.r.id + ':' + Math.round(x.ahead)) }; });
+    const put = list => app(page, list => { const R = window.__app.reports; R.reps.list.length = 0; for (const r of list) R.reps.list.push({ id: r.id, t: r.t, lat: r.lat, lon: r.lon, brg: null, at: Date.now() - (r.min || 3) * 60000, born: Date.now() - (r.min || 3) * 60000, dev: 'other', own: false, sent: true, conf: 0, no: {} }); window.__app.bus.emit('reports', R.reps); }, list);
+    await emitN('loc', { prov: 'gps', lat: me[0], lon: me[1], acc: 5, spd: 0, t: Date.now() }); await sleep(500);
+    // рейсу немає: позначки поруч є, але «на маршруті» шукати нема де — не світиться
+    const pA = coords[turnIdx[2] + 60], pB = coords[turnIdx[3] + 40], pBack = coords[Math.max(0, turnIdx[2] - 60)];
+    await put([{ id: 'r-a', t: 'police', lat: pA[0], lon: pA[1] }]); await sleep(250);
+    const t0 = await tabR();
+    ok('«Мітки»: рейсу немає — значок не світиться, навіть якщо позначки поруч є (вони видні на карті)', !t0.has && t0.n === '' && t0.ahead.length === 0, JSON.stringify(t0));
+    await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+    await emitN('loc', { prov: 'gps', lat: me[0], lon: me[1], acc: 5, spd: 0, t: Date.now() }); await sleep(700);
+    await put([]); await sleep(600);
+    const t1 = await tabR();
+    ok('«Мітки»: рейс іде, позначок на маршруті немає — значок не світиться, числа немає', !t1.has && t1.n === '' && t1.tc === 'rgba(0, 0, 0, 0)' && t1.label === 'Позначити подію на дорозі', JSON.stringify(t1));
+    await shot(page, '47-rep-tab-off');
+    // дві позначки попереду на маршруті, одна позаду, одна за 3 км убік
+    await put([{ id: 'r-b', t: 'transport', lat: pB[0], lon: pB[1], min: 12 }, { id: 'r-a', t: 'police', lat: pA[0], lon: pA[1] }, { id: 'r-back', t: 'crash', lat: pBack[0], lon: pBack[1] }, { id: 'r-off', t: 'police', lat: pA[0] + 0.03, lon: pA[1] + 0.03 }]); await sleep(300);
+    const t2 = await tabR();
+    ok(`«Мітки»: на маршруті попереду дві позначки — значок засвітився зеленим, поруч число 2 («${t2.label}»); позначки позаду й осторонь маршруту не рахуються`, t2.has && t2.n === '2' && t2.color === 'rgb(47, 158, 98)' && t2.tc !== 'rgba(0, 0, 0, 0)' && t2.badgeBg === 'rgb(47, 158, 98)' && /попереду позначок — 2/.test(t2.label) && t2.ahead.length === 2 && /^r-a:/.test(t2.ahead[0]) && /^r-b:/.test(t2.ahead[1]), JSON.stringify(t2));
+    await shot(page, '47-rep-tab-on');
+    ok('«Мітки» світяться: нижня стрічка ціла, усе читається', (await page.evaluate(layoutCheck)).length === 0 && (await readCheck(page, '#tabs')).length === 0, JSON.stringify([await page.evaluate(layoutCheck), await readCheck(page, '#tabs')]));
+    // дотик — у вікні «Що на дорозі?» згори список: що попереду й через скільки
+    await page.click('#tabRep'); await sleep(350);
+    const sh = await app(page, () => { const s = document.getElementById('repSheet'), r = s.getBoundingClientRect(); return { open: !s.hidden, inView: r.bottom <= innerHeight + 1 && r.top >= 0, sub: (s.querySelector('.rep-sub') || {}).textContent, rows: [...s.querySelectorAll('.rep-row')].map(x => x.querySelector('b').textContent + ' · ' + x.querySelector('small').textContent + ' · ' + x.querySelector('.rep-d').textContent), btns: [...s.querySelectorAll('.rep-grid [data-rep]')].map(b => b.dataset.rep).join() }; });
+    ok('дотик до «Міток»: згори «Попереду на маршруті» — що саме, коли бачили, через скільки (найближча перша); нижче — ті самі кнопки «ДТП · Поліція · Транспортна служба»', sh.open && sh.inView && sh.sub === 'Попереду на маршруті' && sh.rows.length === 2 && /^Поліція · .*хв.* · через \d/.test(sh.rows[0]) && /^Транспортна служба · .* · через \d/.test(sh.rows[1]) && sh.btns === 'crash,police,transport', JSON.stringify(sh));
+    ok('вікно «Що на дорозі?» зі списком: усе читається', (await readCheck(page, '#repSheet')).length === 0, JSON.stringify(await readCheck(page, '#repSheet')));
+    await shot(page, '47-rep-sheet');
+    // дотик до рядка — показати позначку на карті
+    await page.click('#repSheet .rep-row'); await sleep(1600);
+    const fly = await app(page, ([la, lo]) => { const c = window.__app.map.map.getCenter(); return { closed: document.getElementById('repSheet').hidden, d: Math.round(window.__app.core.hav({ lat: c.lat, lon: c.lng }, { lat: la, lon: lo })) }; }, pA);
+    ok('дотик до рядка — вікно закрилось, карта показує цю позначку', fly.closed && fly.d < 150, JSON.stringify(fly));
+    // рейс завершено — не світиться
+    await app(page, () => window.__app.guide.endTrip ? window.__app.guide.endTrip() : window.__app.guide.stopTrip()); await sleep(500);
+    const t4 = await tabR();
+    ok('рейс завершено — «Мітки» знову не світяться', !t4.has && t4.n === '', JSON.stringify(t4));
+    ok('прохід 32 («Мітки») без помилок JS', errors.length === 0, errors.join(' | '));
+    await ctx.close(); }
+} catch (e) { ok('прохід 32 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 
 /* ============ справжні пачки номерів на справжній карті (лише на прохання: ADDR_DIR=тека ONLY=addrreal --shots тека) ============ */
 // ADDR_DIR — тека з v1/index.json і пачками, взятими з гілки addr сховища. Карта — справжній квадрат Львова (city.pmtiles).

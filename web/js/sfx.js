@@ -33,3 +33,17 @@ export function chime(kind = 'pass') {
     return true;
   } catch (_) { return false; }
 }
+// Калібрування телефона: сигнал «крок зараховано» мусить бути добре чутний — телефон у цю мить повернуто ребром і екрана
+// не видно. Тому гучніший за «дзинь» і не залежить від налаштування звуку поворотів (калібрування водій запускає сам).
+export function calTone(kind = 'ok') {
+  sfxLog.push({ kind: 'cal-' + kind, t: Date.now() }); if (sfxLog.length > 30) sfxLog.shift();
+  const c = ac(); if (!c) return false;
+  try {
+    if (c.state === 'suspended') c.resume().catch(() => {});
+    const t0 = c.currentTime + 0.01, v = 0.32;
+    if (kind === 'ok') { note(c, 784, t0, 0.2, v); note(c, 1047, t0 + 0.14, 0.34, v); }
+    else if (kind === 'done') { note(c, 784, t0, 0.18, v); note(c, 988, t0 + 0.13, 0.18, v); note(c, 1319, t0 + 0.26, 0.5, v); }
+    else { note(c, 440, t0, 0.22, v); note(c, 349, t0 + 0.2, 0.4, v); }
+    return true;
+  } catch (_) { return false; }
+}

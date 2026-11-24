@@ -15,6 +15,10 @@ export const ms = {
   alpha: null, beta: null, gamma: null, abs: false,   // положення телефона (deviceorientation)
 };
 let lastT = 0, hx = 0, hy = 0, hz = 0, peak = 0, cnt = 0, secT = 0, started = false, lastHandled = 0;
+// Сирі заміри для калібрування телефона (calib.js): кожна подія датчиків як є — кутова швидкість у осях телефона й прискорення з тяжінням.
+let rawFn = null;
+/** Слухати сирі заміри: fn({ t (с), w: [x, y, z] °/с, g: [x, y, z] м/с² }). Повертає функцію «перестати слухати». Слухач один (екран калібрування). */
+export function onRaw(fn) { rawFn = fn; startMotion(); return () => { if (rawFn === fn) rawFn = null; }; }
 function onMotion(e) {
   const r = e.rotationRate, g = e.accelerationIncludingGravity; if (!g || g.x == null) return;
   const now = (e.timeStamp || performance.now()) / 1000, dt = lastT ? Math.min(0.2, Math.max(0, now - lastT)) : 0; lastT = now;
@@ -25,6 +29,7 @@ function onMotion(e) {
   if (!r || r.alpha == null) return;
   const m = Math.hypot(ms.up[0], ms.up[1], ms.up[2]) || 1, ux = ms.up[0] / m, uy = ms.up[1] / m, uz = ms.up[2] / m;
   const wx = r.beta, wy = r.gamma, wz = r.alpha;                      // °/с навколо осей x, y, z телефона
+  if (rawFn) { try { rawFn({ t: now, w: [wx, wy, wz], g: [g.x, g.y, g.z] }); } catch (_) {} }
   const wUp = wx * ux + wy * uy + wz * uz;                             // навколо вертикалі (проти годинникової — плюс)
   ms.rate = Math.hypot(wx, wy, wz); ms.rateUp = -wUp; ms.yaw -= wUp * dt;
   hx += (wx - wUp * ux) * dt; hy += (wy - wUp * uy) * dt; hz += (wz - wUp * uz) * dt;   // обертання НЕ навколо вертикалі — це нахил телефона

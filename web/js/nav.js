@@ -2,7 +2,7 @@
 import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.js';
 import { RouteTracker } from './drpf.js';
 import { motionHint, startMotion } from './sensors.js';
-import { gyroK } from './calib.js';
+import { gyroK, calBusy } from './calib.js';
 
 export const pos = {
   mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
@@ -673,7 +673,11 @@ export function calYaw(raw) {
 }
 function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
-  if (s.yaw != null) { const y = calYaw(s.yaw); yawNow = y; onYaw(y); }
+  if (s.yaw != null) {
+    const y = calYaw(s.yaw); yawNow = y;
+    if (calBusy()) yawHist.length = 0;                   // іде калібрування: телефон крутять у руках — це не повороти фури
+    else onYaw(y);
+  }
   if (s.var == null) return;
   lastVar = s.var;
   // Самокалібрування: запам'ятовуємо рівень вібрації на стоянці й у русі, поки GPS живий.

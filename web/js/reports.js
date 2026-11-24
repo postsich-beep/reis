@@ -155,17 +155,13 @@ export async function poll() {
   } catch (e) { reps.ok = false; reps.err = e.message; }
   busy = false;
 }
-/** Позначки, які варто перевірити (1.1.22 — значок «Мітки» загоряється зеленим): у рейсі — попереду на маршруті
- *  (до 300 м від лінії рейсу), без рейсу — поблизу (до 15 км). Найближчі — перші. [{ r, ahead | dist }] */
+/** Позначки, які варто перевірити (1.1.22 — значок «Мітки» загоряється зеленим): попереду на маршруті
+ *  (до 300 м від лінії рейсу). Без рейсу — порожньо. Найближчі — перші. [{ r, ahead }] */
 export function repsAhead() {
   const out = [];
-  if (g.active && g.idx && pos.rd != null) {
-    for (const r of shown()) { const l = g.idx.locate(r, null); if (!l || l.off > 300) continue; const a = l.d - pos.rd; if (a < -150) continue; out.push({ r, ahead: Math.max(0, a) }); }
-    return out.sort((a, b) => a.ahead - b.ahead);
-  }
-  if (pos.lat == null) return out;
-  for (const r of shown()) { const d = hav(pos, r); if (d <= 15000) out.push({ r, dist: d }); }
-  return out.sort((a, b) => a.dist - b.dist);
+  if (!(g.active && g.idx && pos.rd != null)) return out;          // рейсу немає — «на маршруті» нема чого шукати
+  for (const r of shown()) { const l = g.idx.locate(r, null); if (!l || l.off > 300) continue; const a = l.d - pos.rd; if (a < -150) continue; out.push({ r, ahead: Math.max(0, a) }); }
+  return out.sort((a, b) => a.ahead - b.ahead);
 }
 // Позначка попереду на маршруті (до 20 км) — одне повідомлення в «Події» й голосом
 function ahead() {
