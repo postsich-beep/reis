@@ -4473,7 +4473,7 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
   if (sc.n === 'xiaomi') {
     const snd = () => app(page, () => { const b = document.getElementById('bSnd'); return { voice: window.__app.S.voice, off: b.classList.contains('off'), pressed: b.getAttribute('aria-pressed'), label: b.getAttribute('aria-label'), bg: getComputedStyle(b).backgroundColor }; });
     const s0 = await snd(); await page.click('#bSnd'); await sleep(300); const s1 = await snd(); await shot(page, `60-grid-${sc.n}-5-mute`); await page.click('#bSnd'); await sleep(300); const s2 = await snd();
-    ok(`[${T}] кнопка звуку: дотик — звук вимкнено (червона, «${s1.label}»), ще дотик — увімкнено`, s0.voice === true && !s0.off && s1.voice === false && s1.off && s1.pressed === 'false' && /вимкнено/.test(s1.label) && /rgb\(2\d\d, \d\d, \d\d\)/.test(s1.bg) && s2.voice === true && !s2.off, JSON.stringify({ s0, s1, s2 }));
+    ok(`[${T}] кнопка звуку: дотик — звук вимкнено (помаранчева, не червона — червона відволікала; «${s1.label}»), ще дотик — увімкнено`, s0.voice === true && !s0.off && s1.voice === false && s1.off && s1.pressed === 'false' && /вимкнено/.test(s1.label) && s1.bg === 'rgb(245, 163, 0)' && s2.voice === true && !s2.off, JSON.stringify({ s0, s1, s2 }));
   }
   ok(`[${T}] прохід 36 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
