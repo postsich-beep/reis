@@ -567,7 +567,6 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
   #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
   .q-tile{min-height:64px;padding:5px 4px 4px;gap:1px}
   .q-grid{grid-template-columns:repeat(3,1fr);gap:6px} .q-l{font-size:13px} .q-s{font-size:12px}   /* (1.1.24) дев'ять плиток — три ряди по три, без гортання */
-  .q-zoom{margin-top:6px} .q-zoom button{height:44px}
 }
 @media (max-width:340px){
   .q-grid{grid-template-columns:repeat(3,1fr);gap:6px}
@@ -1256,7 +1255,7 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
 #tabs button.main .mc{width:60px;height:60px;margin-top:-20px}
 #tabs button.main .mc svg{width:33px;height:33px}
 #tabs button.main span:last-child{font-size:15px}
-#tabs .badge{top:3px;left:calc(50% + 8px);min-width:20px;height:20px;border-radius:10px;font:700 13px/20px var(--f-num)}
+#tabs .badge{top:3px;left:min(calc(50% + 8px),calc(100% - 21px));min-width:20px;height:20px;border-radius:10px;font:700 13px/20px var(--f-num)}   /* на вузькій кнопці за її правий край не виходить */
 /* Нахил карти — повзунок: видима дорожка згори донизу й кругла ручка-«точка» на ній (була стрілка на ледь помітній рисці — не всі
    розуміли, що її тягнуть угору-вниз). Нижче ручки дорожка яскравіша — видно, наскільки карту нахилено; на кінцях — маленькі вістря. */
 #tilt{min-height:calc(74px + var(--up));margin:8px 1px calc(var(--sb) + 6px)}
@@ -1280,6 +1279,8 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
 #spdPop{bottom:calc(var(--bl,var(--bh,150px)) + 150px)}
 /* Рядок подій під маневром: більший шрифт і щільніше тло — читається на ходу й на супутниковій карті */
 .strip{min-height:42px;padding:7px 12px;font-size:17px;gap:9px}
+/* довге повідомлення (наприклад «Повітряна тривога: Харківська область») більшим шрифтом в один рядок не влазить — переносимо на другий, а не обрізаємо */
+.strip-text{white-space:normal;display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;line-height:1.16;overflow:hidden;text-overflow:clip}
 .strip-counts{font-size:16px}
 .strip-dot{width:11px;height:11px}
 .strip[data-level="none"]{color:var(--ink)}
@@ -1303,6 +1304,8 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
   #speed{bottom:18px} #cam{bottom:32px} #spdPop{bottom:132px;max-height:calc(100% - var(--st) - 140px)}
   .strip{min-height:38px;padding:5px 12px;font-size:16px}
 }
-@media (min-width:1010px) and (min-height:521px){ #speed{bottom:calc(var(--sb) + 18px)} #cam{bottom:calc(var(--sb) + 32px)} #spdPop{bottom:calc(var(--sb) + 144px)} }
+@media (min-width:1010px) and (min-height:521px){ #speed{bottom:calc(var(--sb) + 18px)} #cam{bottom:calc(var(--sb) + 98px)} #spdPop{bottom:calc(var(--sb) + 144px)} }   /* камера — над рівною частиною плашки, праворуч від круга */
+/* планшет 1010–1100 завширшки: ліворуч від плашки (760) лишається ~130 px — круг притискаємо до краю, щоб не лягав на її кут */
+@media (min-width:1010px) and (max-width:1100px) and (min-height:521px){ #speed{left:20px} #spdLim,#spdGps{left:-18px} #cam{left:140px} }
 /* круг швидкості тепер більший і вище — поки відкрите меню точки на карті, він під ним не потрібен (як уже було на невисоких екранах) */
 @media (orientation:portrait){ body:has(#pick:not([hidden])) :is(#speed,#cam){visibility:hidden} }
