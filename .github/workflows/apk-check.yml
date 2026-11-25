@@ -1,0 +1,44 @@
+# Перевірка, що оболонка Android збирається, — на гілці, ДО злиття в main (злиття в main одразу випускає реліз).
+# Потрібна, коли міняється сама оболонка (android/**): зібрати APK локально на робочій машині нема чим.
+name: Перевірка збірки APK (гілка)
+
+on:
+  push:
+    branches: ['release-*']
+    paths: ['android/**', '.github/workflows/apk-check.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: apk-check-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compile:
+    name: Збірка APK без випуску
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Збірка (без голосового рушія й інтерфейсу всередині — перевіряємо лише код оболонки й маніфест)
+        working-directory: android
+        run: >
+          gradle --no-daemon :app:assembleRelease
+          -PvCode=1 -PvName=check
+          -PupdateRepo=${{ github.repository }}
+          -PnativeRev=$(python3 -c "import json;print(json.load(open('../web/version.json')).get('native',0))")
+
+      - name: Що вийшло
+        run: ls -la android/app/build/outputs/apk/release/

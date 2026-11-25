@@ -658,8 +658,11 @@ function targetZoom() {
   // Без GPS на рейсі — той самий масштаб, що й із GPS: стрілка їде лінією рейсу, віддаляти нема чого.
   // Лише місце «за вишками» поза рейсом — трохи далі, але не дрібніше за квартал.
   if (pos.mode === 'approx' && !onRouteNow() && pos.acc > 150) zoom = Math.min(zoom, clamp(16.6 - 0.5 * Math.log2(pos.acc / 50), 14.5, 16.6));
+  if (view.pip) zoom -= 0.9;                 // у маленькому вікні показуємо трохи більше дороги попереду
   return clamp(zoom + view.zoomBias, 5, 19);
 }
+/** Програма у вікні поверх інших (1.1.27): карта стежить за машиною, трохи далі. */
+export function setPipView(on) { view.pip = !!on; cam.anc = null; if (on) setFollow(true); else follow(true); try { map && map.resize(); } catch (_) {} }
 const camFree = () => view.down && Date.now() - view.touchT < 8000 || Date.now() - (view.touchT || 0) < 700;   // палець на карті
 // Перехід до стеження (кнопка «Моє місце», 3D, північ, масштаб): коротка анімація, далі — покадрово
 function follow(force) {

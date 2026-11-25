@@ -3,15 +3,18 @@ package ua.reis.nav
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.content.res.Configuration
 import android.graphics.Color
 import android.net.ConnectivityManager
 import android.net.Network
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.util.Rational
 import android.view.WindowManager
 import android.webkit.ConsoleMessage
 import android.webkit.GeolocationPermissions
@@ -189,12 +192,63 @@ class MainActivity : Activity() {
         }
     }
 
+    /* ---------- вікно поверх інших програм («картинка в картинці», як у Google Maps) ----------
+       Інтерфейс каже, чи воно потрібне (рейс іде й у налаштуваннях дозволено). Тоді, щойно водій іде з програми — «Додому»,
+       інша програма, дотик до сповіщення про дзвінок чи повідомлення, — «Рейс» не зникає, а лишається маленьким вікном
+       поверх усього. Розмір вікна міняє сама система (розтягнути двома пальцями, подвійний дотик), «розгорнути» — назад на весь екран. */
+    @Volatile private var pipWanted = false
+
+    private fun pipSupported() = try { packageManager.hasSystemFeature(PackageManager.FEATURE_PICTURE_IN_PICTURE) } catch (_: Exception) { false }
+
+    private fun pipParams(): PictureInPictureParams {
+        val land = resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
+        val b = PictureInPictureParams.Builder().setAspectRatio(if (land) Rational(4, 3) else Rational(3, 4))
+        if (Build.VERSION.SDK_INT >= 31) {
+            b.setAutoEnterEnabled(pipWanted)          // Android 12+: жест «Додому» сам плавно згортає у вікно
+            b.setSeamlessResizeEnabled(true)          // вміст перемальовується під час зміни розміру (у нас карта, не відео)
+        }
+        return b.build()
+    }
+
+    /** Інтерфейс: вікно потрібне / не потрібне. Повертає, чи телефон узагалі це вміє. */
+    fun setPip(on: Boolean): Boolean {
+        val ok = pipSupported()
+        pipWanted = on && ok
+        if (ok) runOnUiThread { try { setPictureInPictureParams(pipParams()) } catch (e: Exception) { Log.w("Reis", "pip params failed", e) } }
+        return ok
+    }
+
+    /** Згорнути у вікно. true — вдалося (або програма вже у вікні). */
+    private fun enterPip(): Boolean {
+        if (!pipWanted || isFinishing) return false
+        if (isInPictureInPictureMode) return true
+        return try { enterPictureInPictureMode(pipParams()) } catch (e: Exception) { Log.w("Reis", "enter pip failed", e); false }
+    }
+
+    /** Водій сам іде з програми (не вимкнув екран і не закрив її): «Додому», перемикання програм, дотик до сповіщення. */
+    override fun onUserLeaveHint() {
+        super.onUserLeaveHint()
+        enterPip()
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        emit("pip", JSONObject().put("on", isInPictureInPictureMode).toString())
+    }
+
+    /** Телефон повернули — вікно має стати лежачим чи стоячим відповідно. */
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        if (pipWanted && !isInPictureInPictureMode) try { setPictureInPictureParams(pipParams()) } catch (_: Exception) {}
+    }
+
     /* ---------- життєвий цикл ---------- */
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() {
         // «Назад» спершу закриває відкриту панель; якщо закривати нічого — згортаємо, навігація триває.
         web.evaluateJavascript("(window.__reisBack&&window.__reisBack())?1:0") { r ->
-            if (r != "1") moveTaskToBack(true)
+            // рейс іде й вікно поверх інших програм дозволено — «Назад» із карти теж лишає його на екрані, а не ховає програму
+            if (r != "1" && !enterPip()) moveTaskToBack(true)
         }
     }
 

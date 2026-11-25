@@ -32,7 +32,7 @@ window.addEventListener('unhandledrejection', e => log('err', 'promise: ' + (e.r
 // події, проблемні місця, заміри покриття — водій вмикає сам кнопкою «Шари».
 const BASE_STOPS = { food: false, fuel: true, park: false, motel: false, cam: true, shower: false };
 const DEFAULTS = {
-  lang: 'uk', theme: 'auto', view3d: true, pitch: 52, autoCenter: true,          // pitch — кут нахилу карти в «3D» (1.1.21: повзунок нахилу)
+  lang: 'uk', theme: 'auto', view3d: true, pitch: 52, autoCenter: true, pip: true,          // pitch — кут нахилу карти в «3D» (1.1.21: повзунок нахилу)
   voice: true, popups: true, lookahead: true, cpSound: true,
   tg: true, air: true, cams: true, stops: true, drive: true,
   aiFilter: false, spoof: true, offline: true, rec: false,

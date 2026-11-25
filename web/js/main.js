@@ -29,6 +29,7 @@ import * as sensors from './sensors.js';
 import * as calib from './calib.js';
 import * as uiCalib from './ui_calib.js';
 import * as journey from './journey.js';
+import * as pipWin from './pip.js';
 import * as uiJourney from './ui_journey.js';
 
 async function boot() {
@@ -42,7 +43,7 @@ async function boot() {
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   bus.on('offlineBad', () => { if (mapM.map) mapM.applyMapSource(); });
   nav.start(); guide.init(); poi.init(); track.init(); journey.init(); weather.init(); roads.init(); rough.init();
-  initUI(); initLab(); lab.initLabApp(); uiJourney.initJourneyUi();
+  initUI(); initLab(); lab.initLabApp(); uiJourney.initJourneyUi(); pipWin.init();
   await route.loadTrips();
   await feed.init();
   stopsdb.load(); vplaces.init(); reports.init(); limits.init();
@@ -52,5 +53,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, journey, uiJourney, lab, ui: { ptsState } };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, journey, uiJourney, pipWin, lab, ui: { ptsState } };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));
