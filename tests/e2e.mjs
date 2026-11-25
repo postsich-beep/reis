@@ -118,7 +118,9 @@ const STOPS_JSON = { v: 1, date: '20261121', rows: [
 const PLACES_JSON = { v: 1, date: '20261121', rows: [
   [49.993, 36.230, 'c', 'Харків', 'Харьков', 'kharkiv', 1421125], [49.839, 24.029, 'c', 'Львів', 'Львов', 'lviv', 717273],
   [49.588, 34.551, 'c', 'Полтава', '', 'poltava', 279593], [49.835, 36.686, 'c', 'Чугуїв', 'Чугуев', 'kharkiv', 31000],
-  [48.66, 25.51, 'v', 'Львівка', '', 'chernivtsi', 0], [50.02, 30.12, 'v', 'Харківці', '', 'kyiv', 0], [B[0], B[1], 'c', 'Полтава-тест', '', 'poltava', 1]
+  [48.66, 25.51, 'v', 'Львівка', '', 'chernivtsi', 0], [50.02, 30.12, 'v', 'Харківці', '', 'kyiv', 0], [B[0], B[1], 'c', 'Полтава-тест', '', 'poltava', 1],
+  // (1.1.30) однойменні: місто Миколаїв (обласний центр) і місто Миколаїв на Львівщині — у файлі навмисно спершу менше
+  [49.524, 23.980, 't', 'Миколаїв', 'Николаев', 'lviv', 14600], [46.975, 31.994, 'c', 'Миколаїв', 'Николаев', 'mykolaiv', 470011]
 ] };
 // проблемні для фури місця (як web/data/hazards.json, формат 2): міст 15 т на М-03 уздовж маршруту (фура в парку — до 20 т),
 // низький проїзд на вулиці навхрест (має ігноруватися), ґрунт 1,2 км, міст 55 т (фурі не заважає)
@@ -210,6 +212,15 @@ async function newPage(native, opts = {}) {
         { geometry: { coordinates: [24.0301, 49.8101] }, properties: { name: st, city: L('Львів', 'Lviv'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
         { geometry: { coordinates: [23.4791, 49.7852] }, properties: { name: L('вулиця Антонича', 'Antonycha Street'), city: L('Городок', 'Horodok'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
         { geometry: { coordinates: [24.0205, 49.8203] }, properties: { name: L('Львівська загальноосвітня санаторна школа;School', 'Lviv Sanatorium School'), street: st, housenumber: '3', city: L('Львів', 'Lviv'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'amenity', osm_value: 'school', countrycode: 'UA' } }] }); }
+    // (1.1.30) «рядова» — вулиці в різних містах; сервер навмисно віддає спершу далекі
+    if (q.includes('рядов')) { const F = (lon, lat, name, city, state, extra = {}) => ({ geometry: { coordinates: [lon, lat] }, properties: { name, city, state, osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA', ...extra } });
+      return json(r, { features: [F(30.52, 50.45, 'вулиця Рядова', 'Київ', 'Київська область'), F(25.59, 49.55, 'вулиця Рядова', 'Тернопіль', 'Тернопільська область'),
+        { geometry: { coordinates: [32.61, 46.64] }, properties: { name: 'Рядове', osm_key: 'place', osm_value: 'village', state: 'Херсонська область', countrycode: 'UA' } },
+        F(23.65, 49.785, 'вулиця Рядова', 'Городок', 'Львівська область'), F(24.052, 49.807, 'вулиця Рядова', 'Львів', 'Львівська область')] }); }
+    if (q.includes('миколаїв') || q.includes('николаев')) return json(r, { features: [
+      { geometry: { coordinates: [24.04, 49.82] }, properties: { name: 'Миколаївська вулиця', city: 'Львів', state: 'Львівська область', osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
+      { geometry: { coordinates: [31.994, 46.975] }, properties: { name: 'Миколаїв', osm_key: 'place', osm_value: 'city', state: 'Миколаївська область', countrycode: 'UA' } },
+      { geometry: { coordinates: [23.98, 49.524] }, properties: { name: 'Миколаїв', osm_key: 'place', osm_value: 'town', state: 'Львівська область', countrycode: 'UA' } }] });
     if (q.includes('львов')) return json(r, { features: [
       { geometry: { coordinates: [36.70, 50.98] }, properties: { name: 'Львов', osm_key: 'place', osm_value: 'village', county: 'Прохоровский муниципальный округ', state: 'Belgorod Oblast', countrycode: 'RU' } },
       { geometry: { coordinates: [24.03, 49.84] }, properties: { name: 'Львів', osm_key: 'place', osm_value: 'city', state: 'Львівська область', countrycode: 'UA' } }] });
@@ -607,7 +618,7 @@ if (run('1')) try {
   const kinds = () => app(page, () => { const seg = document.querySelector('#panelBody .seg.veh'), R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), w: Math.round(r.width), h: Math.round(r.height) }; }, h = document.getElementById('vehHint');
     return { btns: [...seg.querySelectorAll('button')].map(b => ({ kind: b.dataset.kind, on: b.classList.contains('on'), txt: b.textContent.replace(/\s+/g, ' ').trim(), box: R(b), cut: [...b.querySelectorAll('b,small,svg')].some(x => { const q = x.getBoundingClientRect(), w = b.getBoundingClientRect(); return x.scrollWidth > x.clientWidth + 1 || q.right > w.right - 1 || q.left < w.left + 1; }) })), hint: h ? h.textContent.replace(/\s+/g, ' ').trim() : '', hintCls: h ? h.className : '', seg: R(seg), vw: innerWidth, S: { vehicle: window.__app.S.vehicle, routeMode: window.__app.S.routeMode } }; });
   const k0 = await kinds();
-  ok(`види рейсу: три кнопки (${k0.btns.map(b => '«' + b.txt + '»').join(', ')}), за замовчуванням — «суворо»; написи цілі, кнопки не менші за 44 px, у межах екрана`, k0.btns.length === 3 && k0.btns.map(b => b.kind).join() === 'strict,free,car' && k0.btns[0].on && !k0.btns[1].on && /Фура\s*суворо/.test(k0.btns[0].txt) && /Фура\s*на свій розсуд/.test(k0.btns[1].txt) && /Легкова/.test(k0.btns[2].txt) && k0.btns.every(b => !b.cut && b.box.h >= 44 && b.box.w >= 80 && b.box.l >= 0 && b.box.r <= k0.vw), JSON.stringify(k0.btns));
+  ok(`види рейсу: три кнопки (${k0.btns.map(b => '«' + b.txt + '»').join(', ')}), (1.1.30) «на свій розсуд» перша, «суворо» посередині й вибрана за замовчуванням; написи цілі, кнопки не менші за 44 px, у межах екрана`, k0.btns.length === 3 && k0.btns.map(b => b.kind).join() === 'free,strict,car' && k0.btns[1].on && !k0.btns[0].on && /Фура\s*на свій розсуд/.test(k0.btns[0].txt) && /Фура\s*суворо/.test(k0.btns[1].txt) && /Легкова/.test(k0.btns[2].txt) && k0.btns.every(b => !b.cut && b.box.h >= 44 && b.box.w >= 80 && b.box.l >= 0 && b.box.r <= k0.vw), JSON.stringify(k0.btns));
   ok(`під кнопками — попередження, що це означає: «${k0.hint.slice(0, 90)}…»`, /Жорсткі обмеження для фур: лише дороги, де фурі можна/.test(k0.hint) && /Шлях може вийти довшим/.test(k0.hint), k0.hint);
   await shot(page, '02d-kinds');
   await page.click('#panelBody .seg.veh [data-kind="free"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
@@ -617,20 +628,20 @@ if (run('1')) try {
   await shot(page, '02d-kinds-free');
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('#panelBody .seg.veh');
   const k1 = await kinds();
-  ok(`у формі вибрано «на свій розсуд», пояснення — жовта рамка: «${k1.hint.slice(0, 80)}…»; у деталях рейсу — те саме попередження`, k1.btns[1].on && !k1.btns[0].on && /free/.test(k1.hintCls) && /На свій розсуд: дороги загального користування/.test(k1.hint) && /програма НЕ перевіряє/.test(k1.hint) && await app(page, () => /Рейс на свій розсуд/.test((document.querySelector('#planSum .softcard') || { textContent: '' }).textContent)), JSON.stringify({ hint: k1.hint, cls: k1.hintCls }));
+  ok(`у формі вибрано «на свій розсуд», пояснення — жовта рамка: «${k1.hint.slice(0, 80)}…»; у деталях рейсу — те саме попередження`, k1.btns[0].on && !k1.btns[1].on && /free/.test(k1.hintCls) && /На свій розсуд: дороги загального користування/.test(k1.hint) && /програма НЕ перевіряє/.test(k1.hint) && await app(page, () => /Рейс на свій розсуд/.test((document.querySelector('#planSum .softcard') || { textContent: '' }).textContent)), JSON.stringify({ hint: k1.hint, cls: k1.hintCls }));
   await page.click('#panelBody .seg.veh [data-veh="auto"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
   ok('легкова: маршрут без обмежень для фур (costing auto), без обмежувача фури', routeReqs[routeReqs.length - 1].costing === 'auto' && !(routeReqs[routeReqs.length - 1].costing_options || {}).auto && await app(page, () => window.__app.S.vehicle === 'auto'), JSON.stringify(routeReqs[routeReqs.length - 1].costing_options));
   // (1.1.28) вид транспорту видно й на екрані вибору маршруту (сюди приходять і з точки на карті, і з «Їхати сюди»): натиснули інший — той самий рейс перераховано
   const vm = () => app(page, () => { const seg = document.querySelector('#routePick .vehm'); if (!seg || document.getElementById('routePick').hidden) return null; const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; }, box = R(document.getElementById('routePick'));
     return { box, btns: [...seg.querySelectorAll('button')].map(b => ({ kind: b.dataset.kind, on: b.classList.contains('on'), txt: b.textContent.trim(), label: b.getAttribute('aria-label'), box: R(b), cut: [...b.querySelectorAll('span')].some(x => x.scrollWidth > x.clientWidth + 1) })) }; });
   const v0 = await vm(); await shot(page, '02e-sheet-kinds');
-  ok(`на екрані вибору маршруту — ряд «вид рейсу» (${v0 ? v0.btns.map(b => '«' + b.txt + '»').join(' ') : '—'}), вибрано «Легкова»; кнопки не менші за 44 px, написи цілі, у межах шторки`, !!v0 && v0.btns.map(b => b.kind).join() === 'strict,free,car' && v0.btns[2].on && !v0.btns[0].on && v0.btns.every(b => !b.cut && b.box.h >= 44 && b.box.l >= v0.box.l && b.box.r <= v0.box.r) && /Фура: суворо/.test(v0.btns[0].label), JSON.stringify(v0));
+  ok(`на екрані вибору маршруту — ряд «вид рейсу» (${v0 ? v0.btns.map(b => '«' + b.txt + '»').join(' ') : '—'}), вибрано «Легкова»; кнопки не менші за 44 px, написи цілі, у межах шторки`, !!v0 && v0.btns.map(b => b.kind).join() === 'free,strict,car' && v0.btns[2].on && !v0.btns[1].on && v0.btns.every(b => !b.cut && b.box.h >= 44 && b.box.l >= v0.box.l && b.box.r <= v0.box.r) && /Фура: на свій розсуд/.test(v0.btns[0].label) && /Фура: суворо/.test(v0.btns[1].label), JSON.stringify(v0));
   const nV = routeReqs.length;
   await page.click('#routePick .vehm [data-kind="strict"]'); await page.waitForFunction(n => window.__app && document.querySelector('#routePick .vehm [data-kind="strict"].on') && !document.getElementById('routePick').hidden && !document.getElementById('routePick').classList.contains('busy'), nV, { timeout: 10000 }).catch(() => {}); await sleep(300);
   const v1 = await vm();
-  ok('у шторці натиснули «Суворо» — той самий рейс одразу перераховано для фури (costing truck), шторка лишилась, вибрано «Суворо»', routeReqs.length === nV + 1 && routeReqs[nV].costing === 'truck' && !!v1 && v1.btns[0].on && !v1.btns[2].on && await app(page, () => window.__app.S.vehicle === 'truck' && window.__app.S.routeMode === 'strict'), JSON.stringify({ n: routeReqs.length - nV, c: (routeReqs[nV] || {}).costing, v1 }));
+  ok('у шторці натиснули «Суворо» — той самий рейс одразу перераховано для фури (costing truck), шторка лишилась, вибрано «Суворо»', routeReqs.length === nV + 1 && routeReqs[nV].costing === 'truck' && !!v1 && v1.btns[1].on && !v1.btns[2].on && await app(page, () => window.__app.S.vehicle === 'truck' && window.__app.S.routeMode === 'strict'), JSON.stringify({ n: routeReqs.length - nV, c: (routeReqs[nV] || {}).costing, v1 }));
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('#panelBody .seg.veh');
-  await page.click('#panelBody .seg.veh [data-veh="truck"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
+  await page.click('#panelBody .seg.veh [data-kind="strict"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
   ok('знову фура: профіль truck з обмежувачем 90', routeReqs[routeReqs.length - 1].costing === 'truck' && routeReqs[routeReqs.length - 1].costing_options.truck.top_speed === 90);
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('[data-act="go"]');
   ok('після вибору підказки список не відкривається знову', await app(page, () => ['a', 'b'].every(k => document.getElementById('sg_' + k).hidden)));
@@ -4481,6 +4492,29 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
 /* ============ прохід 37 (1.1.29): пошук адреси чи місця — як у Google Maps, усе українською ============
    Олексій: «пошук тільки українською — вулиці українською, щоб не було англійською; такий, як у Google Maps; домашні місця; просто
    подивитись, де це, не прокладаючи маршрут; набрати адресу і в рейсі». Без рейсу — рядок пошуку згори карти, у рейсі — лупа праворуч. */
+/* (1.1.30) порядок результатів: однойменні міста — від більшого до меншого; вулиці й решта — від найближчого */
+if (run('37')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('loc', { prov: 'gps', lat: 49.8397, lon: 24.0297, acc: 5, spd: 0, t: Date.now() }); await sleep(700);   // я у Львові
+  const rows = () => app(page, () => [...document.querySelectorAll('#srBody .sr-item')].map(it => ({ t: it.querySelector('.sr-tx b').textContent, s: it.querySelector('.sr-tx small').textContent, d: (it.querySelector('.sr-d') || {}).textContent || '' })));
+  const ask = async q => { await page.fill('#srIn', q); await page.waitForFunction(() => !document.querySelector('.sr-wait') && document.querySelectorAll('#srBody [data-sri]').length >= 2, null, { timeout: 8000 }).catch(() => {}); await sleep(500); return rows(); };
+  await page.click('#srBar'); await sleep(300);
+  const r1 = await ask('рядова');
+  ok(`я у Львові, шукаю «рядова» — спершу вулиця у Львові, далі від ближчого до дальшого: ${r1.map(r => (r.s.split(',')[0] || r.t) + ' ' + r.d).join(' → ')}`,
+    r1.length >= 5 && /^Львів/.test(r1[0].s) && /^Городок/.test(r1[1].s) && /^Тернопіль/.test(r1[2].s) && /^Київ/.test(r1[3].s) && r1[4].t === 'Рядове', JSON.stringify(r1));
+  await shot(page, '64-rank-street');
+  const r2 = await ask('миколаїв');
+  ok(`«миколаїв» — спершу більше місто (${r2[0] && r2[0].s}), потім менше (${r2[1] && r2[1].s}), хоч воно й ближче; далі — решта від найближчого (${r2[2] && r2[2].t})`,
+    r2.length >= 3 && r2[0].t === 'Миколаїв' && /Миколаївська/.test(r2[0].s) && r2[1].t === 'Миколаїв' && /Львівська/.test(r2[1].s) && r2[2].t === 'Миколаївська вулиця' && r2.filter(r => r.t === 'Миколаїв').length === 2, JSON.stringify(r2));
+  await shot(page, '64-rank-city');
+  const r3 = await ask('николаев');
+  ok(`російською «николаев» — той самий порядок: ${r3.slice(0, 3).map(r => r.t + ' (' + r.s.split(',').slice(-1)[0].trim() + ')').join(', ')}`, r3.length >= 2 && /Миколаївська/.test(r3[0].s) && /Львівська/.test(r3[1].s), JSON.stringify(r3));
+  const fp = await app(page, () => window.__app.route.rankPlaces([{ label: 'Миколаїв', kind: 't', local: true, pop: 14600, lat: 49.524, lon: 23.98 }, { label: 'Миколаїв', kind: 'c', local: true, pop: 470011, lat: 46.975, lon: 31.994 }], 'Миколаїв', { lat: 49.84, lon: 24.03 }).map(x => x.kind).join());
+  ok('у формі «Рейс» той самий порядок (якщо набрати й не вибрати підказку — береться перша, тобто більше місто)', fp === 'c,t', fp);
+  ok('прохід 37 (порядок) без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 37 (порядок) дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('37')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny', 'land'].includes(x.n)).filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h } });
   const T = sc.title, full = sc.n === 'xiaomi', emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);

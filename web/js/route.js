@@ -26,9 +26,25 @@ export async function geocode(q, near) {
     const close = near && Math.hypot((c[1] - near.lat) * 111, (c[0] - near.lon) * 71) < 40 ? 6 : 0;
     // (1.1.29) вулиця без номера — у пошуку під нею кнопка «Вказати номер будинку»; місто — щоб шукати номер саме там
     const street = (p.osm_key === 'highway' || p.type === 'street') && !p.housenumber, city = p.city || p.town || p.village || p.locality || '';
-    return { lat: c[1], lon: c[0], label: name, sub, ua, street, city, score: kind + exact + close + (20 - i) * 0.5 };
+    const place = p.osm_key === 'place' ? p.osm_value || '' : '';
+    return { lat: c[1], lon: c[0], label: name, sub, ua, street, city, place, score: kind + exact + close + (20 - i) * 0.5 };
   }).filter(x => x.label && x.ua);
-  return out.sort((a, b) => b.score - a.score).slice(0, 7).map(({ lat, lon, label, sub, street, city }) => ({ lat, lon, label, sub, street, city }));
+  const top = out.sort((a, b) => b.score - a.score).slice(0, 12).map(({ lat, lon, label, sub, street, city, place }) => ({ lat, lon, label, sub, street, city, place }));
+  return rankPlaces(top, q, near);
+}
+// (1.1.30) Порядок результатів пошуку, як просив Олексій:
+//  1) міста й селища з такою назвою — від більшого до меншого: «Миколаїв, Миколаївська обл.» раніше за «Миколаїв, Львівська обл.»;
+//  2) далі все інше — вулиці, адреси, села, місця — від найближчого до дальшого: «вулиця Рядова» спершу у Львові, де ви є,
+//     потім у Городку, Тернополі, Києві.
+// ref — від чого міряти (моє місце, місто вулиці, середина карти); без нього лишається порядок сервера.
+export function rankPlaces(list, q, ref) {
+  const w = normName(String(q || '').split(',')[0]).split(' ').filter(Boolean)[0] || '';
+  const size = x => x.kind === 'c' || x.place === 'city' ? 3 : x.kind === 't' || x.place === 'town' ? 2 : 0;
+  // з довідника в телефоні — це збіг назви (українською чи російською); із сервера — назва має починатися з набраного
+  const big = x => size(x) && (x.local || (w && normName(x.label).startsWith(w))) ? size(x) : 0;
+  const has = ref && ref.lat != null;
+  return list.map((x, i) => ({ x, i, b: big(x), d: has ? hav(ref, x) : 0 }))
+    .sort((a, b) => (b.b - a.b) || (a.b ? (b.x.pop || 0) - (a.x.pop || 0) : 0) || (a.d - b.d) || (a.i - b.i)).map(o => o.x);
 }
 // (1.1.29) Назви — мовою місцевості (в Україні — українською), а не мовою телефона: без lang сервер брав мову з налаштувань телефона й
 // віддавав «Lviv», «Chukarina». Якщо сервер колись не прийме lang=default — питаємо без нього.

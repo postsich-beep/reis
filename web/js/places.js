@@ -33,7 +33,7 @@ export function load() {
 
 const kindLabel = k => t(k === 'c' ? 'kindCity' : k === 't' ? 'kindTown' : 'kindVillage');
 export function toPlace(x) {
-  return { lat: x[0], lon: x[1], label: x[3], sub: kindLabel(x[2]) + ', ' + oblastName(x[5]) + ' ' + t('oblShort'), kind: x[2], local: true };
+  return { lat: x[0], lon: x[1], label: x[3], sub: kindLabel(x[2]) + ', ' + oblastName(x[5]) + ' ' + t('oblShort'), kind: x[2], pop: x[6] || 0, local: true };
 }
 
 export function search(q, limit = 8) {

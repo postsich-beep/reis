@@ -8,7 +8,7 @@ import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnaps
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
+import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
@@ -661,7 +661,8 @@ async function softOffer(trip, strict) {
 const vehKind = () => S.vehicle === 'auto' ? 'car' : S.routeMode === 'free' ? 'free' : 'strict';
 function vehHtml() {
   const k = vehKind(), b = (kind, veh, mode, ico, l1, l2) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}">${ico}<span><b>${l1}</b>${l2 ? `<small>${l2}</small>` : ''}</span></button>`;
-  return `<div class="seg veh veh3">${b('strict', 'truck', 'strict', ICON.truck, t('vehTruck'), t('vehStrict'))}${b('free', 'truck', 'free', ICON.truck, t('vehTruck'), t('vehFree'))}${b('car', 'auto', '', ICON.car, t('vehCar'), '')}</div>
+  // (1.1.30) порядок, як попросив Олексій: «на свій розсуд» — перша, «суворо» — посередині, «Легкова» — остання (за замовчуванням — «суворо»)
+  return `<div class="seg veh veh3">${b('free', 'truck', 'free', ICON.truck, t('vehTruck'), t('vehFree'))}${b('strict', 'truck', 'strict', ICON.truck, t('vehTruck'), t('vehStrict'))}${b('car', 'auto', '', ICON.car, t('vehCar'), '')}</div>
     <div class="veh-hint ${k}" id="vehHint">${vehHintHtml(k)}</div>`;
 }
 const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
@@ -669,7 +670,7 @@ const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
 // той самий рейс одразу перераховується для нього. Так вид транспорту видно й можна змінити там, де рейс підтверджують.
 function vehMiniHtml() {
   const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}" aria-label="${t('vehMiniFull_' + kind)}">${ico}<span>${lbl}</span></button>`;
-  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
+  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
 }
 async function pickKind(veh, mode) {
   if (plan.busy || !plan.trip) return;
@@ -1063,13 +1064,15 @@ function showSugg(k, list, head) {
 const ADDR = /\d|вул|просп|пров|пл\.|бульв|шосе|ул\.|улиц|street/i;
 async function findPlaces(q) {
   await places.load();
+  // (1.1.30) міста — від більшого до меншого, решта — від найближчого (rankPlaces)
+  const mc = mapM.map && mapM.map.getCenter ? mapM.map.getCenter() : null, ref = pos.lat != null ? pos : mc ? { lat: mc.lat, lon: mc.lng } : null;
   const local = places.search(q, 8);
-  if (local.length >= 5 && !ADDR.test(q)) return local;
-  if (q.length < 3 || !P.online()) return local;
+  if (local.length >= 5 && !ADDR.test(q)) return rankPlaces(local, q, ref);
+  if (q.length < 3 || !P.online()) return rankPlaces(local, q, ref);
   let remote = [];
-  try { remote = await geocode(q, pos.lat != null ? pos : null); } catch (e) { log('warn', 'пошук: ' + e.message); }
+  try { remote = await geocode(q, ref); } catch (e) { log('warn', 'пошук: ' + e.message); }
   const near = (a, b) => Math.abs(a.lat - b.lat) < 0.02 && Math.abs(a.lon - b.lon) < 0.03;
-  return local.concat(remote.filter(r => !local.some(l => near(l, r)))).slice(0, 9);
+  return rankPlaces(local.concat(remote.filter(r => !local.some(l => near(l, r)))), q, ref).slice(0, 9);
 }
 // (1.1.29) «Їхати сюди» з пошуку: старт — моє місце, фініш — знайдене місце; рейс одразу прокладається (з вибором варіанта й виду рейсу)
 export function routeTo(p) {
