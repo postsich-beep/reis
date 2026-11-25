@@ -15,7 +15,7 @@ export const g = {
 let said = {}, offSince = 0, lastReroute = 0, lastManI = -1;
 // (1.1.28) Маршрут у дорозі САМ не перебудовується. З'їхали з рейсу чи сталося щось інше — показуємо пропозицію з причиною, читаємо її вголос
 // і чекаємо OFFER_SECS секунд. Підтвердили — перебудовуємо; ні (або час вийшов) — ведемо далі запланованим рейсом.
-export const OFFER_SECS = 10, CHOICE_SECS = 45;
+export const OFFER_SECS = 10, CHOICE_SECS = 30;          // на вибір нового маршруту — 30 с; кожен дотик до картки дає ще 30
 let offerT = 0, offerSeq = 0, offAsked = false, onSince = 0, lastOfferEnd = 0, choiceT = 0;
 
 /* ---------- голосова черга ---------- */
@@ -228,10 +228,15 @@ export async function newRouteChoice() {
   if (!alive()) return false;
   c.state = 'ready';
   if (!c.routes.length) { closeChoice('fail'); log('warn', 'новий маршрут: варіантів немає' + (err ? ' — ' + err.message : '')); return false; }
-  bus.emit('choice', c);
+  bus.emit('choice', c); say(t('rrReadyVoice', c.routes.length));
   return true;
 }
-export function selectChoice(i) { const c = g.choice; if (!c || !c.routes[i]) return; c.sel = i; bus.emit('choice', c); }
+export function selectChoice(i) {
+  const c = g.choice; if (!c || !c.routes[i]) return;
+  c.sel = i;
+  if (c.until) { const secs = S.choiceSecs || CHOICE_SECS; c.until = Date.now() + secs * 1000; clearTimeout(choiceT); choiceT = setTimeout(() => cancelChoice('timeout'), secs * 1000); }   // водій вибирає — час іде знову
+  bus.emit('choice', c);
+}
 // Водій підтвердив варіант: відтепер це і є рейс (його ж запам'ятовуємо як «вибраний» — на нього й повертатимемо).
 export function confirmChoice(i) {
   const c = g.choice; if (!c) return false;

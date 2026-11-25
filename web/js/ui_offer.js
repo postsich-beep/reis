@@ -14,7 +14,7 @@ function show(o) {
   shown = o.id;
   // дії з картки (для з'їзду: «Новий маршрут» і «Назад на рейс») — дві великі кнопки; під ними — «Лишити як є» з лічильником:
   // саме це й станеться, коли час вийде
-  const acts = (o.actions || []).map(a => `<button class="btn${a.pri ? ' pri' : ''}" data-rr="${esc(a.id)}">${a.id === 'new' ? ICON.route : a.id === 'back' ? ICON.back || '' : ''}<span>${esc(a.label)}</span></button>`).join('');
+  const acts = (o.actions || []).map(a => `<button class="btn${a.pri ? ' pri' : ''}" data-rr="${esc(a.id)}">${a.id === 'new' ? ICON.route : ''}<span>${esc(a.label)}</span></button>`).join('');
   box.innerHTML = `<div class="rr-t"><span class="rr-ico">${ICON.warn || ''}</span><div class="rr-tx"><b>${esc(o.title)}</b><small>${esc(o.text)}</small></div></div>
     <div class="rr-b">${acts}</div>
     <button class="btn rr-no" data-rr="no"><span>${t('rrNo')}</span><i class="rr-sec" id="rrSec">${left(o)}</i></button>

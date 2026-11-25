@@ -918,7 +918,15 @@ export function previewAlts(list) {
 }
 // (1.1.28) Варіанти нового маршруту в дорозі: list — координати кожного; sel — вибраний (яскравий), решта — сірі (дотик вибирає).
 // Чинний рейс при цьому лишається на карті, як був. list = null — прибрати.
+// Уночі звичайну карту перевертає фільтр (body.mapdark/mapsat — без нього): бурштин під ним темніє до брунатного, а темна облямівка
+// світлішає. Тому під фільтром даємо кольори, які ПІСЛЯ фільтра виглядають помаранчевою лінією з темною облямівкою (підібрано на екрані).
+function selPaint() {
+  if (!map || !map.getLayer || !map.getLayer('route-sel')) return;
+  const b = document.body, inv = b.dataset.theme === 'night' && !b.classList.contains('mapdark') && !b.classList.contains('mapsat');
+  try { map.setPaintProperty('route-sel', 'line-color', inv ? 'hsl(24,100%,46%)' : '#f5a400'); map.setPaintProperty('route-sel-case', 'line-color', inv ? 'hsl(42,100%,76%)' : '#3d2a00'); } catch (_) {}
+}
 export function pickRoutes(list, sel = 0) {
+  selPaint();
   previewAlts(list ? list.map((c, k) => [k, c]).filter(([k]) => k !== sel) : null);
   const src = map && map.getSource && map.getSource('route-sel'); if (!src) return;
   src.setData(list && list[sel] ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: list[sel].map(c => [c[1], c[0]]) } } : EMPTY);

@@ -218,8 +218,11 @@ function toggleRec() {
 
 function railState() {
   const qb = $('bQuick');
-  qb.innerHTML = ICON.quick + (!S.voice ? `<i class="q-badge mute">${ICON.mute}</i>` : S.rec ? '<i class="q-badge rec"></i>' : '');
-  qb.classList.toggle('muted', !S.voice);
+  // (1.1.28) звук має власну кнопку під типом карти — на кнопці швидких налаштувань лишився тільки знак запису треку
+  qb.innerHTML = ICON.quick + (S.rec ? '<i class="q-badge rec"></i>' : '');
+  const sb = $('bSnd'), on = !!S.voice;
+  if (sb.dataset.on !== String(on)) { sb.dataset.on = String(on); sb.innerHTML = on ? ICON.vol : ICON.mute; sb.classList.toggle('off', !on);
+    sb.setAttribute('aria-pressed', String(on)); sb.setAttribute('aria-label', t(on ? 'sndBtnOn' : 'sndBtnOff')); }
   const mb = $('bMap'), cur = mtShown(), key = cur + (P.online() ? '' : '-nonet');
   if (mb.dataset.k !== key) { mb.dataset.k = key; mb.classList.toggle('nonet', !P.online());
     mb.innerHTML = `<span class="mt-seg on" data-k="${cur}">${MT_PIC[cur]}</span>`;
@@ -658,7 +661,7 @@ const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
 // Те саме — одним рядком на екрані вибору маршруту (рейс уже прокладено: з форми, з точки на карті, з архіву). Натиснули інший вид —
 // той самий рейс одразу перераховується для нього. Так вид транспорту видно й можна змінити там, де рейс підтверджують.
 function vehMiniHtml() {
-  const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}">${ico}<span>${lbl}</span></button>`;
+  const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}" aria-label="${t('vehMiniFull_' + kind)}">${ico}<span>${lbl}</span></button>`;
   return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
 }
 async function pickKind(veh, mode) {
@@ -1589,7 +1592,7 @@ export function initUI() {
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
   bus.on('panel', name => { if (name) { if (rrOpen()) cancelChoice('panel'); else if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
-  bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && $('routePick').dataset.mode !== 'trip') pickHide(); });
+  bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && !['trip', 'rr'].includes($('routePick').dataset.mode)) pickHide(); });
   bus.on('route', () => { if (tsOpen()) { tsRender(); requestAnimationFrame(tsFit); } });
   bus.on('guide', () => { if (tsOpen()) { const kv = document.querySelector('#routePick .ts-kv'); if (kv) kv.outerHTML = tsKvHtml(); } });
   $('routePick').addEventListener('input', tsInput);
@@ -1671,6 +1674,7 @@ export function initUI() {
     if (!$('repSheet').hidden) { repOpen(false); return true; }
     if (aim) { aimEnd(); return true; }
     if (pm) { ptsEnd(true); return true; }
+    if (rrOpen()) { cancelChoice('no'); return true; }          // (1.1.28) «Назад» на виборі нового маршруту — лишити старий
     if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
@@ -1698,6 +1702,7 @@ export function initUI() {
   bus.on('calib', tabCalSync); bus.on('calibSaved', () => { tabCalSync(); toast(t('cbSaved'), 'green', 5000); });
   bus.on('reports', repTabSync); bus.on('trip', repTabSync);
   $('bMap').onclick = e => { e.stopPropagation(); mapTypeTap(); };
+  $('bSnd').onclick = e => { e.stopPropagation(); S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); P.vibrate(15); };
   // мережа зникла / повернулась: мініатюра на кнопці і — якщо вибрано супутник — коротко водієві
   const netChanged = () => railState();
   window.addEventListener('online', netChanged); window.addEventListener('offline', netChanged);
