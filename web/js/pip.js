@@ -25,7 +25,7 @@ function draw() {
   const man = $('man'), manOn = man && !man.hidden, info = manOn && man.classList.contains('info');
   const ico = manOn ? $('manIco').innerHTML : '', dist = manOn ? $('manDist').textContent : fmtClock(new Date());
   const sub = g.arrived ? ((g.trip && g.trip.b && g.trip.b.label) || '') : g.active && g.route ? `${fmtDist(g.remain)} · ${fmtClock(new Date(g.eta))}` : t('pipNoTrip');
-  const k = [ico.length, dist, sub, info, g.offRoute].join('|'); if (k === key) return; key = k;
+  const k = [dist, sub, info, g.offRoute, ico].join('|'); if (k === key) return; key = k;   // сам малюнок стрілки, а не його довжина: «ліворуч» і «праворуч» однакові завдовжки
   box.className = (info ? 'info' : '') + (g.offRoute ? ' off' : '');
   box.innerHTML = `${ico ? `<span class="pv-ico">${ico}</span>` : ''}<span class="pv-t"><b>${esc(dist)}</b><small>${esc(sub)}</small></span>`;
 }
@@ -45,6 +45,6 @@ export function init() {
   bus.on('trip', sync); bus.on('arrived', sync);
   bus.on('settings', k => { if (k === 'pip') sync(); });
   bus.on('guide', draw); bus.on('pos', draw);
-  setInterval(draw, 1000);
+  setInterval(() => { sync(); draw(); }, 1000);     // sync — страховка: рейс могли завершити шляхом, що не шле події
   sync();
 }
