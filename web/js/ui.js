@@ -226,6 +226,7 @@ function railState() {
   const qb = $('bQuick');
   // (1.1.28) звук має власну кнопку під типом карти — на кнопці швидких налаштувань лишився тільки знак запису треку
   qb.innerHTML = ICON.quick + (S.rec ? '<i class="q-badge rec"></i>' : '');
+  const sbar = $('srBar'); if (!sbar.dataset.k) { sbar.dataset.k = '1'; sbar.innerHTML = ICON.search + `<span>${t('srBar')}</span>`; $('bSearch').innerHTML = ICON.search; $('bSearch').setAttribute('aria-label', t('srBtn')); }
   const sb = $('bSnd'), on = !!S.voice;
   if (sb.dataset.on !== String(on)) { sb.dataset.on = String(on); sb.innerHTML = on ? ICON.vol : ICON.mute; sb.classList.toggle('off', !on);
     sb.setAttribute('aria-pressed', String(on)); sb.setAttribute('aria-label', t(on ? 'sndBtnOn' : 'sndBtnOff')); }
@@ -1070,6 +1071,15 @@ async function findPlaces(q) {
   const near = (a, b) => Math.abs(a.lat - b.lat) < 0.02 && Math.abs(a.lon - b.lon) < 0.03;
   return local.concat(remote.filter(r => !local.some(l => near(l, r)))).slice(0, 9);
 }
+// (1.1.29) «Їхати сюди» з пошуку: старт — моє місце, фініш — знайдене місце; рейс одразу прокладається (з вибором варіанта й виду рейсу)
+export function routeTo(p) {
+  if (!p || g.active) return;
+  plan.a = null; plan.v = null; plan.b = { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' }; plan.trip = null; plan.routes = []; plan.sel = 0;
+  openPanel('trip'); doBuild();
+}
+// Дім і Робота — першими серед недавніх у полях «Рейсу»
+const homeWork = () => ['home', 'work'].map(k => S[k] && S[k].lat != null ? { ...S[k], label: S[k].label, sub: t(k === 'home' ? 'srHome' : 'srWork') + (S[k].sub ? ' · ' + S[k].sub : '') } : null).filter(Boolean);
+const recentList = () => { const hw = homeWork(); return hw.concat(places.recent().filter(r => !hw.some(h => Math.abs(h.lat - r.lat) < 1e-4 && Math.abs(h.lon - r.lon) < 1e-4))).slice(0, 9); };
 async function doBuild() {
   plan.err = '';
   // текст у полі без вибраної підказки — беремо перший результат пошуку
@@ -1166,7 +1176,7 @@ function tripInput(e) {
   if (k === 'b') requestAnimationFrame(tripToolsSync);
   plan[k] = null; clearTimeout(geoTimer);
   const q = e.target.value.trim();
-  if (!q) { showSugg(k, places.recent(), t('recentPlaces')); return; }
+  if (!q) { showSugg(k, recentList(), t('recentPlaces')); return; }
   // довідник — одразу з першої літери; сервер — лише після паузи в наборі
   if (places.pl.ready) showSugg(k, places.search(q, 8));
   geoTimer = setTimeout(async () => {
@@ -1177,7 +1187,7 @@ function tripInput(e) {
 function tripFocus(e) {
   const k = e.target.dataset && e.target.dataset.f; if (!k) return;
   places.load();
-  if (!e.target.value.trim()) showSugg(k, places.recent(), t('recentPlaces'));
+  if (!e.target.value.trim()) showSugg(k, recentList(), t('recentPlaces'));
 }
 definePanel('trip', {
   title: () => t('tabTrip'),

@@ -12,10 +12,10 @@ export async function geocode(q, near) {
   if (m) { const lat = +m[1].replace(',', '.'), lon = +m[2].replace(',', '.'); return [{ lat, lon, label: lat.toFixed(5) + ', ' + lon.toFixed(5), sub: '' }]; }
   let url = PHOTON + '/api/?q=' + encodeURIComponent(q) + '&limit=20&bbox=' + UA_BBOX;
   if (near) url += '&lat=' + near.lat.toFixed(4) + '&lon=' + near.lon.toFixed(4);
-  const j = await getJson(url, { timeout: 12000 });
+  const j = await photon(url);
   const nq = normName(q);
   const out = (j.features || []).map((f, i) => {
-    const p = f.properties || {}, c = f.geometry.coordinates;
+    const p = clean(f.properties || {}), c = f.geometry.coordinates;
     const name = p.name || [p.street, p.housenumber].filter(Boolean).join(' ') || p.city || '';
     const sub = [p.street && p.name ? [p.street, p.housenumber].filter(Boolean).join(' ') : '', p.city !== name ? p.city : '', p.county, p.state].filter(Boolean).join(', ');
     // лише Україна: у прямокутник пошуку потрапляють і шматки Росії та Білорусі
@@ -24,10 +24,21 @@ export async function geocode(q, near) {
     const kind = p.osm_key === 'place' ? ({ city: 50, town: 38, village: 22, suburb: 16, hamlet: 10 }[p.osm_value] || 12) : 6;
     const nn = normName(name), exact = nn === nq ? 30 : nn.startsWith(nq) ? 10 : 0;
     const close = near && Math.hypot((c[1] - near.lat) * 111, (c[0] - near.lon) * 71) < 40 ? 6 : 0;
-    return { lat: c[1], lon: c[0], label: name, sub, ua, score: kind + exact + close + (20 - i) * 0.5 };
+    // (1.1.29) вулиця без номера — у пошуку під нею кнопка «Вказати номер будинку»; місто — щоб шукати номер саме там
+    const street = (p.osm_key === 'highway' || p.type === 'street') && !p.housenumber, city = p.city || p.town || p.village || p.locality || '';
+    return { lat: c[1], lon: c[0], label: name, sub, ua, street, city, score: kind + exact + close + (20 - i) * 0.5 };
   }).filter(x => x.label && x.ua);
-  return out.sort((a, b) => b.score - a.score).slice(0, 7).map(({ lat, lon, label, sub }) => ({ lat, lon, label, sub }));
+  return out.sort((a, b) => b.score - a.score).slice(0, 7).map(({ lat, lon, label, sub, street, city }) => ({ lat, lon, label, sub, street, city }));
 }
+// (1.1.29) Назви — мовою місцевості (в Україні — українською), а не мовою телефона: без lang сервер брав мову з налаштувань телефона й
+// віддавав «Lviv», «Chukarina». Якщо сервер колись не прийме lang=default — питаємо без нього.
+async function photon(url) {
+  try { return await getJson(url + '&lang=default', { timeout: 12000 }); }
+  catch (e) { if (e.status === 400) return getJson(url, { timeout: 12000 }); throw e; }
+}
+// У даних OSM буває кілька значень через «;» («Chukarina;School») — беремо перше
+const CLEAN = ['name', 'street', 'city', 'town', 'village', 'locality', 'county', 'state', 'district'];
+function clean(p) { const o = { ...p }; for (const k of CLEAN) if (typeof o[k] === 'string') o[k] = o[k].split(';')[0].trim(); return o; }
 // Порівняння назв без різниці між українським і російським написанням (Львів/Львов, Київ/Киев).
 export function normName(s) {
   return String(s || '').toLowerCase().replace(/[ʼ'’`\-ьъ]/g, '')
@@ -37,8 +48,8 @@ export function normName(s) {
 }
 
 export async function reverse(lat, lon) {
-  const j = await getJson(PHOTON + '/reverse?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5), { timeout: 10000 });
-  const p = j.features && j.features[0] && j.features[0].properties;
+  const j = await photon(PHOTON + '/reverse?lat=' + lat.toFixed(5) + '&lon=' + lon.toFixed(5));
+  const p = j.features && j.features[0] && clean(j.features[0].properties || {});
   return p ? { name: p.name || '', city: p.city || p.town || p.village || p.name || '', county: p.county || '', state: p.state || '', cc: p.countrycode || '' } : null;
 }
 
@@ -70,7 +81,7 @@ export const OBLAST_CENTER = {
 export async function placeSearch(q) {
   const url = PHOTON + '/api/?q=' + encodeURIComponent(q) + '&limit=4&bbox=' + UA_BBOX +
     '&osm_tag=place:city&osm_tag=place:town&osm_tag=place:village&osm_tag=place:hamlet&osm_tag=place:suburb';
-  const j = await getJson(url, { timeout: 12000 });
+  const j = await photon(url);
   return (j.features || []).map(f => ({ name: (f.properties || {}).name || '', state: (f.properties || {}).state || '', lat: f.geometry.coordinates[1], lon: f.geometry.coordinates[0] })).filter(x => x.name);
 }
 export const townName = x => typeof x === 'string' ? x : (x && x.name) || '';

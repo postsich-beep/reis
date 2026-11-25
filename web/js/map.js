@@ -608,7 +608,7 @@ export function setTilt(v, live = false) {
 // у нижній частині вільної карти — і дивиться строго вгору; рухається й повертається карта під нею.
 // Позицію між фіксами (раз на секунду) ведемо плавно кадр за кадром: і стрілку, і камеру — однією точкою,
 // тому стрілка не «гуляє» відносно центру, як було з окремою анімацією камери.
-export const ANCHOR = { frac: 0.72 };          // частка висоти вільної карти від її верху до стрілки
+export const ANCHOR = { frac: 0.75 };          // частка висоти вільної карти від її верху до стрілки (1.1.29: Діма — «на пару міліметрів нижче, більше простору попереду»; було 0,72)
 const cam = { cur: null, from: null, to: null, t0: 0, dur: 0, lastPosT: 0, brg: null, tBrg: 0, z: null, raf: 0, lastT: 0, drawT: 0, blendUntil: 0, pad: null, anc: null, ancT: 0,
   dd: null, rdT: 0, rdAt: 0, v: 0, idx: null, onR: false };
 export const camState = cam;
@@ -989,7 +989,8 @@ export function setMapStyle(url) {
   // diff: false — повне перезавантаження стилю, інакше бібліотека «порівнює» стилі й мовчки викидає наші шари маршруту
   try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
-export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
+// offY — на скільки пікселів підняти точку над серединою (коли низ карти закриває картка)
+export function flyTo(p, zoom = 14, offY = 0) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); noPad(); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600, offset: [0, -Math.round(offY)] }); }
 
 function drawMarks() {
   const src = map && map.getSource && map.getSource('marks'); if (!src) return;
