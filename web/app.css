@@ -947,6 +947,15 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .card.softcard{margin-top:8px;border:2px solid var(--yellow);font-size:14px;line-height:1.35} .card.softcard.mild{border:0;color:var(--ink-2)}
 .alts.rp-cards .alt:nth-child(3):last-child{grid-column:1/-1;min-height:0}
 .alts.rp-cards{max-height:max(118px,calc(100vh - var(--st) - 330px));overflow-y:auto;overscroll-behavior:contain}   /* три картки на малому екрані — прокручуються, шторка не вилазить за екран */
+/* (1.1.31) три варіанти маршруту (як у Google) — у три стовпчики, усі видно одразу; четвертий («через заборону для фур») — сіткою 2×2 */
+.alts.n3:not(.rr-cards){grid-template-columns:repeat(3,minmax(0,1fr))}
+.alts.n3:not(.rr-cards) .alt{padding:9px 9px}
+.alts.n3:not(.rr-cards) .alt b{font-size:19px;white-space:normal}
+.alts.n3:not(.rr-cards) .alt span{font-size:14px}
+.alts.n3:not(.rr-cards) .alt small{font-size:12.5px}
+.alts.n3:not(.rr-cards) .alt .fl i{font-size:12px;padding:2px 5px}
+.alts.rp-cards.n3:not(.rr-cards) .alt:nth-child(3):last-child{grid-column:auto;min-height:0}
+@media (max-width:350px){ .alts.n3:not(.rr-cards) .alt b{font-size:17px} }
 
 /* 1.1.11: камера в списку шарів — тим самим значком, що й на карті */
 .sdot.cam{width:22px;height:22px;border:0;background:none;box-shadow:none;padding:0}
