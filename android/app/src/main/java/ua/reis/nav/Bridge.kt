@@ -84,6 +84,10 @@ class Bridge(private val act: MainActivity) {
         }
     }
 
+    /** Вікно поверх інших програм, коли водій іде з «Рейсу» під час рейсу. Повертає, чи телефон це вміє. */
+    @JavascriptInterface
+    fun setPip(on: Boolean): Boolean = try { act.setPip(on) } catch (_: Exception) { false }
+
     @JavascriptInterface
     fun openUrl(url: String) {
         if (!url.startsWith("https://")) return

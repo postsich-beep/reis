@@ -194,6 +194,9 @@ export function appInfo() {
   if (N) { try { return JSON.parse(N.info()); } catch (_) {} }
   return { app: 'web', code: 0, native: false };
 }
+/** Вікно поверх інших програм (оболонка №8+): чи вміє оболонка, і «потрібне / не потрібне» (повертає, чи телефон це підтримує). */
+export const pipCapable = () => !!(N && typeof N.setPip === 'function');
+export function setPip(on) { if (pipCapable()) { try { return !!N.setPip(!!on); } catch (_) {} } return false; }
 export function openLocationSettings() { if (N && typeof N.openLocationSettings === 'function') { try { N.openLocationSettings(); return true; } catch (_) {} } return false; }
 export function openAppSettings() { if (N && typeof N.openAppSettings === 'function') { try { N.openAppSettings(); return true; } catch (_) {} } return false; }
 /* ---------- офлайн-карта (лише в застосунку) ---------- */

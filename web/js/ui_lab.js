@@ -148,7 +148,7 @@ function settingsHtml() {
   <div class="muted" style="margin:-4px 2px 10px">${t('glassHint')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setMapStyle')}</div>
   ${offlineActive() ? `<div class="muted" style="margin:0 2px 10px">${t('styleOffNote')}</div>` : seg('style', STYLES.map(([k, u]) => [k, t('style_' + k), S.styleUrl === u]))}
-  <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}${tog('routeCats')}</div>
+  <div class="list">${tog('view3d')}${tog('autoCenter')}${tog('keepAwake')}${toggleRow('pip', t('set_pip'), t(P.pipCapable() ? 'setd_pip' : P.isNative ? 'setd_pipOld' : 'setd_pipWeb'), S.pip !== false)}${tog('routeCats')}</div>
 
   <div class="sec">${t('secPoints')}</div>
   <div id="ptsSec">${pointsHtml()}</div>

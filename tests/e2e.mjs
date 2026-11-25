@@ -4113,6 +4113,72 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   await ctx.close();
 } catch (e) { ok(`прохід 34 (${sc.n}) дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 
+/* ============ прохід 35 (1.1.27): «Рейс» у вікні поверх інших програм (як у Google Maps) — що просимо в оболонки й що видно у вікні ============ */
+if (run('35')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 360, height: 670 } });
+  const n = coords.length, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const trip = { id: 't-35', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: turnIdx[2], len: 3500, time: 300 }, { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Соборності', streets: ['вулиця Соборності'], i0: turnIdx[2], i1: n - 1, len: 23300, time: 1400 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  const calls = () => app(page, () => window.__nativeCalls.filter(x => /^setPip/.test(x)).join());
+  const openSettings = async () => { await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody [data-tg="pip"]'); };
+  const rowTxt = () => app(page, () => { const r = document.querySelector('#panelBody [data-tg="pip"]'); return r ? { txt: r.textContent.replace(/\s+/g, ' ').trim(), on: !!r.querySelector('.on, [aria-checked="true"], input:checked') || /\bon\b/.test(r.className) || r.getAttribute('aria-checked') === 'true' } : null; });
+  // а) стара оболонка (без setPip): рядок у налаштуваннях каже, що потрібне оновлення; оболонку ні про що не просимо
+  await openSettings();
+  let r0 = await rowTxt();
+  ok('налаштування: є рядок «Вікно поверх інших програм»; у старій оболонці (№7 і давніші) під ним — «Потрібна нова версія програми — встановіть оновлення (APK)…»', !!r0 && /^Вікно поверх інших програм/.test(r0.txt) && /Потрібна нова версія програми/.test(r0.txt), JSON.stringify(r0));
+  await page.click('#panelOk'); await sleep(200);
+  // б) нова оболонка (№8): уміє setPip
+  await app(page, () => { window.__nativeRev = 8; window.ReisNative.setPip = on => { window.__nativeCalls.push('setPip:' + on); return true; }; });
+  await openSettings();
+  r0 = await rowTxt();
+  ok(`нова оболонка: під рядком — пояснення («${r0 && r0.txt.slice(27, 110)}…»), за замовчуванням увімкнено`, !!r0 && /Під час рейсу, коли йдете з «Рейсу»/.test(r0.txt) && /двома пальцями/.test(r0.txt) && await app(page, () => window.__app.S.pip !== false), JSON.stringify(r0));
+  await shot(page, '56-pip-setting');
+  await page.click('#panelOk'); await sleep(200);
+  ok('рейсу немає — вікно в оболонки не просимо', !/setPip:true/.test(await calls()), await calls());
+  await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(400);
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip); await sleep(500);
+  await emitN('loc', { prov: 'gps', lat: coords[6][0], lon: coords[6][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(900);
+  ok('рейс запущено — оболонці сказано: вікно потрібне (setPip:true)', /(^|,)setPip:true$/.test(await calls()), await calls());
+  // в) перемикач у налаштуваннях
+  await openSettings(); await page.click('#panelBody [data-tg="pip"]'); await sleep(300);
+  ok('вимкнули в налаштуваннях — оболонці сказано: не потрібне (setPip:false); налаштування запам\'ятано', /setPip:true,setPip:false$/.test(await calls()) && await app(page, () => window.__app.S.pip === false && JSON.parse(localStorage.getItem('reis.settings')).pip === false), await calls());
+  await page.click('#panelBody [data-tg="pip"]'); await sleep(300);
+  ok('увімкнули знову — потрібне (setPip:true)', /setPip:false,setPip:true$/.test(await calls()), await calls());
+  await page.click('#panelOk'); await sleep(300);
+  // г) оболонка повідомила: програма у вікні. Лишаються карта й одна смужка: стрілка маневру, скільки до нього, «лишилось · час прибуття»
+  const z0 = await app(page, () => +window.__app.map.map.getZoom().toFixed(2));
+  const look = () => app(page, () => { const vis = el => !!el && !el.hidden && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+    const pv = document.getElementById('pipView'), r = pv.getBoundingClientRect(), b = pv.querySelector('b'), sm = pv.querySelector('small'), ic = pv.querySelector('.pv-ico'), m = window.__app.map.map, cv = m.getCanvas().getBoundingClientRect();
+    const others = [...document.body.children].filter(e => e.id !== 'map' && e.id !== 'pipView' && !/^(SCRIPT|STYLE)$/.test(e.tagName) && vis(e)).map(e => e.id || e.tagName);
+    const fit = el => !el || (el.scrollWidth <= el.clientWidth + 1 && el.getBoundingClientRect().right <= innerWidth + 1);
+    return { pip: document.body.classList.contains('pip'), shown: vis(pv), others, w: innerWidth, h: innerHeight, pv: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], pvH: Math.round(r.height), dist: b ? b.textContent : '', sub: sm ? sm.textContent : '', ico: !!ic && !!ic.querySelector('svg'), icoW: ic ? Math.round(ic.getBoundingClientRect().width) : 0,
+      fs: [b ? parseFloat(getComputedStyle(b).fontSize) : 0, sm ? parseFloat(getComputedStyle(sm).fontSize) : 0], fit: fit(b) && fit(sm) && r.right <= innerWidth + 1, canvas: [Math.round(cv.width), Math.round(cv.height)], follow: window.__app.map.view.follow, zoom: +m.getZoom().toFixed(2), state: window.__app.pipWin.pip.on }; });
+  const sizes = [[200, 267, 'звичайне'], [150, 200, 'найменше'], [300, 400, 'розтягнуте'], [400, 533, 'найбільше'], [320, 240, 'телефон набік']];
+  for (const [w, h, nm] of sizes) {
+    await page.setViewportSize({ width: w, height: h }); await emitN('pip', { on: true }); await sleep(900);
+    await emitN('loc', { prov: 'gps', lat: coords[7][0], lon: coords[7][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(700);
+    const v = await look();
+    ok(`вікно ${w}×${h} (${nm}): на екрані лише карта й смужка маневру — стрілка (${v.icoW} px), «${v.dist}» (${v.fs[0]} px), під ним «${v.sub}» (${v.fs[1]} px); усе влазить, смужка займає ${v.pvH} із ${v.h} px`,
+      v.pip && v.state && v.shown && v.others.length === 0 && v.ico && v.icoW >= 30 && /^\d+(,\d)? (км|м)$/.test(v.dist) && /^\d+(,\d)? км · \d\d:\d\d$/.test(v.sub) && v.fs[0] >= 20 && v.fs[1] >= 11 && v.fit && v.pv[0] === 0 && v.pv[1] === 0 && v.pv[2] === v.w && v.pvH <= v.h * 0.42 && Math.abs(v.canvas[0] - v.w) <= 1 && Math.abs(v.canvas[1] - v.h) <= 1 && v.follow, JSON.stringify(v));
+    if (w === 200 || w === 400 || w === 320) await shot(page, `57-pip-${w}x${h}`);
+  }
+  const zp = (await look()).zoom;
+  await page.setViewportSize({ width: 200, height: 267 }); await sleep(600);
+  ok(`у вікні карта трохи далі (масштаб ${z0} → ${(await look()).zoom}) — видно більше дороги попереду`, (await look()).zoom <= z0 - 0.5, `${z0} → ${zp} → ${(await look()).zoom}`);
+  // ґ) з'їхали з маршруту / прибули — у вікні те саме, що й на великому екрані
+  await app(page, () => { const g = window.__app.guide.g; g.arrived = true; g.active = false; window.__app.bus.emit('arrived', g); window.__app.bus.emit('guide', g); }); await sleep(1300);
+  let v = await look();
+  ok(`прибули — у вікні «${v.dist}», під ним місце призначення («${v.sub}»); оболонці сказано, що нове вікно вже не потрібне, а це лишається, доки його не закриють`, /прибули/i.test(v.dist) && v.sub === 'Полтава' && v.fit && v.pip && /setPip:false$/.test(await calls()), JSON.stringify({ dist: v.dist, sub: v.sub, calls: await calls() }));
+  await shot(page, '57-pip-arrived');
+  // д) розгорнули назад — звичайний екран, усе на місці
+  await page.setViewportSize({ width: 360, height: 670 }); await emitN('pip', { on: false }); await sleep(900);
+  v = await look();
+  const back = await app(page, () => { const vis = el => !!el && !el.hidden && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden'; return { top: vis(document.getElementById('top')), tabs: vis(document.getElementById('tabs')), speed: vis(document.getElementById('speed')), rail: vis(document.getElementById('rail')) }; });
+  ok('розгорнули назад на весь екран — смужки вікна немає, маневр, круг швидкості, кнопки й нижня плашка на місці; нічого не накладається', !v.pip && !v.shown && back.top && back.tabs && back.speed && back.rail && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ v: { pip: v.pip, shown: v.shown }, back, lay: await page.evaluate(layoutCheck) }));
+  ok('прохід 35 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 35 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+
 /* ============ справжні пачки номерів на справжній карті (лише на прохання: ADDR_DIR=тека ONLY=addrreal --shots тека) ============ */
 // ADDR_DIR — тека з v1/index.json і пачками, взятими з гілки addr сховища. Карта — справжній квадрат Львова (city.pmtiles).
 if (process.env.ADDR_DIR && run('addrreal')) try {

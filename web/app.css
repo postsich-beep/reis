@@ -1312,3 +1312,20 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
 @media (min-width:1010px) and (max-width:1100px) and (min-height:521px){ #speed{left:20px} #spdLim,#spdGps{left:-18px} #cam{left:140px} }
 /* круг швидкості тепер більший і вище — поки відкрите меню точки на карті, він під ним не потрібен (як уже було на невисоких екранах) */
 @media (orientation:portrait){ body:has(#pick:not([hidden])) :is(#speed,#cam){visibility:hidden} }
+
+/* ---- 1.1.27: «Рейс» у вікні поверх інших програм (як у Google Maps) ----
+   Вікно маленьке (від ~150 до ~400 px завширшки — розмір міняє водій) і дотиків програмі не передає: лишаємо тільки карту й одну смужку
+   згори — стрілка маневру, скільки до нього, і «лишилось · час прибуття». Розміри — від ширини вікна, щоб читалось у будь-якому. */
+body.pip > :not(#map):not(#pipView):not(script):not(style){display:none!important}
+body.pip .maplibregl-ctrl,body.pip .rpq,body.pip .mk-pop{display:none!important}
+#pipView{position:absolute;left:0;right:0;top:0;z-index:40;display:flex;align-items:center;gap:2.5vw;padding:2vw 3vw;
+  background:rgba(19,23,28,.9);color:#fff;border-bottom:1px solid rgba(255,255,255,.14)}
+#pipView[hidden]{display:none}
+#pipView .pv-ico{flex:none;width:clamp(30px,24vw,84px);height:clamp(30px,24vw,84px);border-radius:22%;background:rgba(255,255,255,.12);display:grid;place-items:center}
+#pipView .pv-ico svg{width:76%;height:76%;display:block}
+#pipView .pv-t{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:center;gap:.6vw}
+#pipView b{display:block;font:800 clamp(20px,17vw,60px)/1 var(--f-num);color:var(--amber);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-variant-numeric:tabular-nums}
+#pipView small{display:block;font:700 clamp(11px,7.2vw,24px)/1.1 var(--f-num);color:#e7ebf0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#pipView.info b{font-size:clamp(15px,10.5vw,40px);white-space:normal;line-height:1.05}
+#pipView.off b{color:#ff8a8a}
+#pipView:not(:has(.pv-ico)) .pv-t{align-items:center;text-align:center}
