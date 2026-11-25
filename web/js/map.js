@@ -638,6 +638,10 @@ export function anchorPoint() {
     const tp = document.getElementById('top'), bt = document.getElementById('bottom');
     if (tp && !tp.hidden) top = Math.max(0, tp.getBoundingClientRect().bottom - cr.top);
     if (bt && !bt.hidden) bot = Math.min(H, bt.getBoundingClientRect().top - cr.top);
+    // (1.1.28) кнопки «без GPS» (Поворот, ±100) тепер стоять стовпчиком справа над повзунком, а не в нижній плашці: стрілку тримаємо
+    // вище за них — щоб дорога біля машини (за нею звіряють ±100) не ховалась під кнопками
+    const nd = document.getElementById('nudge'), nq = nd && !nd.hidden ? nd.getBoundingClientRect() : null;
+    if (nq && nq.height > 0 && nq.left < W / 2 + 120 && nq.top - cr.top - top >= 200) bot = Math.min(bot, nq.top - cr.top);   // на планшеті кнопки далеко збоку — не заважають
     if (bot - top < 160) { top = 0; bot = H; }
   } else {                                       // альбомна: плашки по боках, середина екрана вільна
     const st = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--st')) || 0;

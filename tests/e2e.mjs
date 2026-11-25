@@ -4217,6 +4217,73 @@ if (process.env.ADDR_DIR && run('addrreal')) try {
 } catch (e) { ok('справжні пачки номерів', false, String(e.message).split('\n')[0]); } finally { PM.fonts = false; PM.file = 'tiny'; PACKS.on = false; OFM.down = false; }
 
 /* ============ прохід 2: звичайний браузер (без оболонки) ============ */
+/* ============ прохід 36 (1.1.28): сітка головного екрана — осі, проміжки, дзеркальні відступи ============
+   Олексій: «круги швидкості опусти нижче», «над повзунком спершу хрестик "моє місце", над хрестиком — ±100», «зроби собі сітку й перевір,
+   щоб усе було рівненько, симетрія в усіх значках». Правила: проміжок між сусідами й до плашки — 10 px; правий стовпчик (кнопки вгорі,
+   «Моє місце», ±100) — на одній осі з повзунком нахилу; круги ліворуч — так само далеко від лівого краю, як стовпчик від правого;
+   кнопки ±100 круг швидкості більше не піднімають. */
+if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny', 'xiaomi', 'tall', 'land', 'tablet', 'notch'].includes(x.n)), { n: 'tabland', w: 1272, h: 702, dpr: 1, title: 'планшет набік 1272×702' }].filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+  const T = sc.title, n = coords.length, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  if (sc.st) await app(page, ([st, sb]) => { const r = document.documentElement.style; r.setProperty('--st', st + 'px'); r.setProperty('--sb', sb + 'px'); }, [sc.st, sc.sb]);
+  const trip = { id: 't-36', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: turnIdx[2], len: 3500, time: 300 }, { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Соборності', streets: ['вулиця Соборності'], i0: turnIdx[2], i1: n - 1, len: 23300, time: 1400 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  const meas = (prep = '') => app(page, prep => { if (/lim/.test(prep)) { const l = document.getElementById('spdLim'); l.hidden = false; l.textContent = '50'; } if (/cam/.test(prep)) { const c = document.getElementById('cam'); c.hidden = false; document.getElementById('camMax').textContent = '90'; document.getElementById('camDist').textContent = '450 м'; }
+    const o = {}, vis = el => !!el && !el.hidden && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+    const sel = { top: '#top', quick: '#bQuick', map: '#bMap', center: '#bCenter', fwd: '#bFwd100', back: '#bBack100', turn: '#bTurn', nudge: '#nudge', tilt: '#tilt', thumb: '.tl-thumb', speed: '#speed', lim: '#spdLim', gps: '#spdGps', cam: '#cam', attr: '#attr', bar: '#tabbar', flat: '#tabbar .tb-main', tripbar: '#tripbar' };
+    for (const k in sel) { const e = document.querySelector(sel[k]); if (!vis(e)) { o[k] = null; continue; } const r = e.getBoundingClientRect(); o[k] = { l: +r.left.toFixed(1), t: +r.top.toFixed(1), r: +r.right.toFixed(1), b: +r.bottom.toFixed(1), cx: +((r.left + r.right) / 2).toFixed(1), cy: +((r.top + r.bottom) / 2).toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) }; }
+    const a = window.__app.map.anchorPoint(); o.anc = { y: a.y, bot: Math.round(a.bot) }; o.W = innerWidth; o.H = innerHeight; o.follow = window.__app.map.view.follow; return o; }, prep);
+  const near = (a, b, tol = 1) => Math.abs(a - b) <= tol;
+  const phone = sc.w <= 1009 && !(sc.w > sc.h && sc.h <= 520), exact = phone && sc.w > 340, wideTab = sc.w >= 1010 && sc.h >= 521;
+  const lay = async () => await page.evaluate(layoutCheck);
+  await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(600);
+  // а) без рейсу, карту зсунули — зʼявилось «Моє місце»
+  await app(page, () => { window.__app.map.setFollow(false); window.__app.map.view.lastTouch = Date.now() + 600000; window.dispatchEvent(new Event('resize')); }); await sleep(700);
+  const a = await meas(); await shot(page, `60-grid-${sc.n}-1`);
+  if (phone) {
+    ok(`[${T}] «Моє місце» — одразу над повзунком нахилу (проміжок ${a.center && a.bar ? Math.round(a.bar.t - a.center.b) : '?'} px)${exact ? ` і на одній осі з ним (хрестик ${a.center.cx}, ручка ${a.thumb.cx})` : ''}; у межах екрана`,
+      !!a.center && near(a.bar.t - a.center.b, 10) && (!exact || near(a.center.cx, a.thumb.cx)) && a.center.r <= a.W - 4 && Math.abs(a.center.cx - a.thumb.cx) <= 10, JSON.stringify({ center: a.center, thumb: a.thumb, bar: a.bar }));
+    if (exact) ok(`[${T}] кнопки справа вгорі — на тій самій осі (${a.quick.cx}, ${a.map.cx} | повзунок ${a.tilt.cx}); між ними ${Math.round(a.map.t - a.quick.b)} px, до верхньої плашки ${Math.round(a.quick.t - a.top.b)} px`,
+      near(a.quick.cx, a.tilt.cx) && near(a.map.cx, a.tilt.cx) && near(a.map.t - a.quick.b, 10) && near(a.quick.t - a.top.b, 10), JSON.stringify({ quick: a.quick, map: a.map, tilt: a.tilt, top: a.top }));
+    ok(`[${T}] круги ліворуч опущено до плашки: кружечок GPS — за ${Math.round(a.flat.t - a.gps.b)} px над нею; від лівого краю (${a.gps.l}) стільки ж, як «Моє місце» від правого (${+(a.W - a.center.r).toFixed(1)})`,
+      near(a.flat.t - a.gps.b, 10) && near(a.gps.l, a.W - a.center.r) && a.speed.b <= a.flat.t - 4, JSON.stringify({ gps: a.gps, speed: a.speed, flat: a.flat, center: a.center }));
+    ok(`[${T}] ⓘ (про карту) — у кутку між плашкою й виступом повзунка: не в стовпчику кнопок, нічого не закриває`, !!a.attr && a.attr.r <= a.tilt.l + 1 && a.attr.b <= a.flat.t && a.attr.t >= a.bar.t && (await lay()).length === 0, JSON.stringify({ attr: a.attr, tilt: a.tilt, lay: await lay() }));
+  } else if (wideTab) {
+    ok(`[${T}] широкий планшет: «Моє місце» у правому куті — на одній висоті з кругом швидкості в лівому (центри ${a.center && a.center.cy} і ${a.speed.cy}) і так само далеко від краю (${a.center && +(a.W - a.center.r).toFixed(1)} і ${a.gps.l})`,
+      !!a.center && near(a.center.cy, a.speed.cy) && near(a.W - a.center.r, a.gps.l) && (await lay()).length === 0, JSON.stringify({ center: a.center, speed: a.speed, gps: a.gps, lay: await lay() }));
+  } else ok(`[${T}] телефон набік: «Моє місце» — теж над повзунком нахилу (проміжок ${a.center ? Math.round(a.bar.t - a.center.b) : '?'} px, осі ${a.center && a.center.cx} і ${a.thumb.cx}); у межах екрана, нічого не накладається`, !!a.center && near(a.bar.t - a.center.b, 8) && Math.abs(a.center.cx - a.thumb.cx) <= 12 && a.center.r <= a.W - 4 && (await lay()).length === 0, JSON.stringify({ center: a.center, thumb: a.thumb, bar: a.bar, lay: await lay() }));
+  // б) рейс, GPS, знак обмеження й камера
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip); await sleep(500);
+  await emitN('loc', { prov: 'gps', lat: coords[6][0], lon: coords[6][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(900);
+  await app(page, () => window.__app.map.setFollow(true)); await sleep(600);
+  const b = await meas('lim cam'); await shot(page, `60-grid-${sc.n}-2`);
+  if (phone) ok(`[${T}] рейс: знак обмеження й кружечок GPS — на одній вертикалі (${b.lim && b.lim.l} і ${b.gps.l}); камера — на рівні середини круга (${b.cam && b.cam.cy} і ${b.speed.cy}), за ${b.cam ? Math.round(b.cam.l - b.speed.r) : '?'} px від нього; нічого не накладається`,
+    !!b.lim && near(b.lim.l, b.gps.l) && !!b.cam && near(b.cam.cy, b.speed.cy, 1.5) && near(b.cam.l - b.speed.r, 10) && (await lay()).length === 0, JSON.stringify({ lim: b.lim, gps: b.gps, cam: b.cam, speed: b.speed, lay: await lay() }));
+  else ok(`[${T}] рейс: знак, круг, камера — нічого не накладається`, (await lay()).length === 0, JSON.stringify(await lay()));
+  await app(page, () => { document.getElementById('cam').hidden = true; });
+  // в) GPS зник: зʼявились ±100 — над повзунком; круг швидкості НЕ підстрибує
+  await app(page, () => window.__app.nav.nudge(0)); await sleep(1100);
+  await app(page, () => window.__app.map.setFollow(true)); await sleep(900);
+  const c = await meas('lim'); await shot(page, `60-grid-${sc.n}-3`);
+  ok(`[${T}] GPS зник — кнопки ±100 зʼявились, а круг швидкості лишився на місці (низ ${b.speed.b} → ${c.speed.b}); у нижній плашці їх більше немає`, !!c.fwd && !!c.back && near(c.speed.b, b.speed.b, 0.5) && near(c.speed.l, b.speed.l, 0.5) && !c.tripbar && near(c.bar.t, b.bar.t, 0.5), JSON.stringify({ was: b.speed, now: c.speed, fwd: c.fwd }));
+  if (phone) {
+    ok(`[${T}] без «Мого місця» ±100 стоять одразу над повзунком (${Math.round(c.bar.t - c.back.b)} px), правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
+      near(c.bar.t - c.back.b, 10) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
+    if (sc.w <= 600) ok(`[${T}] стрілка машини — вище кнопок ±100 (вільна карта закінчується на ${c.anc.bot}, кнопки починаються з ${Math.round(c.nudge.t)}): дорогу біля машини вони не закривають`, c.anc.bot <= c.nudge.t + 1 && c.anc.y < c.nudge.t - 20, JSON.stringify({ anc: c.anc, nudge: c.nudge }));
+  }
+  // г) без GPS і карту зсунули: над повзунком — «Моє місце», над ним — ±100
+  await app(page, () => { window.__app.map.setFollow(false); window.__app.map.view.lastTouch = Date.now() + 600000; }); await sleep(700);
+  const d = await meas('lim'); await shot(page, `60-grid-${sc.n}-4`);
+  const side = sc.w > sc.h && sc.h <= 520;                        // телефон набік: ±100 — ліворуч від «Мого місця», в один ряд
+  if (side) ok(`[${T}] карту зсунули без GPS: «Моє місце» над повзунком, ±100 — ліворуч від нього (проміжок ${d.center && d.back ? Math.round(d.center.l - d.back.r) : '?'} px), низом на одній лінії; стрілку машини посеред карти не закривають; нічого не накладається`,
+    !!d.center && !!d.back && near(d.center.l - d.back.r, 8) && near(d.back.b, d.center.b) && near(d.bar.t - d.center.b, 8) && (d.turn ? d.turn.l : d.fwd.l) > d.W / 2 + 20 && near(d.speed.b, b.speed.b, 0.5) && (await lay()).length === 0, JSON.stringify({ center: d.center, back: d.back, fwd: d.fwd, turn: d.turn, lay: await lay() }));
+  else ok(`[${T}] карту зсунули без GPS: «Моє місце» ${phone ? 'над повзунком' : 'на місці'}, ±100 — над ним (проміжок ${d.center && d.back ? Math.round(d.center.t - d.back.b) : '?'} px), праві краї на одній лінії (${d.back && d.back.r} і ${d.center && d.center.r}); нічого не накладається`,
+    !!d.center && !!d.back && near(d.center.t - d.back.b, 10) && near(d.back.r, d.center.r) && (!phone || near(d.bar.t - d.center.b, 10)) && near(d.speed.b, b.speed.b, 0.5) && (await lay()).length === 0, JSON.stringify({ center: d.center, back: d.back, fwd: d.fwd, turn: d.turn, lay: await lay() }));
+  await page.click('#bFwd100'); await sleep(300);
+  ok(`[${T}] кнопки на новому місці працюють: ↑100 зсуває позначку вперед, «Моє місце» повертає стеження`, await app(page, () => window.__app.nav.pos.mode === 'dr') && (await page.click('#bCenter'), await sleep(400), await app(page, () => window.__app.map.view.follow && document.getElementById('bCenter').hidden)));
+  ok(`[${T}] прохід 36 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`[${sc.title}] прохід 36 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);

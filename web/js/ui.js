@@ -39,10 +39,13 @@ function layoutVars() {
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
   barShape();
   // --bl — скільки знизу зайнято ЛІВОРУЧ (там плашка рівна й низька): над цим стоїть круг швидкості. Якщо над плашкою є щось на всю
-  // ширину чи впритул до лівого краю (кнопки «без GPS», «Нова версія», «прийняти GPS») — круг стає над ним.
+  // ширину («Нова версія», «прийняти GPS») — круг стає над ним. Кнопки «без GPS» (±100) з 1.1.28 стоять праворуч, над повзунком
+  // нахилу, тож круг через них більше не підстрибує.
   { let top = $('tabbar').querySelector('.tb-main').getBoundingClientRect().top;
-    for (const id of ['nudge', 'updBar', 'bAcceptGps']) { const e = $(id), q = e && !e.hidden ? e.getBoundingClientRect() : null; if (q && q.height > 0) top = Math.min(top, q.top); }
+    for (const id of ['updBar', 'bAcceptGps']) { const e = $(id), q = e && !e.hidden ? e.getBoundingClientRect() : null; if (q && q.height > 0) top = Math.min(top, q.top); }
     r.setProperty('--bl', Math.max(0, Math.round($('bottom').getBoundingClientRect().bottom - top)) + 'px'); }
+  // --ex — відстань від правого краю екрана до осі повзунка нахилу: на цій осі стоять «Моє місце», кнопки справа вгорі й (правим краєм) ±100
+  { const T = $('tilt').getBoundingClientRect(); if (T.width > 0) r.setProperty('--ex', (Math.round((window.innerWidth - (T.left + T.right) / 2) * 2) / 2) + 'px'); }
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:

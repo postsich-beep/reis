@@ -1329,3 +1329,37 @@ body.pip .maplibregl-ctrl,body.pip .rpq,body.pip .mk-pop{display:none!important}
 #pipView.info b{font-size:clamp(15px,10.5vw,40px);white-space:normal;line-height:1.05}
 #pipView.off b{color:#ff8a8a}
 #pipView:not(:has(.pv-ico)) .pv-t{align-items:center;text-align:center}
+
+/* ---- 1.1.28: сітка головного екрана — усе рівно й на своїх осях ----
+   Правила (телефон вертикально й невеликий планшет):
+   • проміжок між сусідами і до нижньої плашки — 10 px;
+   • правий стовпчик на ОДНІЙ осі з повзунком нахилу: кнопки справа вгорі, «Моє місце» — одразу над повзунком, над ним — ±100 «без GPS»
+     (правим краєм по тій самій лінії). Для цього виступ із повзунком на 6 px ширший, а кнопки стоять за 7 px від краю екрана;
+   • круги ліворуч (знак, швидкість, GPS) — за ті самі 7 px від лівого краю й на 10 px над плашкою; кнопки ±100 їх більше не піднімають;
+   • ⓘ (про карту) — у кутку між плашкою й виступом, а не в стовпчику кнопок. */
+#tripbar{display:none!important}                       /* кнопки «без GPS» переїхали в стовпчик справа; тут лишився лише прихований кружечок GPS */
+#tabbar{--s:64px}
+.nudge{gap:6px}
+body.jv-on #nudge,body:has(#repSheet:not([hidden])) #nudge{visibility:hidden}
+@media (max-width:380px){ #tabbar{--s:64px;--r:68px} }
+@media (max-width:340px){ #tabbar{--s:46px;--r:66px} }
+/* телефон набік: «Моє місце» теж над повзунком, а ±100 — ліворуч від нього в один ряд (угору місця немає); стрілку машини посеред карти
+   вони не закривають — стоять над плашкою, праворуч */
+@media (orientation:landscape) and (max-height:520px){
+  #tabbar{--s:42px;--r:62px}
+  #zoom{right:max(7px,calc(var(--ex,21px) - 25px));bottom:calc(var(--bh,120px) + 8px);flex-direction:row;align-items:flex-end;gap:8px}
+}
+@media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){
+  #zoom{right:max(7px,calc(var(--ex,32px) - 25px));bottom:calc(var(--bh,150px) + 10px);gap:10px;align-items:flex-end}
+  #rail{right:max(7px,calc(var(--ex,32px) - 25px))}
+  #bMap{margin-top:10px}
+  #attr{right:calc(var(--ex,32px) + 37px);bottom:calc(var(--bl,var(--bh,150px)) + 4px)}
+  /* круги ліворуч — дзеркально до правого стовпчика: значки знака й GPS так само далеко від лівого краю, як кнопки від правого */
+  #speed{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 23px);bottom:calc(var(--bl,var(--bh,150px)) + 14px)}
+  #cam{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 143px);bottom:calc(var(--bl,var(--bh,150px)) + 43px)}
+  #spdPop{bottom:calc(var(--bl,var(--bh,150px)) + 140px)}
+}
+/* широкий планшет: плашка вужча за екран, круг швидкості — в лівому куті, «Моє місце» — у правому, на одній висоті з ним (центри на одній
+   лінії) і так само далеко від краю; ±100 — над ним */
+@media (min-width:1010px) and (min-height:521px){ #zoom{right:10px;bottom:calc(var(--sb) + 48px);gap:10px;align-items:flex-end} }
+@media (min-width:1101px) and (min-height:521px){ #speed{left:33px} }
