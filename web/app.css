@@ -1304,6 +1304,9 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
   #speed{bottom:18px} #cam{bottom:32px} #spdPop{bottom:132px;max-height:calc(100% - var(--st) - 140px)}
   .strip{min-height:38px;padding:5px 12px;font-size:16px}
 }
+/* невисокий екран (до 600 px): поки відкрито вікно «Маршрут», рядок подій ховаємо — стовпчику кнопок карти (позначки, +, −, весь маршрут)
+   тепер бракувало місця під вищою верхньою плашкою */
+@media (orientation:portrait) and (max-height:600px){ body:has(#routePick:not([hidden])) #strip{display:none} }
 @media (min-width:1010px) and (min-height:521px){ #speed{bottom:calc(var(--sb) + 18px)} #cam{bottom:calc(var(--sb) + 98px)} #spdPop{bottom:calc(var(--sb) + 144px)} }   /* камера — над рівною частиною плашки, праворуч від круга */
 /* планшет 1010–1100 завширшки: ліворуч від плашки (760) лишається ~130 px — круг притискаємо до краю, щоб не лягав на її кут */
 @media (min-width:1010px) and (max-width:1100px) and (min-height:521px){ #speed{left:20px} #spdLim,#spdGps{left:-18px} #cam{left:140px} }
