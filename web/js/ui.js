@@ -661,7 +661,8 @@ async function softOffer(trip, strict) {
 const vehKind = () => S.vehicle === 'auto' ? 'car' : S.routeMode === 'free' ? 'free' : 'strict';
 function vehHtml() {
   const k = vehKind(), b = (kind, veh, mode, ico, l1, l2) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}">${ico}<span><b>${l1}</b>${l2 ? `<small>${l2}</small>` : ''}</span></button>`;
-  return `<div class="seg veh veh3">${b('strict', 'truck', 'strict', ICON.truck, t('vehTruck'), t('vehStrict'))}${b('free', 'truck', 'free', ICON.truck, t('vehTruck'), t('vehFree'))}${b('car', 'auto', '', ICON.car, t('vehCar'), '')}</div>
+  // (1.1.30) порядок, як попросив Олексій: «на свій розсуд» — перша, «суворо» — посередині, «Легкова» — остання (за замовчуванням — «суворо»)
+  return `<div class="seg veh veh3">${b('free', 'truck', 'free', ICON.truck, t('vehTruck'), t('vehFree'))}${b('strict', 'truck', 'strict', ICON.truck, t('vehTruck'), t('vehStrict'))}${b('car', 'auto', '', ICON.car, t('vehCar'), '')}</div>
     <div class="veh-hint ${k}" id="vehHint">${vehHintHtml(k)}</div>`;
 }
 const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
@@ -669,7 +670,7 @@ const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
 // той самий рейс одразу перераховується для нього. Так вид транспорту видно й можна змінити там, де рейс підтверджують.
 function vehMiniHtml() {
   const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}" aria-label="${t('vehMiniFull_' + kind)}">${ico}<span>${lbl}</span></button>`;
-  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
+  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
 }
 async function pickKind(veh, mode) {
   if (plan.busy || !plan.trip) return;
