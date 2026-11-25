@@ -128,7 +128,7 @@ export function openPanel(name, arg) {
   def.render(body, arg);
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => b.classList.toggle('act', b.dataset.panel === (def.tab || name)));
   bus.emit('panel', name);
-  panelDodgeSoon(); toastSync();
+  panelDodge(); panelDodgeSoon(); toastSync();
 }
 // Рядок списку, що саме проходить під галочкою «Готово», відсуває свій правий край — відстань чи кнопка в ньому лишається на видноті
 let dodgeRaf = 0;
@@ -154,7 +154,7 @@ export function refresh(name) {
     rerenderTimer = null; if (current !== name) return;
     const def = panels[name], body = $('panelBody'), st = body.scrollTop;
     if (def.update) def.update(body); else { body.innerHTML = ''; def.render(body); }
-    body.scrollTop = st; panelDodgeSoon();
+    body.scrollTop = st; panelDodge();          // одразу, не в наступному кадрі: інакше оновлений рядок на мить опиняється під галочкою «Готово»
   }, 400);
 }
 export const html = (strings, ...vals) => strings.reduce((a, s, i) => a + s + (i < vals.length ? (vals[i] == null ? '' : vals[i]) : ''), '');
