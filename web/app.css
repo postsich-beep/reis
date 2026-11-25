@@ -1457,9 +1457,12 @@ body.rail-tight #bSearch{grid-column:1;grid-row:2}
 
 /* ---- 1.1.29: пошук адреси чи місця, як у Google Maps ----
    Без рейсу — рядок пошуку згори карти (над смужкою «що на дорозі»); у рейсі — лупа праворуч під кнопкою звуку. */
-.sr-bar{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;margin-bottom:8px;padding:0 18px;border-radius:26px;background:var(--panel);color:var(--ink-2);box-shadow:var(--shadow);font-size:17px;text-align:left}
-.sr-bar svg{flex:none;width:24px;height:24px;color:var(--ink)}
-.sr-bar span{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* (Олексій: «плашка, як "Тут і попереду спокійно", посередині, трошки більша») — та сама прозора плашка, по центру згори */
+.sr-bar{display:flex;align-items:center;justify-content:center;gap:10px;align-self:center;width:auto;max-width:100%;min-width:min(250px,100%);min-height:48px;margin-bottom:8px;padding:0 24px 0 18px;border-radius:24px;
+  background:rgba(var(--glass-rgb),var(--ga));border:1px solid var(--edge);color:var(--ink);font-size:18px;font-weight:600;text-shadow:0 0 2px var(--halo),0 0 5px var(--halo),0 0 9px var(--halo)}
+.sr-bar svg{flex:none;width:24px;height:24px}
+.sr-bar span{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.sr-bar:active{transform:scale(.97)}
 body.trip-on .sr-bar,body.pts-on .sr-bar,body:has(#routePick:not([hidden])) .sr-bar{display:none}
 #bSearch{display:none;margin-top:10px;padding:0;width:50px;height:50px;border-radius:50%;place-items:center}
 #bSearch svg{width:26px;height:26px}
