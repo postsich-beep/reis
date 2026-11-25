@@ -608,7 +608,7 @@ export function setTilt(v, live = false) {
 // у нижній частині вільної карти — і дивиться строго вгору; рухається й повертається карта під нею.
 // Позицію між фіксами (раз на секунду) ведемо плавно кадр за кадром: і стрілку, і камеру — однією точкою,
 // тому стрілка не «гуляє» відносно центру, як було з окремою анімацією камери.
-export const ANCHOR = { frac: 0.72 };          // частка висоти вільної карти від її верху до стрілки
+export const ANCHOR = { frac: 0.75 };          // частка висоти вільної карти від її верху до стрілки (1.1.29: Діма — «на пару міліметрів нижче, більше простору попереду»; було 0,72)
 const cam = { cur: null, from: null, to: null, t0: 0, dur: 0, lastPosT: 0, brg: null, tBrg: 0, z: null, raf: 0, lastT: 0, drawT: 0, blendUntil: 0, pad: null, anc: null, ancT: 0,
   dd: null, rdT: 0, rdAt: 0, v: 0, idx: null, onR: false };
 export const camState = cam;

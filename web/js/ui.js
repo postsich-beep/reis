@@ -226,7 +226,7 @@ function railState() {
   const qb = $('bQuick');
   // (1.1.28) звук має власну кнопку під типом карти — на кнопці швидких налаштувань лишився тільки знак запису треку
   qb.innerHTML = ICON.quick + (S.rec ? '<i class="q-badge rec"></i>' : '');
-  const sbar = $('srBar'); if (!sbar.dataset.k) { sbar.dataset.k = '1'; sbar.innerHTML = ICON.search + `<span>${t('srPh')}</span>`; $('bSearch').innerHTML = ICON.search; $('bSearch').setAttribute('aria-label', t('srBtn')); }
+  const sbar = $('srBar'); if (!sbar.dataset.k) { sbar.dataset.k = '1'; sbar.innerHTML = ICON.search + `<span>${t('srBar')}</span>`; $('bSearch').innerHTML = ICON.search; $('bSearch').setAttribute('aria-label', t('srBtn')); }
   const sb = $('bSnd'), on = !!S.voice;
   if (sb.dataset.on !== String(on)) { sb.dataset.on = String(on); sb.innerHTML = on ? ICON.vol : ICON.mute; sb.classList.toggle('off', !on);
     sb.setAttribute('aria-pressed', String(on)); sb.setAttribute('aria-label', t(on ? 'sndBtnOn' : 'sndBtnOff')); }
