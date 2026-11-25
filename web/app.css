@@ -1240,3 +1240,69 @@ body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .to
   #jrAsk,#jv{left:0;right:0;margin-inline:auto;width:min(640px,calc(100% - 16px))}
   .jv-chart{height:84px}
 }
+
+/* ---- 1.1.26: нижня плашка вища й просторіша, усе в ній більше; круг швидкості на 20 % більший і вище; жовтий рядок подій читається ----
+   Час прибуття, кілометри й час у дорозі — більші; значки й «Рейс» — більші; виступ зі шкалою нахилу — ширший і вищий.
+   «Рейс» і далі рівно посередині: місце під час = одна кнопка + виступ (ті самі формули, інші числа). */
+#tabbar{--s:58px;--r:78px;--up:50px}
+#tripbar{--s2:58px;--up2:50px}
+.tb-main{height:calc(86px + var(--sb));gap:2px;padding:6px 3px calc(var(--sb) + 5px)}
+.tb-main b{font-size:28px}
+#remain span{font-size:17px;line-height:1.12}
+#tabs{padding:10px 0 calc(var(--sb) + 8px)}
+#tabs button{height:68px;font-size:14px;gap:3px}
+#tabs button svg{width:30px;height:30px}
+#tabs .tc{width:40px;height:34px} #tabs .tc svg{width:31px;height:31px}
+#tabs button.main .mc{width:60px;height:60px;margin-top:-20px}
+#tabs button.main .mc svg{width:33px;height:33px}
+#tabs button.main span:last-child{font-size:15px}
+#tabs .badge{top:3px;left:calc(50% + 8px);min-width:20px;height:20px;border-radius:10px;font:700 13px/20px var(--f-num)}
+/* Нахил карти — повзунок: видима дорожка згори донизу й кругла ручка-«точка» на ній (була стрілка на ледь помітній рисці — не всі
+   розуміли, що її тягнуть угору-вниз). Нижче ручки дорожка яскравіша — видно, наскільки карту нахилено; на кінцях — маленькі вістря. */
+#tilt{min-height:calc(74px + var(--up));margin:8px 1px calc(var(--sb) + 6px)}
+.tl-track::before{top:15px;bottom:15px;width:6px;margin-left:-3px;border-radius:3px;opacity:.26}
+.tl-fill{position:absolute;left:50%;bottom:15px;width:6px;margin-left:-3px;border-radius:3px;background:currentColor;opacity:.7;height:calc(var(--tv) * (100% - 30px))}
+.tl-thumb{width:30px;height:30px;margin-left:-15px;bottom:calc(var(--tv) * (100% - 30px))}
+.tl-thumb svg{width:30px;height:30px;stroke:none;fill:currentColor;filter:drop-shadow(0 1px 3px rgba(0,0,0,.55))}
+.tl-dot{stroke:var(--halo);stroke-width:1.5}
+.tl-end{position:absolute;left:50%;width:14px;height:9px;margin-left:-7px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;opacity:.75;pointer-events:none}
+.tl-end.tl-up{top:1px} .tl-end.tl-dn{bottom:1px}
+#tilt.flat .tl-dn,#tilt.max .tl-up{opacity:.2}
+#tilt.drag .tl-thumb{transform:scale(1.2);color:var(--amber)}
+/* Круг швидкості: 110 замість 92 (на 20 % більший), цифри, знак обмеження й кружечок GPS — так само; стоїть вище над плашкою */
+#speed{left:34px;width:110px;height:110px;border-width:6px;bottom:calc(var(--bl,var(--bh,150px)) + 24px)}
+#speed b{font-size:48px} #speed.wide b{font-size:37px} #speed.d3 b{font-size:42px} #speed.d4 b{font-size:32px}
+#speed span{font-size:13px}
+#speed.over{border-width:7px}
+#spdLim{top:-36px;left:-29px;width:58px;height:58px;border-width:6px;font:800 23px/46px var(--f-num)}
+#spdGps{left:-29px;bottom:-10px;width:52px;height:52px} #spdGps svg{width:26px;height:26px}
+#cam{left:156px;bottom:calc(var(--bl,var(--bh,150px)) + 38px)}
+#spdPop{bottom:calc(var(--bl,var(--bh,150px)) + 150px)}
+/* Рядок подій під маневром: більший шрифт і щільніше тло — читається на ходу й на супутниковій карті */
+.strip{min-height:42px;padding:7px 12px;font-size:17px;gap:9px}
+.strip-counts{font-size:16px}
+.strip-dot{width:11px;height:11px}
+.strip[data-level="none"]{color:var(--ink)}
+.strip.alone.calm{min-height:34px;padding:5px 12px;font-size:15px}
+.strip[data-level="red"]{background:rgba(229,72,77,max(var(--gc),.9))}
+.strip[data-level="yellow"]{background:rgba(246,189,22,max(var(--gc),.9))}
+.strip[data-level="green"]{background:rgba(47,158,98,max(var(--gc),.9))}
+/* вузький телефон (360): підписи кнопок трохи менші, щоб «Місця» й «Мітки» не злипались */
+@media (max-width:380px){ #tabbar{--s:56px;--r:74px} #tripbar{--s2:56px} #tabs button{font-size:13px} }
+@media (max-width:340px){
+  #tabbar{--s:46px;--r:66px} #tripbar{--s2:46px} .tb-main b{font-size:25px} #remain span{font-size:15px}
+  #tabs button{font-size:13px} #tabs button.main .mc{width:54px;height:54px} #tabs button.main span:last-child{font-size:14px}
+  .strip{font-size:16px}
+}
+@media (orientation:landscape) and (max-height:520px){
+  #tabbar{--s:42px;--r:62px;--up:36px} #tripbar{--s2:42px;--up2:36px}
+  .tb-main{height:calc(72px + var(--sb));padding:4px 3px calc(var(--sb) + 3px)} .tb-main b{font-size:24px} #remain span{font-size:15px}
+  #tabs{padding:7px 0 calc(var(--sb) + 5px)} #tabs button{height:60px;font-size:13px;gap:2px} #tabs button svg{width:27px;height:27px}
+  #tabs button.main .mc{width:52px;height:52px;margin-top:-16px} #tabs button.main span:last-child{font-size:14px}
+  #tilt{min-height:calc(60px + var(--up));margin:6px 1px calc(var(--sb) + 4px)}
+  #speed{bottom:18px} #cam{bottom:32px} #spdPop{bottom:132px;max-height:calc(100% - var(--st) - 140px)}
+  .strip{min-height:38px;padding:5px 12px;font-size:16px}
+}
+@media (min-width:1010px) and (min-height:521px){ #speed{bottom:calc(var(--sb) + 18px)} #cam{bottom:calc(var(--sb) + 32px)} #spdPop{bottom:calc(var(--sb) + 144px)} }
+/* круг швидкості тепер більший і вище — поки відкрите меню точки на карті, він під ним не потрібен (як уже було на невисоких екранах) */
+@media (orientation:portrait){ body:has(#pick:not([hidden])) :is(#speed,#cam){visibility:hidden} }

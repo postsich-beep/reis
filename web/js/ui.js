@@ -62,7 +62,7 @@ function barShape() {
   sv.querySelector('.tb-fill').setAttribute('d', `M0 ${H}L` + top.slice(1) + `L${W} ${H}Z`);
   sv.querySelector('.tb-edge').setAttribute('d', top);
 }
-const TILT_THUMB = 34;
+const TILT_THUMB = 30;                      // (1.1.26) ручка — кругла «точка» на дорожці
 function tiltFit() {}                      // місце й висоту дає сама плашка (CSS); лишено для layoutVars
 function tiltDraw(v) {
   const el = $('tilt'); if (!el) return;
