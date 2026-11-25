@@ -158,7 +158,7 @@ export function propose(o) {
 function closeOffer(why) {
   if (!g.offer) return null;
   const o = g.offer; g.offer = null; clearTimeout(offerT); offerT = 0; lastOfferEnd = Date.now();
-  bus.emit('offer', null, why, o);
+  bus.emit('offerEnd', { why, offer: o });
   return o;
 }
 // Відповідь водія (або час вийшов — тоді це «ні»): так — перебудовуємо; ні — ведемо запланованим рейсом, як і вели.

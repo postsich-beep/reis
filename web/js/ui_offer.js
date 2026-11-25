@@ -27,11 +27,11 @@ function hide() {
 export function initOfferUi() {
   const box = $('rrAsk'); if (!box) return;
   box.addEventListener('click', e => { const b = e.target.closest('[data-rr]'); if (b) answerOffer(b.dataset.rr === 'yes'); });
-  bus.on('offer', (o, why) => {
-    if (o) return show(o);
+  bus.on('offer', o => { if (o) show(o); });
+  bus.on('offerEnd', e => {
     hide();
     // Не підтвердили (чи натиснули «Лишити»): коротко кажемо, що маршрут той самий і як перебудувати, якщо все-таки треба
-    if (why === 'timeout' || why === 'no') toast(t('rrStayToast'), '', 6000);
+    if (e && (e.why === 'timeout' || e.why === 'no')) toast(t('rrStayToast'), '', 6000);
   });
   bus.on('offerNoNet', () => toast(t('rrNoNet'), 'yellow', 6000));
   bus.on('trip', () => { if (!g.active) hide(); });

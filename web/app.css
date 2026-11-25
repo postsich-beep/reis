@@ -1348,6 +1348,7 @@ body.jv-on #nudge,body:has(#repSheet:not([hidden])) #nudge{visibility:hidden}
 @media (orientation:landscape) and (max-height:520px){
   #tabbar{--s:42px;--r:62px}
   #zoom{right:max(7px,calc(var(--ex,21px) - 25px));bottom:calc(var(--bh,120px) + 8px);flex-direction:row;align-items:flex-end;gap:8px}
+  body:has(#pick:not([hidden])) #zoom{visibility:hidden}          /* меню точки стає на це місце — кнопки на цей час не потрібні */
 }
 @media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){
   #zoom{right:max(7px,calc(var(--ex,32px) - 25px));bottom:calc(var(--bh,150px) + 10px);gap:10px;align-items:flex-end}
@@ -1358,8 +1359,11 @@ body.jv-on #nudge,body:has(#repSheet:not([hidden])) #nudge{visibility:hidden}
   /* Кнопка «Поворот» (без GPS, червона/жовта) — у кутку між плашкою й виступом повзунка: лівіше «Мого місця», одразу над плашкою.
      ±100 лишаються стовпчиком над «Моїм місцем». Камера на цей час — вище, над кнопкою. */
   .nudge.has-turn{display:flex;flex-direction:column}
-  .nudge .turn-btn{position:absolute;right:60px;bottom:calc(var(--bl,var(--bh,150px)) - var(--bh,150px))}
-  body.turn-on #cam{bottom:calc(var(--bl,var(--bh,150px)) + 106px)}
+  /* куток є, поки виступ повзунка вищий за плашку (звичайний стан). Якщо над плашкою щось на всю ширину («Нова версія») — кутка немає:
+     тоді кнопка стає лівіше ±100, а не під ними (зсув 38 px вмикається, коли різниця висот менша за 36 px) */
+  .nudge .turn-btn{position:absolute;right:calc(60px + clamp(0px,(36px - (var(--bh,150px) - var(--bl,98px))) * 100,38px));bottom:calc(var(--bl,var(--bh,150px)) - var(--bh,150px))}
+  /* камера, поки на екрані кнопка «Поворот»: над кругом швидкості ліворуч (праворуч від круга її місце зайняте) */
+  body.turn-on #cam{left:max(7px,calc(var(--ex,32px) - 25px));bottom:calc(var(--bl,var(--bh,150px)) + 170px)}
   /* круги ліворуч — дзеркально до правого стовпчика: значки знака й GPS так само далеко від лівого краю, як кнопки від правого */
   #speed{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 23px);bottom:calc(var(--bl,var(--bh,150px)) + 14px)}
   #cam{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 143px);bottom:calc(var(--bl,var(--bh,150px)) + 43px)}
@@ -1370,6 +1374,17 @@ body.jv-on #nudge,body:has(#repSheet:not([hidden])) #nudge{visibility:hidden}
 @media (min-width:1010px) and (min-height:521px){ #zoom{right:10px;bottom:calc(var(--sb) + 48px);gap:10px;align-items:flex-end} }
 /* без GPS місце «Мого місця» зарезервоване, навіть коли самої кнопки немає: ±100 і «Поворот» стоять завжди на тих самих місцях */
 #zoom.dr > #bCenter[hidden]{display:grid!important;visibility:hidden;pointer-events:none}
+/* невисокий екран (до 600 px): місця вгору обмаль — місце «Мого місця» не резервуємо (±100 стоять одразу над повзунком),
+   а «Поворот» — лівіше них */
+@media (orientation:portrait) and (max-height:600px){
+  #zoom.dr > #bCenter[hidden]{display:none!important}
+  .nudge .turn-btn{right:98px}
+  body.turn-on #attr{visibility:hidden}                           /* ⓘ стало б під кнопкою «Поворот» — на цей час ховаємо */
+}
+/* вузький телефон (до 340 px): без GPS кнопки ±100 доходять до місця камери праворуч від круга — камера стає над кругом */
+@media (max-width:340px) and (orientation:portrait){ body.dr-on #cam{left:7px;bottom:calc(var(--bl,var(--bh,150px)) + 170px)} }
+/* меню точки на карті стає на місце кнопок «без GPS» — на цей час вони не потрібні */
+body:has(#pick:not([hidden])) #nudge{visibility:hidden}
 @media (min-width:1101px) and (min-height:521px){ #speed{left:33px} }
 
 /* ---- 1.1.28: маршрут у дорозі сам не перебудовується — картка-пропозиція з причиною й зворотним відліком ----

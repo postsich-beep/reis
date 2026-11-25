@@ -1043,32 +1043,120 @@ if (run('2ґ')) try {
   await ctx.close();
 } catch (e) { ok('прохід «На маршрут» дійшов до кінця', false, String(e.message).split('\n')[0]); }
 
-/* ============ прохід 6: з'їхали з маршруту — повертаємо на вибраний, а не будуємо зовсім інший ============ */
+/* ============ прохід 6 (1.1.28): з'їхали з маршруту — програма НЕ перебудовує рейс сама, а пропонує: причина, відлік 10 с, голос ============
+   Діма (Чернівці → Львів): «їде машина, проїхати можна, а він постійно: давайте об'їдемо, маршрут перебудовано». Тепер: задали рейс — їдемо
+   ним. З'їхали — вікно «Ви з'їхали з рейсу. Перебудувати?» з відліком і голосом; не підтвердили — ведемо запланованим, удруге не питаємо. */
 if (run('6')) try {
   const { page, ctx, errors } = await newPage(true);
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
   const n = coords.length;
-  const trip = { id: 't-keep', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
-    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
-  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  const mkTrip = (id, b) => ({ id, a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: b || { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } });
+  await app(page, () => { window.__offers = []; window.__app.bus.on('offer', o => window.__offers.push('show:' + o.kind)); window.__app.bus.on('offerEnd', e => window.__offers.push('hide:' + e.why)); });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), mkTrip('t-keep'));
   const at = d => app(page, d => { const R = window.__app.core.RouteIndex, c = window.__app.guide.g.route.coords; const p = new R(c).at(d); return { lat: p.lat, lon: p.lon, brg: p.brg }; }, d);
-  for (let d = 7000; d <= 7200; d += 50) { const p = await at(d); await emitN('loc', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: 20, brg: p.brg, t: Date.now() }); await sleep(250); }
+  let D = 7000;                                                    // де ми вздовж рейсу, м
+  let cur = 0;                                                     // на скільки градусів ми зараз убік від рейсу
+  let lastFix = 0;                                                 // їдемо 20 м/с за справжнім годинником — хоч би як часто йшли відліки
+  const fix = async (side = 0) => { const now = Date.now(); if (lastFix) D += Math.min(60, 20 * (now - lastFix) / 1000); lastFix = now; const p = await at(D); cur = side; await emitN('loc', { prov: 'gps', lat: p.lat + side, lon: p.lon, acc: 5, spd: 20, brg: p.brg, t: Date.now() }); };
+  // їдемо secs секунд (відлік щосекунди): side — на скільки градусів убік від рейсу (0.0036 ≈ 400 м); stop() — вийти раніше
+  const trace = [];
+  const drive = async (secs, side, stop) => { for (let i = 0; i < secs; i++) { await fix(typeof side === 'function' ? side(i) : side); await sleep(1000); trace.push(await app(page, () => { const p = window.__app.nav.pos, g = window.__app.guide.g; return (p.mode === 'gps' ? '' : p.mode + ':') + (p.onRoute ? 'on' : 'off' + Math.round(p.off)) + (g.offer ? '?' : ''); })); if (stop && await stop()) return i + 1; } return secs; };
+  const offer = () => app(page, () => !!window.__app.guide.g.offer);
+  // плавно, як машина: убік — на 33 м за секунду (до max), назад на рейс — так само
+  const out = max => i => Math.min(max, cur + 0.0003), back = () => Math.max(0, cur - 0.0003);
+  const home = async secs => drive(secs, back);                   // повертаємось на рейс і їдемо ним
+  const st = () => app(page, () => { const g = window.__app.guide.g, b = document.getElementById('rrAsk'), vis = !b.hidden && b.getBoundingClientRect().height > 0;
+    const R = e => { const q = e.getBoundingClientRect(); return { l: Math.round(q.left), t: Math.round(q.top), r: Math.round(q.right), b: Math.round(q.bottom), w: Math.round(q.width), h: Math.round(q.height) }; };
+    const yes = b.querySelector('[data-rr="yes"]'), no = b.querySelector('[data-rr="no"]'), seen = e => { if (!e) return false; const q = e.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return !!h && e.contains(h); };
+    return { vis, offer: g.offer ? { kind: g.offer.kind, secs: g.offer.secs } : null, box: vis ? R(b) : null, title: vis ? b.querySelector('.rr-tx b').textContent : '', text: vis ? b.querySelector('.rr-tx small').textContent : '', sec: vis ? +document.getElementById('rrSec').textContent : null,
+      yes: vis ? R(yes) : null, no: vis ? R(no) : null, yesT: vis ? yes.textContent.trim() : '', noT: vis ? no.querySelector('span').textContent : '', seen: vis && seen(yes) && seen(no), barT: Math.round(document.getElementById('tabbar').getBoundingClientRect().top), W: innerWidth, H: innerHeight,
+      off: g.offRoute, rerouting: g.rerouting, pts: g.route ? g.route.coords.length : 0, man: document.getElementById('manDist').textContent, manText: document.getElementById('manText').textContent, toasts: document.getElementById('toasts').textContent, spoken: window.__spoken.slice(), offers: window.__offers.slice(), speedHidden: getComputedStyle(document.getElementById('speed')).visibility === 'hidden' }; });
+  await drive(3, 0);
   ok('вибраний маршрут запам’ятовано (спрощено)', await app(page, () => Array.isArray(window.__app.guide.g.trip.chosen) && window.__app.guide.g.trip.chosen.length > 40));
-  const n0 = routeReqs.length;
-  // з'їхали на паралельну дорогу: 400 м убік, 10 с
-  for (let i = 0; i < 24; i++) { const p = await at(7250 + i * 20); await emitN('loc', { prov: 'gps', lat: p.lat + Math.min(0.0036, 0.0002 * (i + 1)), lon: p.lon, acc: 5, spd: 20, brg: p.brg, t: Date.now() }); await sleep(1000); }
-  await page.waitForFunction(n0 => window.__app.guide.g.trip && window.__app.guide.g.rerouting === false && performance.now() > 0, n0, { timeout: 3000 }).catch(() => {});
-  await sleep(1500);
-  const rq = routeReqs.slice(n0).pop() || { locations: [] };
-  ok('з’їхали: маршрут повертає на вибраний — точки вздовж нього (through) з напрямком руху', rq.locations.length >= 3 && rq.locations.slice(1, -1).every(l => l.type === 'through' && l.heading != null) && !rq.alternates, JSON.stringify(rq.locations.map(l => l.type + (l.heading != null ? '@' + l.heading : ''))));
-  ok('сказано «Повертаю на вибраний маршрут»', await app(page, () => window.__spoken.some(s => /Повертаю на вибраний рейс/.test(s))));
-  // «Новий шлях від мене» — без прив'язки до старого
-  await page.click('#tabs button[data-panel="trip"]'); await page.click('#routePick [data-ts="details"]'); await page.click('[data-act="rerouteFresh"]'); await sleep(1500);
+  const n0 = routeReqs.length, pts0 = (await st()).pts;
+  await app(page, () => { window.__spoken.length = 0; });
+  // а) з'їхали на паралельну дорогу (400 м убік): через кілька секунд — пропозиція, а не перебудова
+  const ramp = out(0.0030);
+  const t1 = await drive(24, ramp, offer); await sleep(300);
+  const a = await st(); await shot(page, '61-offer');
+  ok(`з’їхали з рейсу — маршрут САМ не перебудовано (запитів до сервера: ${routeReqs.length - n0}); через ${t1} с зʼявилась пропозиція`, routeReqs.length === n0 && a.pts === pts0 && !!a.offer && a.offer.kind === 'off' && a.vis && !a.rerouting, JSON.stringify({ reqs: routeReqs.length - n0, offer: a.offer, vis: a.vis, t1 }));
+  ok(`картка пропозиції: «${a.title}» — «${a.text}»; відлік із ${a.offer && a.offer.secs} с (зараз ${a.sec})`, /Ви зʼїхали з рейсу/.test(a.title) && /До рейсу \d+ м\./.test(a.text) && /Перебудувати маршрут звідси\?/.test(a.text) && /Не підтвердите — веду запланованим рейсом/.test(a.text) && a.offer.secs === 10 && a.sec >= 7 && a.sec <= 10, JSON.stringify({ title: a.title, text: a.text, sec: a.sec }));
+  ok(`дві великі кнопки: «${a.noT}» (${a.no && a.no.w}×${a.no && a.no.h}, з лічильником) і «${a.yesT}» (${a.yes && a.yes.w}×${a.yes && a.yes.h}); картка — над нижньою плашкою, у межах екрана, нічим не перекрита; круг швидкості на цей час сховано`,
+    a.noT === 'Лишити' && a.yesT === 'Перебудувати' && a.yes.h >= 52 && a.no.h >= 52 && a.yes.w >= 120 && a.no.w >= 100 && a.box.l >= 0 && a.box.r <= a.W && a.box.b <= a.barT && a.box.t >= 0 && a.seen && a.speedHidden, JSON.stringify({ box: a.box, yes: a.yes, no: a.no, barT: a.barT, seen: a.seen }));
+  ok(`причину прочитано вголос: «${a.spoken.find(s => /зʼїхали/.test(s)) || ''}»`, a.spoken.some(s => /Ви зʼїхали з рейсу\. Перебудувати маршрут\?/.test(s)), JSON.stringify(a.spoken));
+  // б) не відповідаємо: відлік іде, час вийшов — лишаємось на запланованому рейсі
+  await drive(4, ramp); const mid = await st();
+  ok(`відлік іде: було ${a.sec}, стало ${mid.sec}`, mid.vis && mid.sec < a.sec && mid.sec >= 1, JSON.stringify({ was: a.sec, now: mid.sec }));
+  await drive(9, ramp, async () => !(await offer())); await sleep(600);
+  const b = await st(); await shot(page, '61-offer-stay');
+  ok('час вийшов без підтвердження — картка зникла, маршрут НЕ перебудовано: веде тим самим запланованим рейсом (жодного запиту до сервера)', !b.vis && !b.offer && routeReqs.length === n0 && b.pts === pts0 && !b.rerouting && /hide:timeout/.test(b.offers.join()), JSON.stringify({ reqs: routeReqs.length - n0, offers: b.offers }));
+  ok(`про це сказано голосом («${b.spoken.find(s => /Лишаюсь/.test(s)) || ''}») і плашкою; угорі — «${b.man}» · «${b.manText}»`, b.spoken.some(s => /Лишаюсь на запланованому рейсі/.test(s)) && /Веду запланованим рейсом/.test(b.toasts) && /зійшли з рейсу/i.test(b.man) && /веду запланованим/.test(b.manText) && /торкніться — перебудувати/.test(b.manText), JSON.stringify({ spoken: b.spoken, toasts: b.toasts.slice(0, 120), man: b.man, manText: b.manText }));
+  // в) їдемо далі не за рейсом ще пів хвилини — більше не питає («постійно: давайте об'їдемо» — такого бути не повинно)
+  await drive(32, ramp);
+  const c = await st();
+  ok(`їдемо своєю дорогою ще 32 с — удруге про той самий з’їзд не питає й нічого не перебудовує (пропозицій за весь час: ${c.offers.filter(x => /^show/.test(x)).length})`, c.offers.filter(x => /^show/.test(x)).length === 1 && !c.vis && routeReqs.length === n0 && c.pts === pts0 && c.spoken.filter(s => /Перебудувати маршрут/.test(s)).length === 1, JSON.stringify({ offers: c.offers, reqs: routeReqs.length - n0 }));
+  // г) передумали: дотик до плашки «Ви зійшли з рейсу» — пропозиція знову (без голосу); «Перебудувати» — будує шлях назад на вибраний рейс
+  await page.click('#man'); await sleep(400);
+  const d0 = await st();
+  ok('дотик до плашки «Ви зійшли з рейсу» — пропозиція зʼявляється знову (уже без голосу)', d0.vis && d0.offer && d0.offer.kind === 'off' && d0.spoken.filter(s => /Перебудувати маршрут/.test(s)).length === 1, JSON.stringify({ vis: d0.vis, spoken: d0.spoken }));
+  await page.click('#rrAsk [data-rr="yes"]');
+  await page.waitForFunction(n0 => window.__app.guide.g.rerouting === false && window.__spoken.some(s => /Повертаю на вибраний рейс|Рейс перераховано/.test(s)), n0, { timeout: 6000 }).catch(() => {});
+  await sleep(400);
+  const rq = routeReqs.slice(n0).pop() || { locations: [] }, d1 = await st();
+  ok('«Перебудувати» — один запит: шлях назад на вибраний рейс, крізь точки вздовж нього (through) з напрямком руху; картка зникла', routeReqs.length === n0 + 1 && rq.locations.length >= 3 && rq.locations.slice(1, -1).every(l => l.type === 'through' && l.heading != null) && !rq.alternates && !d1.vis, JSON.stringify({ reqs: routeReqs.length - n0, loc: rq.locations.map(l => l.type + (l.heading != null ? '@' + l.heading : '')) }));
+  ok('сказано «Повертаю на вибраний рейс»', d1.spoken.some(s => /Повертаю на вибраний рейс/.test(s)), JSON.stringify(d1.spoken));
+  // ґ) повернулись на рейс, їдемо ним; новий з'їзд — нова пропозиція; «Лишити» — нічого не міняється
+  await home(40);
+  const n1 = routeReqs.length, k1 = (await st()).offers.filter(x => /^show/.test(x)).length;
+  const t2 = await drive(24, ramp, offer); await sleep(300);
+  const e0 = await st();
+  ok(`повернулись на рейс і з’їхали знову — це новий з’їзд, про нього питає знову (через ${t2} с)`, e0.vis && e0.offers.filter(x => /^show/.test(x)).length === k1 + 1 && routeReqs.length === n1, JSON.stringify({ offers: e0.offers, t2 }));
+  await page.click('#rrAsk [data-rr="no"]'); await sleep(500);
+  const e1 = await st();
+  ok('«Лишити» — картка зникла одразу, маршрут той самий, запитів до сервера немає', !e1.vis && !e1.offer && routeReqs.length === n1 && /hide:no$/.test(e1.offers.join()), JSON.stringify({ offers: e1.offers.slice(-2), reqs: routeReqs.length - n1 }));
+  // д) пропозиція на екрані, а водій сам повернувся на рейс — питати вже нема про що, картка зникає сама
+  await home(44);
+  await drive(24, out(0.0012), offer); await sleep(300);          // недалеко: 130 м убік
+  const f0 = await st();
+  await drive(7, back, async () => !(await offer())); await sleep(400);
+  const f1 = await st();
+  ok('пропозиція висить, а водій сам повернувся на рейс — картка зникає сама, нічого не перебудовано', f0.vis && !f1.vis && !f1.offer && /hide:back$/.test(f1.offers.join()) && routeReqs.length === n1 && !f1.off, JSON.stringify({ was: f0.vis, offers: f1.offers.slice(-2), trace: trace.slice(-64).join(' ') }));
+  // е) «Новий шлях від мене» — прохання самого водія: виконується одразу, без запитань
+  // у дорозі GPS не мовчить: відліки йдуть і поки водій відкриває деталі рейсу (інакше на повільному стенді — «без GPS», і перебудову чесно відкладено)
+  await fix(0); await page.click('#tabs button[data-panel="trip"]'); await fix(0); await page.click('#routePick [data-ts="details"]');
+  for (let i = 0; i < 10; i++) { await fix(0); await sleep(400); if (await app(page, () => window.__app.nav.pos.mode === 'gps')) break; }
+  await page.click('[data-act="rerouteFresh"]'); await sleep(1500);
   const rq2 = routeReqs[routeReqs.length - 1];
-  ok('«Новий шлях від мене» — звичайний маршрут від поточного місця до Б', rq2.locations.length === 2, JSON.stringify(rq2.locations.map(l => l.type)));
+  ok('«Новий шлях від мене» (кнопка в деталях рейсу) — будує одразу, без запитань: звичайний маршрут від поточного місця до Б', routeReqs.length === n1 + 1 && rq2.locations.length === 2 && !(await st()).vis, JSON.stringify({ reqs: routeReqs.slice(n1).map(q => q.locations.length), last: rq2.locations.map(l => l.type), mode: await app(page, () => window.__app.nav.pos.mode) }));
+  // є) рейс завершили — пропозиція (якщо була) зникає
+  await home(44); await drive(24, ramp, offer); await sleep(200);
+  const g0 = await st();
+  await app(page, () => window.__app.guide.stopTrip()); await sleep(400);
+  const g1 = await st();
+  ok('рейс завершили під час пропозиції — картка зникла', g0.vis && !g1.vis, JSON.stringify({ was: g0.vis, now: g1.vis }));
   ok('прохід «з’їзд з маршруту» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
-} catch (e) { ok('прохід «з’їзд з маршруту» дійшов до кінця', false, String(e.message).split('\n')[0]); }
+  // ж) старт не з точки А: підводимо до А і далі — ТИМ САМИМ вибраним рейсом (крізь точки на його лінії), а не «як сервер порахує заново»
+  { const { page, ctx, errors } = await newPage(true), emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    for (let i = 0; i < 3; i++) { await emitN('loc', { prov: 'gps', lat: coords[0][0] + 0.02, lon: coords[0][1], acc: 5, spd: 0, t: Date.now() }); await sleep(400); }
+    const n2 = routeReqs.length;
+    await app(page, tr => window.__app.guide.startTrip(tr), mkTrip('t-lead')); await sleep(800);
+    const rl = routeReqs[n2] || { locations: [] }, L = rl.locations, near = (l, c) => l && Math.abs(l.lat - c[0]) < 0.0005 && Math.abs(l.lon - c[1]) < 0.0005;
+    ok(`стартуємо за 2 км від точки А: шлях — від нас до А і далі вибраним рейсом (точок на його лінії: ${Math.max(0, L.length - 3)}, кожна з напрямком руху)`, routeReqs.length === n2 + 1 && L.length >= 4 && Math.abs(L[0].lat - (coords[0][0] + 0.02)) < 0.001 && near(L[1], coords[0]) && L[1].type === 'through' && L.slice(2, -1).every(l => l.type === 'through' && l.heading != null) && near(L[L.length - 1], coords[n - 1]), JSON.stringify(L.map(l => l.type + (l.heading != null ? '@' + l.heading : ''))));
+    ok('прохід «старт не з точки А» без помилок JS', errors.length === 0, errors.join(' | ')); await ctx.close(); }
+  // з) під'їхали до фінішу не тією вулицею, що в рейсі (маршрут не перебудовували) — це теж прибуття
+  { const { page, ctx, errors } = await newPage(true), emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+    const bOff = { lat: coords[n - 1][0] + 0.0013, lon: coords[n - 1][1], label: 'Склад' };       // фініш — у дворі за 140 м від кінця лінії рейсу
+    const north = k => emitN('loc', { prov: 'gps', lat: bOff.lat + k, lon: bOff.lon, acc: 5, spd: 8, brg: 180, t: Date.now() });
+    await north(0.0012); await sleep(500);
+    await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), mkTrip('t-arr', bOff)); await sleep(400);
+    await app(page, () => { window.__spoken.length = 0; });
+    for (let k = 0.0011; k > 0.00025; k -= 0.0001) { await north(k); await sleep(800); }
+    const arr = await app(page, () => ({ arrived: window.__app.guide.g.arrived, active: window.__app.guide.g.active, off: Math.round(window.__app.nav.pos.off), mode: window.__app.nav.pos.mode, spoken: window.__spoken.slice() }));
+    ok(`до фінішу під’їхали іншою вулицею (за ${arr.off} м від лінії рейсу, маршрут не перебудовували) — «Ви прибули»`, arr.arrived && !arr.active && arr.spoken.some(s => /прибули/i.test(s)), JSON.stringify(arr));
+    ok('прохід «прибуття не за лінією рейсу» без помилок JS', errors.length === 0, errors.join(' | ')); await ctx.close(); }
+} catch (e) { ok('прохід «з’їзд з маршруту» дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 
 /* ============ прохід 5: без GPS — усі варіанти збою (як на Samsung S10: «завис на першій точці», «завис на повороті») ============ */
 // Час прискорено: кожен крок — 10 с життя телефона. «Правда» — де машина насправді; порівнюємо з позначкою.
@@ -3339,7 +3427,7 @@ if (run('31')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   const c1 = await st();
   await shot(page, '44c-tilt-center-' + sc.n);
   ok(`[${T}] карту зсунули — з'явилось «Моє місце» (над нижньою плашкою справа, як і було); стрілка нахилу з місця не зрушила, нічого не накладається`, !c1.center.hidden && c1.center.vis && JSON.stringify(c1.tilt) === JSON.stringify(s0.tilt) && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify({ tilt: c1.tilt, was: s0.tilt, center: c1.center, lay: await page.evaluate(layoutCheck) }));
-  if (sc.n === 'tabland') ok(`[${T}] широкий планшет: «Моє місце» не в самому куті — на ${c1.vh - c1.center.box.b} пікселів вище краю, не лежить на ⓘ`, c1.vh - c1.center.box.b >= 90 && (c1.attr.t >= c1.center.box.b || c1.attr.r <= c1.center.box.l), JSON.stringify({ center: c1.center.box, attr: c1.attr, vh: c1.vh }));
+  if (sc.n === 'tabland') ok(`[${T}] широкий планшет: «Моє місце» не в самому куті — на ${c1.vh - c1.center.box.b} пікселів вище краю (з 1.1.28 — на одній висоті з кругом швидкості), не лежить на ⓘ`, c1.vh - c1.center.box.b >= 40 && (c1.attr.t >= c1.center.box.b || c1.attr.r <= c1.center.box.l), JSON.stringify({ center: c1.center.box, attr: c1.attr, vh: c1.vh }));
   if (main) {
     // є) жест на карті (тут — Ctrl і мишка вгору; на телефоні — два пальці вгору-вниз) — те саме, що стрілка: вона йде слідом, кут запам'ятовується
     const Y1 = Math.round((c1.thumb.t + c1.thumb.b) / 2);
@@ -4267,9 +4355,12 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
   const c = await meas('lim'); await shot(page, `60-grid-${sc.n}-3`);
   ok(`[${T}] GPS зник — кнопки ±100 зʼявились, а круг швидкості лишився на місці (низ ${b.speed.b} → ${c.speed.b}); у нижній плашці їх більше немає`, !!c.fwd && !!c.back && near(c.speed.b, b.speed.b, 0.5) && near(c.speed.l, b.speed.l, 0.5) && !c.tripbar && near(c.bar.t, b.bar.t, 0.5), JSON.stringify({ was: b.speed, now: c.speed, fwd: c.fwd }));
   if (phone) {
-    ok(`[${T}] ±100 стоять над місцем для «Мого місця» (воно зарезервоване, тож кнопки не стрибають: до повзунка ${Math.round(c.bar.t - c.back.b)} px), правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
-      near(c.bar.t - c.back.b, 70) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
-    ok(`[${T}] кнопка «Поворот» — у кутку між плашкою й виступом повзунка: одразу над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше місця «Мого місця» (на ${c.turn ? Math.round(c.back.r - 50 - c.turn.r) : '?'} px), нижче кнопок ±100; нічого не закриває`,
+    const low = sc.h <= 600;                                       // невисокий екран: місце «Мого місця» не резервуємо, «Поворот» — лівіше ±100
+    ok(`[${T}] ±100 стоять ${low ? 'одразу над повзунком' : 'над місцем для «Мого місця» (воно зарезервоване, тож кнопки не стрибають)'}: до повзунка ${Math.round(c.bar.t - c.back.b)} px; правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
+      near(c.bar.t - c.back.b, low ? 10 : 70) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
+    if (low) ok(`[${T}] кнопка «Поворот» — над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше кнопок ±100 (на ${c.turn ? Math.round(c.back.l - c.turn.r) : '?'} px); нічого не закриває`,
+      !!c.turn && near(c.flat.t - c.turn.b, 10) && near(c.back.l - c.turn.r, 10) && c.turn.l >= c.speed.r + 4 && (await lay()).length === 0, JSON.stringify({ turn: c.turn, back: c.back, flat: c.flat, speed: c.speed, lay: await lay() }));
+    else ok(`[${T}] кнопка «Поворот» — у кутку між плашкою й виступом повзунка: одразу над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше місця «Мого місця» (на ${c.turn ? Math.round(c.back.r - 50 - c.turn.r) : '?'} px), нижче кнопок ±100; нічого не закриває`,
       !!c.turn && near(c.flat.t - c.turn.b, 10) && near(c.back.r - 50 - c.turn.r, 10) && c.turn.t >= c.back.b + 4 && c.turn.l >= c.speed.r + 4 && (await lay()).length === 0, JSON.stringify({ turn: c.turn, back: c.back, flat: c.flat, speed: c.speed, attr: c.attr, lay: await lay() }));
     if (sc.w <= 600) { const above = c.anc.bot <= c.nudge.t + 1 && c.anc.y < c.nudge.t - 20;
       ok(`[${T}] стрілка машини ${above ? `вище кнопок ±100 (вільна карта закінчується на ${c.anc.bot}, кнопки починаються з ${Math.round(c.nudge.t)})` : `на невисокому екрані — збоку від кнопок ±100 (на ${Math.round(c.nudge.l - c.W / 2)} px лівіше)`}: дорогу біля машини вони не закривають`, above || (sc.h <= 600 && c.nudge.l - c.W / 2 >= 40), JSON.stringify({ anc: c.anc, nudge: c.nudge })); }

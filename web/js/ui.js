@@ -311,7 +311,7 @@ function hud() {
   const lost = pos.mode === 'dr';
   if (lost !== lostShown) {
     lostShown = lost;
-    $('nudge').hidden = !lost; $('gpsChip').hidden = lost; $('zoom').classList.toggle('dr', lost);   // без GPS місце «Мого місця» над повзунком тримаємо завжди: ±100 не стрибають
+    $('nudge').hidden = !lost; $('gpsChip').hidden = lost; $('zoom').classList.toggle('dr', lost); document.body.classList.toggle('dr-on', lost);   // без GPS місце «Мого місця» над повзунком тримаємо завжди: ±100 не стрибають
     if (!lost) $('bAcceptGps').hidden = true;
     requestAnimationFrame(layoutVars);
   }
