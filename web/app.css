@@ -1157,7 +1157,7 @@ body:has(#repSheet:not([hidden]) .rep-near) :is(#speed,#cam,#zoom){visibility:hi
 
 /* ---- 1.1.25: пройдений шлях і «Архів поїздок» ----
    Запитання на фініші — картка над нижньою плашкою (під великим пальцем); круг швидкості на цей час ховаємо: рейс закінчився. */
-#jrAsk{position:absolute;left:8px;right:8px;bottom:calc(var(--bh,150px) + 8px);z-index:8;padding:12px 12px 10px;border-radius:20px;
+#jrAsk{position:absolute;left:8px;right:8px;bottom:calc(var(--bh,150px) + 8px);z-index:7;padding:12px 12px 10px;border-radius:20px;
   background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:qdown .18s ease-out}
 .ja-t b{display:block;font:700 19px/1.2 var(--f-ui)}
 .ja-t small{display:block;margin-top:3px;color:var(--ink-2);font-size:14px;line-height:1.25;overflow-wrap:anywhere}
@@ -1165,12 +1165,14 @@ body:has(#repSheet:not([hidden]) .rep-near) :is(#speed,#cam,#zoom){visibility:hi
 .ja-b .btn{flex:1;min-height:52px;padding:0 10px}
 .ja-b .btn.pri{flex:1.5;gap:7px} .ja-b .btn svg{width:20px;height:20px}
 body.ja-on :is(#speed,#cam,#spdPop){visibility:hidden}
-body:has(#panel:not([hidden]),#quick:not([hidden]),#routePick:not([hidden]),#repSheet:not([hidden]),#calib:not([hidden])) #jrAsk,body.jv-on #jrAsk,body.planning #jrAsk,body.pts-on #jrAsk,body.aiming #jrAsk{display:none}
+/* під час планування, вибору точки чи перегляду поїздки картку ховаємо; відкриті вікна (панель, швидкі налаштування, «Маршрут»,
+   «Що на дорозі?») просто лежать поверх неї — без правил :has(), які змушують браузер перераховувати стилі на кожну зміну екрана */
+body.jv-on #jrAsk,body.planning #jrAsk,body.pts-on #jrAsk,body.aiming #jrAsk{display:none}
 /* Повідомлення-відповідь на дотик у відкритій панелі («Видалено. Торкніться — повернути») — поверх панелі, під її заголовком
    (раніше лишалось під панеллю, і його ніхто не бачив). Повідомлення з дороги панель, як і раніше, закриває. */
 #toasts.over{z-index:22}
-body:has(#panel.full:not([hidden])) #toasts.over{top:calc(var(--st) + 80px)}
-body:has(#panel.full:not([hidden])) #toasts.over .toast:not(.over){display:none}
+#toasts.over.inpanel{top:calc(var(--st) + 80px)}
+#toasts.over.inpanel .toast:not(.over){display:none}
 /* кнопка в «Налаштуваннях» */
 .jr-entry{margin:0 0 6px}
 .jr-entry .btn{justify-content:flex-start;gap:10px;min-height:54px;padding:0 14px;font-weight:700}
