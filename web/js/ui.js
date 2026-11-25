@@ -3,7 +3,7 @@ import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from '
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
 import { chime, initSfx } from './sfx.js';
-import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords } from './guide.js';
+import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords, selectChoice, confirmChoice, cancelChoice } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
@@ -655,6 +655,20 @@ function vehHtml() {
     <div class="veh-hint ${k}" id="vehHint">${vehHintHtml(k)}</div>`;
 }
 const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
+// Те саме — одним рядком на екрані вибору маршруту (рейс уже прокладено: з форми, з точки на карті, з архіву). Натиснули інший вид —
+// той самий рейс одразу перераховується для нього. Так вид транспорту видно й можна змінити там, де рейс підтверджують.
+function vehMiniHtml() {
+  const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}">${ico}<span>${lbl}</span></button>`;
+  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
+}
+async function pickKind(veh, mode) {
+  if (plan.busy || !plan.trip) return;
+  S.vehicle = veh; if (mode) S.routeMode = mode;
+  const box = $('routePick'), k = vehKind();
+  box.classList.add('busy'); box.querySelectorAll('.vehm button').forEach(x => { x.classList.toggle('on', x.dataset.kind === k); x.setAttribute('aria-pressed', String(x.dataset.kind === k)); });
+  try { await doBuild(); } finally { box.classList.remove('busy'); }
+  if (!plan.trip) { toast(plan.err || t('routeFail'), 'red', 7000); openPanel('trip'); }     // не вдалося — показуємо форму з поясненням
+}
 // Варіанти маршруту карточками (до трьох): час, кілометри, головні дороги, обмеження для фури
 function altCardsHtml(force = false) {
   const rs = plan.routes || []; if (rs.length < 2 && !force) return '';
@@ -692,7 +706,7 @@ function pickHtml() {
   const tr = plan.trip;
   return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <div class="rp-head">${ptTag('a', 'rp-t')}<b>${esc(tr.a.label || '')}</b>${tr.v ? `${ptTag('v', 'rp-t')}<b>${esc(tr.v.label || '')}</b>` : ''}${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
-    ${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
+    ${vehMiniHtml()}${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
 }
 // для фури проїзду не знайшлося — показуємо звичайний маршрут із червоним попередженням; старт/фініш перенесено на основну дорогу — тихо кажемо
@@ -724,6 +738,53 @@ function pickFit() {
 }
 function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
 function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
+/* ---------- (1.1.28) новий маршрут у дорозі: кілька варіантів на вибір ---------- */
+// Водій з'їхав із рейсу й вибрав «Новий маршрут» — показуємо всі варіанти звідси: для фури («суворо»), дорогами загального користування
+// («на свій розсуд»), для легкової — легкові. Картка: вид, час, кілометри, головні дороги. Вибрав і підтвердив — це новий рейс.
+// «Лишити старий» або час вийшов — нічого не міняється.
+const rrOpen = () => $('routePick').dataset.mode === 'rr' && !$('routePick').hidden;
+let rrTick = 0, rrFitN = -1;
+function rrCardsHtml(c) {
+  const best = Math.min(...c.routes.map(x => x.r.time));
+  return `<div class="alts rp-cards rr-cards n${Math.min(4, c.routes.length)}">` + c.routes.map((x, i) => {
+    const r = x.r, truck = r.costing === 'truck', red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
+    const flags = [r.truckFail ? `<i class="bad">${t('rrNoTruck')}</i>` : '', truck && ['alt', 'only', 'chosen', 'go'].includes(r.soft) ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', r.time === best && c.routes.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    return `<button class="alt${i === c.sel ? ' on' : ''}" data-rrv="${i}" aria-pressed="${i === c.sel}"><em class="rr-kind ${x.kind}">${t('rrKind_' + x.kind)}</em><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
+  }).join('') + `</div>`;
+}
+function rrHtml() {
+  const c = g.choice, tr = g.trip, sel = c.routes[c.sel];
+  const warn = !sel ? '' : sel.r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : sel.kind === 'free' ? `<div class="rp-warn soft"><b>${t('freeTitle')}.</b> ${t('freeText')}</div>` : softWarnHtml(sel.r);
+  return `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
+    <div class="rp-head">${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b> <span class="muted">· ${t(c.routes.length ? 'rrPickHint' : 'rrLoading')}</span></div>
+    ${warn}${c.routes.length ? rrCardsHtml(c) : `<div class="rr-wait">${t('rrLoading')}</div>`}${c.state === 'load' && c.routes.length ? `<div class="muted rr-more">${t('rrMore')}</div>` : ''}
+    <div class="rp-btns rr-btns"><button class="btn pri" data-rrc="go" ${sel ? '' : 'disabled'}>${ICON.go}<span>${t('rrGo')}</span></button><button class="btn" data-rrc="x"><span>${t('rrKeep')}</span><i class="rr-sec" id="rrcSec"${c.until ? '' : ' hidden'}>${c.until ? Math.max(0, Math.ceil((c.until - Date.now()) / 1000)) : ''}</i></button></div>`;
+}
+function rrFit() {
+  const box = $('routePick'), c = g.choice; if (box.hidden || !c || !c.routes.length) return;
+  const tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
+  fitRoutes(c.routes.map(x => x.r.coords), top, bottom, zoomPad(box));
+}
+function rrRender() {
+  const c = g.choice, box = $('routePick');
+  if (!c) { if (box.dataset.mode === 'rr') { clearInterval(rrTick); rrTick = 0; rrFitN = -1; box.hidden = true; delete box.dataset.mode; box.innerHTML = ''; mapM.pickRoutes(null); setFollow(true); } return; }
+  if (tsOpen()) tsHide(false);
+  if (currentPanel()) closePanel();
+  quickOpen(false); showPick(null); $('pick').hidden = true;
+  box.dataset.mode = 'rr'; box.innerHTML = rrHtml(); box.hidden = false;
+  mapM.pickRoutes(c.routes.map(x => x.r.coords), c.sel);
+  if (rrFitN !== c.routes.length) { rrFitN = c.routes.length; requestAnimationFrame(rrFit); }      // карту підганяємо, коли додались варіанти (не на кожен дотик)
+  if (!rrTick) rrTick = setInterval(() => { const s = $('rrcSec'), k = g.choice; if (!k || !s) return; if (k.until) { s.hidden = false; s.textContent = Math.max(0, Math.ceil((k.until - Date.now()) / 1000)); } }, 250);
+}
+function rrClick(e) {
+  const b = e.target.closest('button'); if (!b || !g.choice) return;
+  if (b.dataset.rp === 'zin' || b.dataset.rp === 'zout') { zoomBy(b.dataset.rp === 'zin' ? 1 : -1); return; }
+  if (b.dataset.rp === 'fit') { rrFit(); return; }
+  if (b.dataset.rrv != null) { selectChoice(+b.dataset.rrv); return; }
+  if (b.dataset.rrc === 'go') { if (confirmChoice()) toast(t('rrNewToast'), 'green', 5000); return; }
+  if (b.dataset.rrc === 'x') cancelChoice('no');
+}
+
 /* ---------- позначки водіїв: ДТП, поліція, транспортна служба ---------- */
 function repOpen(open) {
   const box = $('repSheet');
@@ -954,6 +1015,8 @@ function tsInput(e) {
 }
 function pickClick(e) {
   if ($('routePick').dataset.mode === 'trip') { tsClick(e); return; }
+  if ($('routePick').dataset.mode === 'rr') { rrClick(e); return; }
+  { const v = e.target.closest('.vehm [data-veh]'); if (v) { pickKind(v.dataset.veh, v.dataset.mode); return; } }
   const c = e.target.closest('[data-alt]'); if (c) { selectAlt(+c.dataset.alt); return; }
   const b = e.target.closest('[data-rp]'); if (!b || !plan.trip) return;
   const k = b.dataset.rp;
@@ -1525,12 +1588,13 @@ export function initUI() {
   bus.on('mapPick', p => { if (pm && pm.arm) { ptsPlace(p); return; } if (!aim) onMapPick(p); });
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
-  bus.on('panel', name => { if (name) { if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
+  bus.on('panel', name => { if (name) { if (rrOpen()) cancelChoice('panel'); else if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
   bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && $('routePick').dataset.mode !== 'trip') pickHide(); });
   bus.on('route', () => { if (tsOpen()) { tsRender(); requestAnimationFrame(tsFit); } });
   bus.on('guide', () => { if (tsOpen()) { const kv = document.querySelector('#routePick .ts-kv'); if (kv) kv.outerHTML = tsKvHtml(); } });
   $('routePick').addEventListener('input', tsInput);
-  bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
+  bus.on('altTap', k => { if (rrOpen()) selectChoice(+k); else if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
+  bus.on('choice', rrRender);
   bus.on('stopTap', x => { if (!aim) onStopTap(x); });
   bus.on('markTap', onMarkTap);
   bus.on('marks', () => refresh('trip'));
