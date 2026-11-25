@@ -1460,7 +1460,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     const st = () => app(page, () => { const A = window.__app; return { voice: A.S.voice, v3d: A.S.view3d, north: A.map.view.north, follow: A.map.view.follow, rec: !!A.S.rec, theme: A.S.theme, awake: A.S.keepAwake !== false, zb: A.map.view.zoomBias, open: !document.getElementById('quick').hidden, panel: A.ui ? null : document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent, badge: !!document.querySelector('#bQuick .q-badge') }; });
     const tap = async k => { await page.click(`#quick [data-q="${k}"]`); await sleep(120); return st(); };
     const s0 = await st();
-    let s1 = await tap('voice'); ok(`${T}: плитка «Звук» вимикає голос, на кнопці значок`, s1.voice === !s0.voice && s1.badge === !s1.voice && s1.open, JSON.stringify(s1));
+    let s1 = await tap('voice'); ok(`${T}: плитка «Звук» вимикає голос; (1.1.28) це видно на кнопці звуку праворуч — червона, динамік перекреслений`, s1.voice === !s0.voice && !s1.badge && s1.open && await app(page, v => document.getElementById('bSnd').classList.contains('off') === !v, s1.voice), JSON.stringify(s1));
     s1 = await tap('voice'); ok(`${T}: «Звук» знову вмикає`, s1.voice === s0.voice && !s1.badge);
     s1 = await tap('3d'); ok(`${T}: плитка «Вигляд» 3D ↔ 2D`, s1.v3d === !s0.v3d); await tap('3d');
     s1 = await tap('north'); ok(`${T}: плитка «Карта» північ ↔ за рухом`, s1.north === !s0.north); await tap('north');
@@ -4412,9 +4412,10 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
   if (phone) {
     ok(`[${T}] «Моє місце» — одразу над повзунком нахилу (проміжок ${a.center && a.bar ? Math.round(a.bar.t - a.center.b) : '?'} px)${exact ? ` і на одній осі з ним (хрестик ${a.center.cx}, ручка ${a.thumb.cx})` : ''}; у межах екрана`,
       !!a.center && near(a.bar.t - a.center.b, 10) && (!exact || near(a.center.cx, a.thumb.cx)) && a.center.r <= a.W - 4 && Math.abs(a.center.cx - a.thumb.cx) <= 10, JSON.stringify({ center: a.center, thumb: a.thumb, bar: a.bar }));
-    if (exact && sc.h > 600) ok(`[${T}] (1.1.28) кнопка звуку — під кнопкою типу карти, на тій самій осі (${a.snd && a.snd.cx}), проміжок ${a.snd ? Math.round(a.snd.t - a.map.b) : '?'} px, такого ж розміру (${a.snd && a.snd.w}×${a.snd && a.snd.h})`,
-      !!a.snd && near(a.snd.cx, a.tilt.cx) && near(a.snd.t - a.map.b, 10) && near(a.snd.w, a.map.w) && near(a.snd.h, a.map.h), JSON.stringify({ snd: a.snd, map: a.map }));
-    else if (phone) ok(`[${T}] (1.1.28) невисокий екран: кнопка звуку — ліворуч від швидких налаштувань, в один ряд (проміжок ${a.snd ? Math.round(a.quick.l - a.snd.r) : '?'} px), стовпчик кнопок не дістає до кнопок унизу`,
+    const tight = await app(page, () => document.body.classList.contains('rail-tight'));
+    if (!tight) ok(`[${T}] (1.1.28) кнопка звуку — під кнопкою типу карти, ${exact ? `на тій самій осі (${a.snd && a.snd.cx})` : `під нею (${a.snd && a.snd.cx} і ${a.map.cx})`}, проміжок ${a.snd ? Math.round(a.snd.t - a.map.b) : '?'} px, такого ж розміру (${a.snd && a.snd.w}×${a.snd && a.snd.h})`,
+      !!a.snd && near(a.snd.cx, exact ? a.tilt.cx : a.map.cx) && near(a.snd.t - a.map.b, 10) && near(a.snd.w, a.map.w) && near(a.snd.h, a.map.h), JSON.stringify({ snd: a.snd, map: a.map }));
+    else if (phone) ok(`[${T}] (1.1.28) стовпчиком кнопки дістали б до кнопок над повзунком — кнопка звуку ліворуч від швидких налаштувань, в один ряд (проміжок ${a.snd ? Math.round(a.quick.l - a.snd.r) : '?'} px), стовпчик кнопок не дістає до кнопок унизу`,
       !!a.snd && near(a.snd.t, a.quick.t) && near(a.quick.l - a.snd.r, 10) && near(a.snd.w, a.map.w), JSON.stringify({ snd: a.snd, quick: a.quick }));
     if (exact) ok(`[${T}] кнопки справа вгорі — на тій самій осі (${a.quick.cx}, ${a.map.cx} | повзунок ${a.tilt.cx}); між ними ${Math.round(a.map.t - a.quick.b)} px, до верхньої плашки ${Math.round(a.quick.t - a.top.b)} px`,
       near(a.quick.cx, a.tilt.cx) && near(a.map.cx, a.tilt.cx) && near(a.map.t - a.quick.b, 10) && near(a.quick.t - a.top.b, 10), JSON.stringify({ quick: a.quick, map: a.map, tilt: a.tilt, top: a.top }));
