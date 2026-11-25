@@ -1299,8 +1299,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     const th = [(await tap('theme')).theme, (await tap('theme')).theme, (await tap('theme')).theme];
     ok(`${T}: плитка «Тема» по колу: день → ніч → авто`, th.join() === 'day,night,auto', th.join());
     s1 = await tap('awake'); ok(`${T}: плитка «Екран» — гасне сам / не гасне (команда оболонці)`, s1.awake === !s0.awake && await app(page, v => window.__nativeCalls.includes('keepAwake:' + v), s1.awake)); await tap('awake');
-    const z0 = s0.zb; s1 = await tap('zin'); const z1 = s1.zb; s1 = await tap('zout'); s1 = await tap('zout');
-    ok(`${T}: масштаб + і −`, z1 === z0 + 1 && s1.zb === z0 - 1, `${z0} → ${z1} → ${s1.zb}`); await tap('zin');
+    ok(`${T}: (1.1.26) рядка «− Масштаб +» у швидких налаштуваннях більше немає — лише дев'ять плиток (карту наближають двома пальцями)`, await app(page, () => !document.querySelector('#quick .q-zoom, #quick [data-q="zin"], #quick [data-q="zout"]') && document.querySelectorAll('#quick .q-tile').length === 9 && !/Масштаб/.test(document.getElementById('quick').textContent)));
     await page.click('#quick [data-q="close"]');
     // галочки «що показувати на карті» — у «Місцях» (1.1.20); компактні плитки з мінізображеннями й «Готово»-квадрат у куті (1.1.22)
     await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(350);
@@ -2692,8 +2691,13 @@ if (run('26')) try {
   // перебудова в дорозі — так само з дозволеними дорогами під знак
   n0 = routeReqs.length;
   const details = async () => { if (await page.$('#panelBody [data-act="stop"]')) return; await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#routePick [data-ts="details"]'); await page.click('#routePick [data-ts="details"]'); await page.waitForSelector('#panelBody [data-act="stop"]'); };
-  for (let k = 1; k <= 4; k++) { const f = k * 12 / (softLen * 1000 / N); await emitN('loc', { prov: 'gps', lat: A[0] + (softCoords[1][0] - A[0]) * f, lon: A[1] + (softCoords[1][1] - A[1]) * f, acc: 5, spd: 12, t: Date.now() }); await sleep(1000); }
-  await details(); await page.click('[data-act="reroute"]'); await sleep(2500);
+  let fixAt = null;
+  for (let k = 1; k <= 4; k++) { const f = k * 12 / (softLen * 1000 / N); fixAt = { lat: A[0] + (softCoords[1][0] - A[0]) * f, lon: A[1] + (softCoords[1][1] - A[1]) * f }; await emitN('loc', { prov: 'gps', ...fixAt, acc: 5, spd: 12, t: Date.now() }); await sleep(1000); }
+  // відкрити деталі рейсу на повільній машині — 3–4 с; GPS «мовчить» довше 5 с — і програма чесно відкладає перебудову до GPS.
+  // У дорозі GPS не мовчить: перед натисканням даємо свіжий відлік (перевіряємо перебудову, а не витримку стенда)
+  const tD = Date.now(); await details(); if (process.env.DEBUG) console.log('DETAILS ms', Date.now() - tD);
+  await emitN('loc', { prov: 'gps', ...fixAt, acc: 5, spd: 12, t: Date.now() }); await sleep(150);
+  await page.click('[data-act="reroute"]'); await sleep(2500);
   rq = routeReqs.slice(n0);
   ok('перебудова в дорозі — теж для фури й теж із дозволеною дорогою під знак (а не навколо)', rq.length >= 1 && rq[0].costing === 'truck' && pen(rq[0]) === 600, JSON.stringify({ rq: rq.map(q => [q.costing, pen(q)]), st: await app(page, () => ({ mode: window.__app.nav.pos.mode, pend: window.__app.guide.g.reroutePending, rr: window.__app.guide.g.rerouting, log: window.__app.core.getLog().slice(-4).map(l => l.msg || l.text) })) }));
   await details(); await page.click('#panelBody [data-act="stop"]'); await sleep(700);

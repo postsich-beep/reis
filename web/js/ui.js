@@ -179,8 +179,7 @@ function quickHtml() {
     ${tile('awake', ICON.awake, t('qAwake'), S.keepAwake !== false ? t('qAwakeOn') : t('qAwakeOff'), S.keepAwake !== false)}
     ${tile('settings', ICON.gear, t('qSettings'), t('qAll'), false)}
     ${tile('cal', ICON.calTab, t('qCal'), t(calFresh() ? 'qCalOk' : calGet() ? 'qCalOld' : 'qCalNo'), false, calFresh() ? ' cal-ok' : '')}
-  </div>
-  <div class="q-zoom"><button data-q="zout" aria-label="${t('qZoomOut')}">−</button><span>${t('qZoom')}</span><button data-q="zin" aria-label="${t('qZoomIn')}">+</button></div>`;
+  </div>`;        // (1.1.26) рядка «− Масштаб +» тут більше немає: карту наближають двома пальцями
 }
 function quickRender() { const box = $('quick'); if (!box.hidden) box.innerHTML = quickHtml(); }
 function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => quickOpen(false), Q_IDLE); }
@@ -205,8 +204,6 @@ function quickClick(e) {
   else if (k === 'theme') { S.theme = THEME_NEXT[S.theme || 'auto']; applyTheme(); }
   else if (k === 'awake') { S.keepAwake = S.keepAwake === false; P.keepAwake(S.keepAwake); }
   else if (k === 'settings') { quickOpen(false); currentPanel() === 'settings' ? closePanel() : openPanel('settings'); return; }
-  else if (k === 'zin') zoomBy(1);
-  else if (k === 'zout') zoomBy(-1);
   quickRender();
 }
 function toggleRec() {
@@ -417,9 +414,11 @@ function stripUpdate() {
   el.classList.toggle('calm', calm);
   const hide = calm && manOn;
   if (el.hidden !== hide) { el.hidden = hide; $('top').classList.toggle('nostrip', hide); requestAnimationFrame(layoutVars); }
+  const h0 = el.offsetHeight;
   $('stripText').textContent = off ? t('stripOff') : s.top ? ((s.label ? s.label + ' · ' : '') + (s.top.sum || s.top.text)).replace(/\s+/g, ' ').slice(0, 140) : t('stripEmpty');
   const c = s.counts;
   $('stripCounts').innerHTML = off ? '' : ['red', 'yellow', 'green'].filter(k => c[k]).map(k => `<i class="c-${k}">${c[k]}</i>`).join('');
+  if (el.offsetHeight !== h0) requestAnimationFrame(layoutVars);      // (1.1.26) довге повідомлення стало у два рядки — верхня плашка вища: кнопки праворуч і повідомлення посуваються
   const tab = document.querySelector('#tabs button[data-panel="feed"]');
   if (tab) { let b = tab.querySelector('.badge'); if (s.unseen && !off) { if (!b) { b = document.createElement('span'); b.className = 'badge'; tab.appendChild(b); } b.textContent = s.unseen; } else if (b) b.remove(); }
 }
