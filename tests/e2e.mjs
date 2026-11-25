@@ -2044,7 +2044,7 @@ if (run('15')) try {
   await shot(page, '18c-far-dots');
   // (1.1.20) кнопки «Шари» на головному екрані більше немає: галочки — у «Місцях», екран вільніший
   const lb = await app(page, () => ({ gone: !document.getElementById('bLayers'), rail: [...document.querySelectorAll('#rail > button')].map(b => b.id).join(), quickHasLayers: !!document.querySelector('#quick .ly-row') }));
-  ok('кнопки «Шари» справа немає; справа — швидкі налаштування і тип карти', lb.gone && lb.rail === 'bQuick,bMap' && !lb.quickHasLayers, JSON.stringify(lb));
+  ok('кнопки «Шари» справа немає; справа — швидкі налаштування, тип карти й (1.1.28) звук', lb.gone && /^bQuick,bMap,bSnd(,bSearch)?$/.test(lb.rail) && !lb.quickHasLayers, JSON.stringify(lb));
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await sleep(200);
   ok('галочки — у «Місцях»: 11 плиток', await app(page, () => document.querySelectorAll('#panelBody .pl-chip').length === 11));
   await shot(page, '18d-layers');
@@ -3389,7 +3389,7 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
   // а) кнопка справа вгорі — під швидкими налаштуваннями (кнопки «Шари» з 1.1.20 немає)
   const order = await app(page, () => [...document.querySelectorAll('#rail > button')].map(b => b.id)), bm = await R('#bMap'), s0 = await st();
-  ok(`[${T}] справа вгорі — одна кругла кнопка типу карти (50×50) під швидкими налаштуваннями: на ній значок того виду, що зараз, — складена карта (схема); другого значка немає; нічого її не перекриває`, order.join() === 'bQuick,bMap' && bm.seen && bm.w === 50 && bm.h === 50 && bm.r <= bm.vw && bm.b <= bm.vh
+  ok(`[${T}] справа вгорі — одна кругла кнопка типу карти (50×50) під швидкими налаштуваннями: на ній значок того виду, що зараз, — складена карта (схема); другого значка немає; нічого її не перекриває`, order.slice(0, 2).join() === 'bQuick,bMap' && bm.seen && bm.w === 50 && bm.h === 50 && bm.r <= bm.vw && bm.b <= bm.vh
     && s0.segs.split(',').length === 1 && /^scheme:30:\d+$/.test(s0.segs) && s0.cur === 'scheme' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && /зараз схема/.test(s0.label), JSON.stringify({ order, bm, s0 }));
   // б) один дотик — супутник: жодного віконця, знімки під лініями рейсу й нашими значками, напряму (не в наш кеш), джерело підписано
   const net0 = s0.net; await clearToasts();
