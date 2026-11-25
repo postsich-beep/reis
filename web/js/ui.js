@@ -20,6 +20,7 @@ import { autoOn as addrAutoOn, waitsWifi as addrWaitsWifi } from './addr.js';
 import { sdb, TYPES, F, nearbyRows, alongRoute, brandOf } from './stopsdb.js';
 import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
+import { jvIsOpen, jvClose } from './ui_journey.js';
 import { vp, byId as byIdVp, listed as vpListed, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
 import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass, panelDodge, panelDodgeSoon, panelParent } from './ui_base.js';
 import { t } from './i18n.js';
@@ -1579,6 +1580,7 @@ export function initUI() {
   // системна кнопка «Назад»: закрити панель або вибір точки; інакше оболонка згорне застосунок
   window.__reisBack = () => {
     if (!$('calib').hidden) { calibClose(); return true; }
+    if (jvIsOpen()) { jvClose(true); return true; }                       // (1.1.25) поїздка з архіву на карті → назад до списку поїздок
     // (1.1.24) відкрите фото місця — «Назад» закриває саме його (раніше закривалась картка під ним, а наступний дотик згортав програму)
     if (!$('photoView').hidden) { $('photoView').hidden = true; $('photoView').innerHTML = ''; return true; }
     if (labOpen()) { closeLab(); return true; }
