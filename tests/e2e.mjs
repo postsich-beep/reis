@@ -297,8 +297,8 @@ async function readCheck(page, rootSel, scrollSel) {
         const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
         if (cy > view.top + 4 && cy < view.bottom - 4 && cx > 0 && cx < innerWidth) {
           const h = document.elementFromPoint(cx, cy);
-          // (1.1.25) повідомлення тепер з'являються й поверх панелі: на кілька секунд прикривають рядок під собою — це не вада розкладки
-          if (h && !(el === h || el.contains(h) || h.contains(el)) && !(h.closest('#toasts') && !el.closest('#toasts'))) {
+          // (1.1.25) повідомлення-відповідь на дотик у панелі з'являється поверх неї: на кілька секунд прикриває рядок під собою — це не вада розкладки
+          if (h && !(el === h || el.contains(h) || h.contains(el)) && !(h.closest('#toasts.over') && !el.closest('#toasts'))) {
             const hb = h.closest('button,a,[data-act]'), eb = el.closest('button,a,[data-act]');
             if (!(hb && eb && hb === eb)) out.add('перекрито: ' + name(el) + ' ← ' + name(h));
           }
@@ -4028,7 +4028,6 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   const ls = await app(page, () => ({ title: document.getElementById('panelTitle').textContent, back: !document.getElementById('panelBack').hidden, ids: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => r.dataset.jopen), rows: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => [...r.querySelectorAll('.t, .muted')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).join(' | ')), tap: [...document.querySelectorAll('#panelBody .jr-list .item')].every(r => r.getAttribute('role') === 'button' && !r.querySelector('.btn.pri') && !!r.querySelector('[data-jdel]')), hint: (document.querySelector('#panelBody .arch-hint') || {}).textContent || '' }));
   const row = ls.rows[ls.ids.indexOf('j-test')] || '';
   ok(`[${T}] «Архів поїздок»: найновіша згори; рядок цілком відкриває поїздку (окремої кнопки немає), праворуч кошик; у рядку — звідки й куди, дата й час, відстань, тривалість, середня швидкість, скільки без GPS («${row}»)`, ls.title === 'Архів поїздок' && ls.back && ls.ids[ls.ids.length - 1] === 'j-test' && ls.rows.length === (full ? 3 : 1) && /^Харків → Полтава \| \d+ \S+, \d\d:\d\d · 27 км · 32 хв \| сер\. \d+ км\/год · без GPS 5(,\d)? км$/.test(row) && ls.tap && (!full || /симуляція/.test(ls.rows[0])) && /з GPS і без нього/.test(ls.hint), JSON.stringify(ls));
-  await app(page, () => { document.getElementById('toasts').innerHTML = ''; });      // повідомлення тепер поверх панелі — на кілька секунд прикривають рядок під собою; перевіряємо сам список
   ok(`[${T}] «Архів поїздок»: усе читається, рядок галочку «Готово» обминає`, (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify(await readCheck(page, '#panel', '#panelBody')));
   if (full || sc.n === 'land') await shot(page, '54-jr-list-' + sc.n);
   // поїздка на карті
@@ -4092,7 +4091,11 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
     const del = await app(page, async () => ({ n: window.__app.journey.jr.list.length, rows: document.querySelectorAll('#panelBody .jr-list .item').length, toast: document.getElementById('toasts').textContent, pts: !!(await window.__app.core.db.get('kv', 'jr:j-test')) }));
     const tv = await app(page, () => { const el = [...document.querySelectorAll('#toasts .toast')].pop(), r = el.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2), hd = document.querySelector('#panel > header').getBoundingClientRect(); return { seen: !!h && el.contains(h), underHeader: r.top >= hd.bottom - 2, top: Math.round(r.top) }; });
     ok('кошик видаляє поїздку (і її точки з бази); повідомлення «Торкніться — повернути» видно ПОВЕРХ панелі, під її заголовком (раніше повідомлення лишались під панеллю)', del.n === n0 - 1 && del.rows === n0 - 1 && !del.pts && /Поїздку видалено\. Торкніться — повернути/.test(del.toast) && tv.seen && tv.underHeader, JSON.stringify({ del, tv }));
-    await page.click('#toasts .toast:last-child'); await sleep(600);
+    // а повідомлення з дороги (не відповідь на дотик) панель, як і раніше, закриває — гортати не заважає
+    await sleep(1700); await app(page, () => window.__app.bus.emit('feedPush', { src: 'tg', ch: 'test', level: 'yellow', text: 'Затор на трасі М-03 біля Тестового (перевірка)', key: 't-34-road', lat: window.__app.nav.pos.lat, lon: window.__app.nav.pos.lon, locKind: 'town' })); await sleep(700);
+    const rt = await app(page, () => { const ts = [...document.querySelectorAll('#toasts .toast')], road = ts.find(x => /перевірка/.test(x.textContent)), undo = ts.find(x => /повернути/.test(x.textContent)); const seen = el => { if (!el || getComputedStyle(el).display === 'none') return false; const r = el.getBoundingClientRect(), h = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2); return !!h && el.contains(h); }; return { road: !!road, roadSeen: seen(road), undoSeen: seen(undo) }; });
+    ok('повідомлення з дороги, що прийшло, поки панель відкрита, поверх неї не лізе (чекає на карті); відповідь на дотик — лишається видно', (!rt.road || !rt.roadSeen) && rt.undoSeen, JSON.stringify(rt));
+    await page.click('#toasts .toast.over'); await sleep(600);
     const res = await app(page, async () => ({ n: window.__app.journey.jr.list.length, rows: document.querySelectorAll('#panelBody .jr-list .item').length, pts: !!(await window.__app.core.db.get('kv', 'jr:j-test')) }));
     ok('дотик до повідомлення — поїздку повернуто', res.n === n0 && res.rows === n0 && res.pts, JSON.stringify(res));
     // GPX

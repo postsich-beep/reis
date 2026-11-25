@@ -86,13 +86,21 @@ export function manIcon(type) {
 }
 
 /* ---------- спливаючі сповіщення ---------- */
+// (1.1.25) Повідомлення-відповідь на дотик у відкритій панелі («Видалено. Торкніться — повернути», «Збережено») показуємо ПОВЕРХ панелі,
+// під її заголовком: раніше воно лишалось під панеллю, і його ніхто не бачив. Повідомлення з дороги (події, позначки) панель,
+// як і раніше, закриває — гортати не заважають; вони чекають на карті.
+let tapT = 0;
+document.addEventListener('click', () => { tapT = Date.now(); }, true);
 export function toast(text, level = '', ms = 7000, onTap) {
   const box = $('toasts'); if (!box) return;
   const el = document.createElement('div'); el.className = 'toast ' + level; el.textContent = text;
-  el.onclick = () => { el.remove(); if (onTap) onTap(); };
+  const P = $('panel'); if (P && !P.hidden && P.classList.contains('full') && Date.now() - tapT < 1500) el.classList.add('over');
+  const sync = () => box.classList.toggle('over', !!box.querySelector('.toast.over'));
+  el.onclick = () => { el.remove(); sync(); if (onTap) onTap(); };
   box.appendChild(el);
   while (box.children.length > 3) box.firstChild.remove();
-  setTimeout(() => el.remove(), ms);
+  sync();
+  setTimeout(() => { el.remove(); sync(); }, ms);
 }
 
 /* ---------- панелі ---------- */

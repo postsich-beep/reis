@@ -1166,9 +1166,11 @@ body:has(#repSheet:not([hidden]) .rep-near) :is(#speed,#cam,#zoom){visibility:hi
 .ja-b .btn.pri{flex:1.5;gap:7px} .ja-b .btn svg{width:20px;height:20px}
 body.ja-on :is(#speed,#cam,#spdPop){visibility:hidden}
 body:has(#panel:not([hidden]),#quick:not([hidden]),#routePick:not([hidden]),#repSheet:not([hidden]),#calib:not([hidden])) #jrAsk,body.jv-on #jrAsk,body.planning #jrAsk,body.pts-on #jrAsk,body.aiming #jrAsk{display:none}
-/* Повідомлення — поверх відкритої панелі (раніше вони лишались під нею: «Видалено. Торкніться — повернути» ніхто не бачив).
-   Стоять одразу під заголовком панелі. */
-body:has(#panel.full:not([hidden])) #toasts{z-index:22;top:calc(var(--st) + 80px)}
+/* Повідомлення-відповідь на дотик у відкритій панелі («Видалено. Торкніться — повернути») — поверх панелі, під її заголовком
+   (раніше лишалось під панеллю, і його ніхто не бачив). Повідомлення з дороги панель, як і раніше, закриває. */
+#toasts.over{z-index:22}
+body:has(#panel.full:not([hidden])) #toasts.over{top:calc(var(--st) + 80px)}
+body:has(#panel.full:not([hidden])) #toasts.over .toast:not(.over){display:none}
 /* кнопка в «Налаштуваннях» */
 .jr-entry{margin:0 0 6px}
 .jr-entry .btn{justify-content:flex-start;gap:10px;min-height:54px;padding:0 14px;font-weight:700}
