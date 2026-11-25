@@ -8,7 +8,7 @@ import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnaps
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
+import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
@@ -1063,13 +1063,15 @@ function showSugg(k, list, head) {
 const ADDR = /\d|вул|просп|пров|пл\.|бульв|шосе|ул\.|улиц|street/i;
 async function findPlaces(q) {
   await places.load();
+  // (1.1.30) міста — від більшого до меншого, решта — від найближчого (rankPlaces)
+  const mc = mapM.map && mapM.map.getCenter ? mapM.map.getCenter() : null, ref = pos.lat != null ? pos : mc ? { lat: mc.lat, lon: mc.lng } : null;
   const local = places.search(q, 8);
-  if (local.length >= 5 && !ADDR.test(q)) return local;
-  if (q.length < 3 || !P.online()) return local;
+  if (local.length >= 5 && !ADDR.test(q)) return rankPlaces(local, q, ref);
+  if (q.length < 3 || !P.online()) return rankPlaces(local, q, ref);
   let remote = [];
-  try { remote = await geocode(q, pos.lat != null ? pos : null); } catch (e) { log('warn', 'пошук: ' + e.message); }
+  try { remote = await geocode(q, ref); } catch (e) { log('warn', 'пошук: ' + e.message); }
   const near = (a, b) => Math.abs(a.lat - b.lat) < 0.02 && Math.abs(a.lon - b.lon) < 0.03;
-  return local.concat(remote.filter(r => !local.some(l => near(l, r)))).slice(0, 9);
+  return rankPlaces(local.concat(remote.filter(r => !local.some(l => near(l, r)))), q, ref).slice(0, 9);
 }
 // (1.1.29) «Їхати сюди» з пошуку: старт — моє місце, фініш — знайдене місце; рейс одразу прокладається (з вибором варіанта й виду рейсу)
 export function routeTo(p) {

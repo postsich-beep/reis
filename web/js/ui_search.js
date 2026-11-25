@@ -10,7 +10,7 @@ import { g, setVia } from './guide.js';
 import { pos } from './nav.js';
 import * as P from './platform.js';
 import * as places from './places.js';
-import { geocode, normName } from './route.js';
+import { geocode, normName, rankPlaces } from './route.js';
 import * as mapM from './map.js';
 import { routeTo, quickOpen } from './ui.js';
 
@@ -51,16 +51,17 @@ async function run() {
   if (my !== sr.seq) return;
   // «Вказати номер будинку»: шукаємо в тому самому місті, що й вулиця
   const ctx = sr.ctx, q = ctx && ctx.city && !normName(raw).includes(normName(ctx.city)) ? raw + ', ' + ctx.city : raw;
+  // від чого міряти відстань: місто вулиці («Вказати номер будинку»), моє місце, а без GPS — середина карти
+  const mc = mapM.map && mapM.map.getCenter ? mapM.map.getCenter() : null, ref = ctx || (pos.lat != null ? pos : mc ? { lat: mc.lat, lon: mc.lng } : null);
   const local = ADDR.test(raw) ? places.search(raw, 3) : places.search(raw, 6);
-  sr.res = local; sr.err = ''; sr.busy = raw.length >= 3 && P.online(); render();
+  sr.res = rankPlaces(local, raw, ref); sr.err = ''; sr.busy = raw.length >= 3 && P.online(); render();
   if (!sr.busy) { if (raw.length >= 3 && !P.online()) { sr.err = t('srOffline'); render(); } return; }
   let remote = [];
-  try { remote = await geocode(q, ctx || (pos.lat != null ? pos : null)); }
+  try { remote = await geocode(q, ref); }
   catch (e) { log('warn', 'пошук: ' + e.message); if (my === sr.seq) sr.err = t('srNetErr'); }
   if (my !== sr.seq) return;
   const rem = remote.filter(r => !local.some(l => near(l, r)));
-  sr.res = ADDR.test(raw) ? rem.concat(local) : local.concat(rem);
-  sr.res = sr.res.slice(0, 12); sr.busy = false; render();
+  sr.res = rankPlaces(local.concat(rem), raw, ref).slice(0, 12); sr.busy = false; render();
 }
 
 function rowHtml(r, i, ico) {

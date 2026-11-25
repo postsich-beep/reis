@@ -118,7 +118,9 @@ const STOPS_JSON = { v: 1, date: '20261121', rows: [
 const PLACES_JSON = { v: 1, date: '20261121', rows: [
   [49.993, 36.230, 'c', 'Харків', 'Харьков', 'kharkiv', 1421125], [49.839, 24.029, 'c', 'Львів', 'Львов', 'lviv', 717273],
   [49.588, 34.551, 'c', 'Полтава', '', 'poltava', 279593], [49.835, 36.686, 'c', 'Чугуїв', 'Чугуев', 'kharkiv', 31000],
-  [48.66, 25.51, 'v', 'Львівка', '', 'chernivtsi', 0], [50.02, 30.12, 'v', 'Харківці', '', 'kyiv', 0], [B[0], B[1], 'c', 'Полтава-тест', '', 'poltava', 1]
+  [48.66, 25.51, 'v', 'Львівка', '', 'chernivtsi', 0], [50.02, 30.12, 'v', 'Харківці', '', 'kyiv', 0], [B[0], B[1], 'c', 'Полтава-тест', '', 'poltava', 1],
+  // (1.1.30) однойменні: місто Миколаїв (обласний центр) і місто Миколаїв на Львівщині — у файлі навмисно спершу менше
+  [49.524, 23.980, 't', 'Миколаїв', 'Николаев', 'lviv', 14600], [46.975, 31.994, 'c', 'Миколаїв', 'Николаев', 'mykolaiv', 470011]
 ] };
 // проблемні для фури місця (як web/data/hazards.json, формат 2): міст 15 т на М-03 уздовж маршруту (фура в парку — до 20 т),
 // низький проїзд на вулиці навхрест (має ігноруватися), ґрунт 1,2 км, міст 55 т (фурі не заважає)
@@ -210,6 +212,15 @@ async function newPage(native, opts = {}) {
         { geometry: { coordinates: [24.0301, 49.8101] }, properties: { name: st, city: L('Львів', 'Lviv'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
         { geometry: { coordinates: [23.4791, 49.7852] }, properties: { name: L('вулиця Антонича', 'Antonycha Street'), city: L('Городок', 'Horodok'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
         { geometry: { coordinates: [24.0205, 49.8203] }, properties: { name: L('Львівська загальноосвітня санаторна школа;School', 'Lviv Sanatorium School'), street: st, housenumber: '3', city: L('Львів', 'Lviv'), state: L('Львівська область', 'Lviv Oblast'), osm_key: 'amenity', osm_value: 'school', countrycode: 'UA' } }] }); }
+    // (1.1.30) «рядова» — вулиці в різних містах; сервер навмисно віддає спершу далекі
+    if (q.includes('рядов')) { const F = (lon, lat, name, city, state, extra = {}) => ({ geometry: { coordinates: [lon, lat] }, properties: { name, city, state, osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA', ...extra } });
+      return json(r, { features: [F(30.52, 50.45, 'вулиця Рядова', 'Київ', 'Київська область'), F(25.59, 49.55, 'вулиця Рядова', 'Тернопіль', 'Тернопільська область'),
+        { geometry: { coordinates: [32.61, 46.64] }, properties: { name: 'Рядове', osm_key: 'place', osm_value: 'village', state: 'Херсонська область', countrycode: 'UA' } },
+        F(23.65, 49.785, 'вулиця Рядова', 'Городок', 'Львівська область'), F(24.052, 49.807, 'вулиця Рядова', 'Львів', 'Львівська область')] }); }
+    if (q.includes('миколаїв') || q.includes('николаев')) return json(r, { features: [
+      { geometry: { coordinates: [24.04, 49.82] }, properties: { name: 'Миколаївська вулиця', city: 'Львів', state: 'Львівська область', osm_key: 'highway', osm_value: 'residential', type: 'street', countrycode: 'UA' } },
+      { geometry: { coordinates: [31.994, 46.975] }, properties: { name: 'Миколаїв', osm_key: 'place', osm_value: 'city', state: 'Миколаївська область', countrycode: 'UA' } },
+      { geometry: { coordinates: [23.98, 49.524] }, properties: { name: 'Миколаїв', osm_key: 'place', osm_value: 'town', state: 'Львівська область', countrycode: 'UA' } }] });
     if (q.includes('львов')) return json(r, { features: [
       { geometry: { coordinates: [36.70, 50.98] }, properties: { name: 'Львов', osm_key: 'place', osm_value: 'village', county: 'Прохоровский муниципальный округ', state: 'Belgorod Oblast', countrycode: 'RU' } },
       { geometry: { coordinates: [24.03, 49.84] }, properties: { name: 'Львів', osm_key: 'place', osm_value: 'city', state: 'Львівська область', countrycode: 'UA' } }] });
@@ -4479,6 +4490,29 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
 /* ============ прохід 37 (1.1.29): пошук адреси чи місця — як у Google Maps, усе українською ============
    Олексій: «пошук тільки українською — вулиці українською, щоб не було англійською; такий, як у Google Maps; домашні місця; просто
    подивитись, де це, не прокладаючи маршрут; набрати адресу і в рейсі». Без рейсу — рядок пошуку згори карти, у рейсі — лупа праворуч. */
+/* (1.1.30) порядок результатів: однойменні міста — від більшого до меншого; вулиці й решта — від найближчого */
+if (run('37')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  await emitN('loc', { prov: 'gps', lat: 49.8397, lon: 24.0297, acc: 5, spd: 0, t: Date.now() }); await sleep(700);   // я у Львові
+  const rows = () => app(page, () => [...document.querySelectorAll('#srBody .sr-item')].map(it => ({ t: it.querySelector('.sr-tx b').textContent, s: it.querySelector('.sr-tx small').textContent, d: (it.querySelector('.sr-d') || {}).textContent || '' })));
+  const ask = async q => { await page.fill('#srIn', q); await page.waitForFunction(() => !document.querySelector('.sr-wait') && document.querySelectorAll('#srBody [data-sri]').length >= 2, null, { timeout: 8000 }).catch(() => {}); await sleep(500); return rows(); };
+  await page.click('#srBar'); await sleep(300);
+  const r1 = await ask('рядова');
+  ok(`я у Львові, шукаю «рядова» — спершу вулиця у Львові, далі від ближчого до дальшого: ${r1.map(r => (r.s.split(',')[0] || r.t) + ' ' + r.d).join(' → ')}`,
+    r1.length >= 5 && /^Львів/.test(r1[0].s) && /^Городок/.test(r1[1].s) && /^Тернопіль/.test(r1[2].s) && /^Київ/.test(r1[3].s) && r1[4].t === 'Рядове', JSON.stringify(r1));
+  await shot(page, '64-rank-street');
+  const r2 = await ask('миколаїв');
+  ok(`«миколаїв» — спершу більше місто (${r2[0] && r2[0].s}), потім менше (${r2[1] && r2[1].s}), хоч воно й ближче; далі — решта від найближчого (${r2[2] && r2[2].t})`,
+    r2.length >= 3 && r2[0].t === 'Миколаїв' && /Миколаївська/.test(r2[0].s) && r2[1].t === 'Миколаїв' && /Львівська/.test(r2[1].s) && r2[2].t === 'Миколаївська вулиця' && r2.filter(r => r.t === 'Миколаїв').length === 2, JSON.stringify(r2));
+  await shot(page, '64-rank-city');
+  const r3 = await ask('николаев');
+  ok(`російською «николаев» — той самий порядок: ${r3.slice(0, 3).map(r => r.t + ' (' + r.s.split(',').slice(-1)[0].trim() + ')').join(', ')}`, r3.length >= 2 && /Миколаївська/.test(r3[0].s) && /Львівська/.test(r3[1].s), JSON.stringify(r3));
+  const fp = await app(page, () => window.__app.route.rankPlaces([{ label: 'Миколаїв', kind: 't', local: true, pop: 14600, lat: 49.524, lon: 23.98 }, { label: 'Миколаїв', kind: 'c', local: true, pop: 470011, lat: 46.975, lon: 31.994 }], 'Миколаїв', { lat: 49.84, lon: 24.03 }).map(x => x.kind).join());
+  ok('у формі «Рейс» той самий порядок (якщо набрати й не вибрати підказку — береться перша, тобто більше місто)', fp === 'c,t', fp);
+  ok('прохід 37 (порядок) без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 37 (порядок) дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('37')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny', 'land'].includes(x.n)).filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h } });
   const T = sc.title, full = sc.n === 'xiaomi', emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
