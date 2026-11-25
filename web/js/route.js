@@ -88,6 +88,9 @@ export function truckOptions(soft = 0) {
   if (soft > 0) o.hgv_no_access_penalty = soft;            // менше 43200 — сервер дозволяє дороги без доступу для фур, із цим штрафом
   return o;
 }
+// (1.1.28) «На свій розсуд»: фура їде дорогами загального користування — обмежень для фур сервер не враховує (costing auto),
+// але час у дорозі рахує для фури з обмежувачем, а не для легковика
+function autoOptions() { const v = S.vehicle === 'auto' ? 0 : +((S.truck || {}).vmax); return v > 0 ? { auto: { top_speed: Math.round(v) } } : {}; }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
 // snap — «чіпляти» точки лише за дороги не нижче цього класу ('unclassified' — без дворів, заправок, житлових вуличок;
 // 'tertiary' — лише траси й проспекти) і лише за добре з'єднані ділянки
@@ -101,7 +104,7 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     return l;
   });
   const body = {
-    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions(soft) } : {},
+    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions(soft) } : costing === 'auto' ? autoOptions() : {},
     units: 'kilometers', language: S.lang === 'ru' ? 'ru-RU' : 'uk-UA', directions_type: 'instructions'
   };
   if (alternates > 0 && pts.length === 2) body.alternates = alternates;      // запасні варіанти — лише для А → Б без проміжних

@@ -4267,9 +4267,12 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
   const c = await meas('lim'); await shot(page, `60-grid-${sc.n}-3`);
   ok(`[${T}] GPS зник — кнопки ±100 зʼявились, а круг швидкості лишився на місці (низ ${b.speed.b} → ${c.speed.b}); у нижній плашці їх більше немає`, !!c.fwd && !!c.back && near(c.speed.b, b.speed.b, 0.5) && near(c.speed.l, b.speed.l, 0.5) && !c.tripbar && near(c.bar.t, b.bar.t, 0.5), JSON.stringify({ was: b.speed, now: c.speed, fwd: c.fwd }));
   if (phone) {
-    ok(`[${T}] без «Мого місця» ±100 стоять одразу над повзунком (${Math.round(c.bar.t - c.back.b)} px), правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
-      near(c.bar.t - c.back.b, 10) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
-    if (sc.w <= 600) ok(`[${T}] стрілка машини — вище кнопок ±100 (вільна карта закінчується на ${c.anc.bot}, кнопки починаються з ${Math.round(c.nudge.t)}): дорогу біля машини вони не закривають`, c.anc.bot <= c.nudge.t + 1 && c.anc.y < c.nudge.t - 20, JSON.stringify({ anc: c.anc, nudge: c.nudge }));
+    ok(`[${T}] ±100 стоять над місцем для «Мого місця» (воно зарезервоване, тож кнопки не стрибають: до повзунка ${Math.round(c.bar.t - c.back.b)} px), правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
+      near(c.bar.t - c.back.b, 70) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
+    ok(`[${T}] кнопка «Поворот» — у кутку між плашкою й виступом повзунка: одразу над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше місця «Мого місця» (на ${c.turn ? Math.round(c.back.r - 50 - c.turn.r) : '?'} px), нижче кнопок ±100; нічого не закриває`,
+      !!c.turn && near(c.flat.t - c.turn.b, 10) && near(c.back.r - 50 - c.turn.r, 10) && c.turn.t >= c.back.b + 4 && c.turn.l >= c.speed.r + 4 && (await lay()).length === 0, JSON.stringify({ turn: c.turn, back: c.back, flat: c.flat, speed: c.speed, attr: c.attr, lay: await lay() }));
+    if (sc.w <= 600) { const above = c.anc.bot <= c.nudge.t + 1 && c.anc.y < c.nudge.t - 20;
+      ok(`[${T}] стрілка машини ${above ? `вище кнопок ±100 (вільна карта закінчується на ${c.anc.bot}, кнопки починаються з ${Math.round(c.nudge.t)})` : `на невисокому екрані — збоку від кнопок ±100 (на ${Math.round(c.nudge.l - c.W / 2)} px лівіше)`}: дорогу біля машини вони не закривають`, above || (sc.h <= 600 && c.nudge.l - c.W / 2 >= 40), JSON.stringify({ anc: c.anc, nudge: c.nudge })); }
   }
   // г) без GPS і карту зсунули: над повзунком — «Моє місце», над ним — ±100
   await app(page, () => { window.__app.map.setFollow(false); window.__app.map.view.lastTouch = Date.now() + 600000; }); await sleep(700);
