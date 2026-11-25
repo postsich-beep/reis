@@ -100,10 +100,14 @@ const panels = {};          // name -> {title: () => string, render: (body) => v
 let current = null, rerenderTimer = null;
 export function definePanel(name, def) { panels[name] = def; }
 export const currentPanel = () => current;
+/** Куди веде «назад» із відкритої панелі (картка місця → «Місця», екрани налаштувань → «Налаштування», архів → «Рейс»); null — просто закрити. */
+export const panelParent = () => { const d = current && panels[current]; return d && d.back ? d.back : null; };
 export function openPanel(name, arg) {
   const def = panels[name]; if (!def) return;
   current = name;
-  const p = $('panel'); p.hidden = false; p.classList.toggle('half', !!def.half); p.classList.toggle('full', !!def.full);
+  // (1.1.24) Кожна панель — на весь екран: верхня плашка з маневром і нижня з кнопками тут нічого не дають, лише заважають гортати.
+  // Закрити — ✕ угорі, «Готово»/«Назад» унизу чи системна «Назад». (Те, чому потрібна карта, — не панелі, а маленькі вікна поверх неї.)
+  const p = $('panel'); p.hidden = false; p.classList.remove('half'); p.classList.toggle('full', def.full !== false);
   $('panelTitle').textContent = def.title();
   $('panelBack').hidden = !def.back;
   $('panelBack').onclick = () => openPanel(def.back);
@@ -111,7 +115,16 @@ export function openPanel(name, arg) {
   def.render(body, arg);
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => b.classList.toggle('act', b.dataset.panel === (def.tab || name)));
   bus.emit('panel', name);
+  panelDodgeSoon();
 }
+// Рядок списку, що саме проходить під галочкою «Готово», відсуває свій правий край — відстань чи кнопка в ньому лишається на видноті
+let dodgeRaf = 0;
+export function panelDodge() {
+  dodgeRaf = 0;
+  const ok = $('panelOk'), p = $('panel'); if (!ok || !p || p.hidden) return; const r = ok.getBoundingClientRect(); if (!r.width) return;
+  for (const row of document.querySelectorAll('#panelBody :is(.pl-row,.vp-row,.tp-row,.item,.rep-row,.pl-all,.btns,.row,.seg,.field,.tg,.vp-menu > div,.kv > div,.arch .item,summary)')) { const b = row.getBoundingClientRect(); row.classList.toggle('dodge', b.right > r.left - 4 && b.bottom > r.top + 1 && b.top < r.bottom - 1); }
+}
+export const panelDodgeSoon = () => { if (!dodgeRaf) dodgeRaf = requestAnimationFrame(panelDodge); };
 export function closePanel() {
   if (!current) return;
   const def = panels[current]; current = null;
@@ -128,7 +141,7 @@ export function refresh(name) {
     rerenderTimer = null; if (current !== name) return;
     const def = panels[name], body = $('panelBody'), st = body.scrollTop;
     if (def.update) def.update(body); else { body.innerHTML = ''; def.render(body); }
-    body.scrollTop = st;
+    body.scrollTop = st; panelDodgeSoon();
   }, 400);
 }
 export const html = (strings, ...vals) => strings.reduce((a, s, i) => a + s + (i < vals.length ? (vals[i] == null ? '' : vals[i]) : ''), '');
