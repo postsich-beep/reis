@@ -989,7 +989,8 @@ export function setMapStyle(url) {
   // diff: false — повне перезавантаження стилю, інакше бібліотека «порівнює» стилі й мовчки викидає наші шари маршруту
   try { map.setStyle(url, { diff: false }); } catch (e) { log('warn', 'стиль карти: ' + e.message); }
 }
-export function flyTo(p, zoom = 14) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600 }); }
+// offY — на скільки пікселів підняти точку над серединою (коли низ карти закриває картка)
+export function flyTo(p, zoom = 14, offY = 0) { if (!map) return; view.follow = false; view.lastTouch = Date.now(); bus.emit('view', view); noPad(); map.easeTo({ center: [p.lon, p.lat], zoom, pitch: 0, bearing: 0, duration: 600, offset: [0, -Math.round(offY)] }); }
 
 function drawMarks() {
   const src = map && map.getSource && map.getSource('marks'); if (!src) return;
