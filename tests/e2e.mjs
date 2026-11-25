@@ -1285,7 +1285,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     await page.click('#bQuick'); await sleep(300);
     const qb = await app(page, () => { const q = document.getElementById('quick'), b = document.getElementById('bottom').getBoundingClientRect();   // без анімації: розмітка, а не кадр
       return { open: !q.hidden, top: q.offsetTop, bottom: q.offsetTop + q.offsetHeight, H: innerHeight, W: innerWidth, left: q.offsetLeft, right: q.offsetLeft + q.offsetWidth, bt: b.top, tiles: q.querySelectorAll('.q-tile').length, land: innerWidth > innerHeight }; });
-    ok(`${T}: швидкі налаштування відкрились, 8 плиток («Шари» тепер окремою кнопкою), у межах екрана й не під нижньою панеллю`, qb.open && qb.tiles === 8 && qb.top >= 0 && qb.left >= 0 && qb.right <= qb.W && (qb.land ? qb.bottom <= qb.H : qb.bottom <= qb.bt + 1), JSON.stringify(qb));
+    ok(`${T}: швидкі налаштування відкрились, 9 плиток (1.1.24: дев'ята — «Телефон», калібрування), у межах екрана й не під нижньою панеллю`, qb.open && qb.tiles === 9 && qb.top >= 0 && qb.left >= 0 && qb.right <= qb.W && (qb.land ? qb.bottom <= qb.H : qb.bottom <= qb.bt + 1), JSON.stringify(qb));
     await shot(page, `a-${sc.n}-2-quick`);
     const st = () => app(page, () => { const A = window.__app; return { voice: A.S.voice, v3d: A.S.view3d, north: A.map.view.north, follow: A.map.view.follow, rec: !!A.S.rec, theme: A.S.theme, awake: A.S.keepAwake !== false, zb: A.map.view.zoomBias, open: !document.getElementById('quick').hidden, panel: A.ui ? null : document.getElementById('panel').hidden ? '' : document.getElementById('panelTitle').textContent, badge: !!document.querySelector('#bQuick .q-badge') }; });
     const tap = async k => { await page.click(`#quick [data-q="${k}"]`); await sleep(120); return st(); };
@@ -2141,7 +2141,7 @@ if (run('19')) try {
   const sg = await app(P2.page, () => {
     const l = document.getElementById('spdLim'), s = document.getElementById('speed'), v = document.getElementById('spdVal'), r = l.getBoundingClientRect();
     // перетин знака з самими цифрами (за обрисом тексту), для «40», «57» і тризначної «100»
-    const hit = txt => { const old = v.textContent; v.textContent = txt; const rg = document.createRange(); rg.selectNodeContents(v); const g = rg.getBoundingClientRect(), q = l.getBoundingClientRect(); v.textContent = old;
+    const hit = txt => { const old = v.textContent; v.textContent = txt; s.classList.toggle('d3', txt.length >= 3); /* як у програмі: три цифри — дрібніше */ const rg = document.createRange(); rg.selectNodeContents(v); const g = rg.getBoundingClientRect(), q = l.getBoundingClientRect(); v.textContent = old; s.classList.remove('d3');
       const cx = Math.max(q.left, Math.min(q.right, (g.left + g.right) / 2)), cy = Math.max(q.top, Math.min(q.bottom, (g.top + g.bottom) / 2));
       const R = q.width / 2, ox = q.left + R, oy = q.top + R, nx = Math.max(g.left, Math.min(ox, g.right)), ny = Math.max(g.top + g.height * 0.12, Math.min(oy, g.bottom));   // найближча до центру знака точка цифр
       return Math.hypot(nx - ox, ny - oy) < R; };
@@ -2551,7 +2551,9 @@ if (run('27')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land'].i
   ok(`[${T}] карта без панелей: нижня плашка напівпрозора (як у налаштуванні «Прозорість плашок»)`, /rgba\(/.test(l0.bottomBg) && !l0.open && !l0.kb, l0.bottomBg);
   await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#in_b');
   const l1 = await lay();
-  ok(`[${T}] відкрито «Рейс»: нижня плашка непрозора — під вкладками не просвічують підписи карти`, l1.open && /^rgb\(/.test(l1.bottomBg) && l1.bottomShown && l1.panel.b <= l1.bottom.t + 16, JSON.stringify({ bg: l1.bottomBg, panel: l1.panel, bottom: l1.bottom }));
+  // (1.1.24) «Рейс» без побудованого маршруту — панель на весь екран: нижню плашку вона закриває, і крізь неї нічого не просвічує
+  const cov = await app(page, () => { const p = document.getElementById('panel'), tb = document.getElementById('tabs').getBoundingClientRect(), h = document.elementFromPoint(tb.left + tb.width / 2, tb.top + tb.height / 2), m = getComputedStyle(p).backgroundColor.match(/rgba?\(([^)]+)\)/), a = m ? m[1].split(',').map(Number) : []; return { covered: !!h && p.contains(h), alpha: a.length === 4 ? a[3] : 1, full: p.classList.contains('full') }; });
+  ok(`[${T}] відкрито «Рейс»: панель на весь екран і непрозора — нижню плашку закрито, підписи карти ніде не просвічують`, l1.open && cov.full && cov.covered && cov.alpha === 1 && l1.panel.b >= l1.vh - 1, JSON.stringify({ cov, panel: l1.panel, bottom: l1.bottom }));
   if (sc.w > sc.h) {               // телефон набік: бічна розкладка; перевіряємо лише, що набір тексту в полі йде як слід
     await page.focus('#in_b'); await page.type('#in_b', 'Полтава'); await sleep(300);
     ok(`[${T}] телефон набік: текст у полі набирається по порядку`, await app(page, () => document.getElementById('in_b').value) === 'Полтава', await app(page, () => document.getElementById('in_b').value));
@@ -2565,7 +2567,7 @@ if (run('27')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land'].i
   await page.focus('#in_b'); await page.setViewportSize({ width: sc.w, height: sc.h - 300 }); await sleep(400);
   await page.type('#in_b', 'Полтава'); await page.waitForSelector('#sg_b button', { timeout: 5000 }); await sleep(600);
   const l2 = await lay();
-  ok(`[${T}] клавіатура відкрита: нижньої плашки немає, «Рейс» — на всю ширину й висоту над клавіатурою (навіть коли вікно стало «альбомним»)`, l2.kb && !l2.bottomShown && l2.panel.b === l2.vh && l2.panel.t < l1.panel.t && l2.panel.h >= l2.vh - 40 && await app(page, () => { const r = document.getElementById('panel').getBoundingClientRect(); return Math.round(r.left) === 0 && Math.round(r.right) === innerWidth; }), JSON.stringify({ panel: l2.panel, vh: l2.vh, kb: l2.kb }));
+  ok(`[${T}] клавіатура відкрита: нижньої плашки немає, «Рейс» — на всю ширину й висоту над клавіатурою (навіть коли вікно стало «альбомним»)`, l2.kb && !l2.bottomShown && l2.panel.b === l2.vh && l2.panel.t <= l1.panel.t + 4 && l2.panel.h >= l2.vh - 40 && await app(page, () => { const r = document.getElementById('panel').getBoundingClientRect(); return Math.round(r.left) === 0 && Math.round(r.right) === innerWidth; }), JSON.stringify({ panel: l2.panel, vh: l2.vh, kb: l2.kb }));
   ok(`[${T}] поле, в яке набирають, угорі панелі; підказки адрес видно цілком і ніщо їх не перекриває`, l2.sg.length >= 1 && l2.sg[0].mine && l2.sg[0].b <= l2.vh && await app(page, () => { const i = document.getElementById('in_b').getBoundingClientRect(), p = document.getElementById('panelBody').getBoundingClientRect(); return i.top >= p.top && (i.top - p.top < 40 || p.scrollHeight === undefined || document.getElementById('panelBody').scrollHeight - document.getElementById('panelBody').clientHeight - document.getElementById('panelBody').scrollTop < 2); }), JSON.stringify(l2.sg.slice(0, 3)));
   await shot(page, '34-keyboard-' + sc.n);
   // дотик до підказки: фокус зникає, але екран не «стрибає» з-під пальця — підказку вибрано
@@ -2575,7 +2577,7 @@ if (run('27')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land'].i
   // клавіатуру сховано
   await app(page, () => document.activeElement && document.activeElement.blur()); await page.setViewportSize({ width: sc.w, height: sc.h }); await sleep(500);
   const l3 = await lay();
-  ok(`[${T}] клавіатуру сховано — нижня плашка й звичайна панель на місці`, !l3.kb && l3.bottomShown && l3.bottom.b === l3.vh && l3.panel.b <= l3.bottom.t + 16 && l3.panel.t === l1.panel.t, JSON.stringify({ panel: l3.panel, bottom: l3.bottom }));
+  ok(`[${T}] клавіатуру сховано — панель знову на весь екран, нижня плашка під нею на місці`, !l3.kb && l3.bottomShown && l3.bottom.b === l3.vh && l3.panel.b === l3.vh && l3.panel.t === l1.panel.t, JSON.stringify({ panel: l3.panel, bottom: l3.bottom }));
   await page.click('#panelOk'); await sleep(300);
   ok(`[${T}] панель закрито — нижня плашка знову напівпрозора`, /rgba\(/.test((await lay()).bottomBg));
   await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .app-logo'); await sleep(200);
@@ -2596,20 +2598,21 @@ if (run('25')) for (const sc of TABS.filter(x => !process.env.SCR || process.env
   const overflow = () => app(page, () => { const out = []; for (const e of document.querySelectorAll('#top,#bottom,#panel,#quick,#pick,#routePick,#repSheet,.aim-bar,#toasts .toast,#panelBody *')) { if (e.closest('[hidden]')) continue; const r = e.getBoundingClientRect(); if (!r.width) continue; if (r.right > innerWidth + 1 || r.left < -1) out.push((e.id || e.className || e.tagName) + ' ' + Math.round(r.left) + '..' + Math.round(r.right)); } return [...new Set(out)].slice(0, 6); });
   await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(500);
   const top = await R('#top'), bot = await R('#bottom'), bar = await R('#tabbar'), spd = await R('#speed'), zm = await R('#zoom'), mapR = await R('#map');
+  const flat = await R('#tabbar .tb-main');                       // (1.1.24) #bottom — прозорий стовпчик із виступом стрілки нахилу; сама плашка — рівна, на висоту лівої частини з часом
   ok(`[${T}] карта на весь екран; верхня й нижня плашки — по центру${wide ? ', не ширші 760 px' : ''} (а не збоку)`, mapR.w === sc.w && mapR.h === sc.h && centered(top, 760) && centered(bot, 760) && bot.b === sc.h, JSON.stringify({ top, bot }));
-  ok(`[${T}] круг швидкості й кнопки масштабу не налазять на нижню плашку`, spd && zm && (spd.b <= bot.t || spd.r <= bot.l) && (zm.b <= bar.t || zm.l >= bar.r) && spd.l >= 0 && zm.r <= sc.w && spd.b <= sc.h && zm.b <= sc.h, JSON.stringify({ spd, zm, bot }));
+  ok(`[${T}] круг швидкості й кнопки масштабу не налазять на нижню плашку`, spd && zm && flat && (spd.b <= flat.t || spd.r <= bot.l) && (zm.b <= bar.t || zm.l >= bar.r) && spd.l >= 0 && zm.r <= sc.w && spd.b <= sc.h && zm.b <= sc.h, JSON.stringify({ spd, zm, bot, flat }));
   await shot(page, `31-${sc.n}-map`);
   await page.click('#bQuick'); await sleep(300);
   const q = await R('#quick');
   ok(`[${T}] швидкі налаштування — по центру`, centered(q, 640) && q.b <= bot.t + 2, JSON.stringify(q));
   await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .app-logo'); await sleep(250);
   const pn = await R('#panel'), ov1 = await overflow();
-  ok(`[${T}] «Налаштування» відкриваються по центру${wide ? ' (не ширші 720 px)' : ''}, між верхньою і нижньою плашками, нічого не вилазить`, centered(pn, 720) && pn.t >= top.b - 2 && pn.b <= sc.h && pn.h >= 300 && ov1.length === 0, JSON.stringify({ pn, ov1 }));
+  ok(`[${T}] «Налаштування» відкриваються по центру${wide ? ' (не ширші 760 px)' : ''} на всю висоту екрана (1.1.24: плашки їх не затискають), нічого не вилазить`, centered(pn, 760) && pn.t <= 8 && pn.b === sc.h && ov1.length === 0, JSON.stringify({ pn, ov1 }));
   await shot(page, `31-${sc.n}-settings`);
   await page.click('#panelOk');
   await page.click('#tabs button[data-panel="trip"]'); await page.waitForSelector('#panelBody .field'); await sleep(250);
   const pt = await R('#panel'), ov2 = await overflow();
-  ok(`[${T}] «Рейс» — так само по центру`, centered(pt, 720) && ov2.length === 0, JSON.stringify({ pt, ov2 }));
+  ok(`[${T}] «Рейс» — так само по центру й на всю висоту`, centered(pt, 760) && pt.t <= 8 && pt.b === sc.h && ov2.length === 0, JSON.stringify({ pt, ov2 }));
   await shot(page, `31-${sc.n}-trip`);
   // рейс: будуємо, вікно варіантів і плашка в дорозі — по центру
   await page.fill('#in_b', 'Полтава'); await page.click('[data-act="build"]');
@@ -3616,8 +3619,8 @@ if (run('32')) try {
       && /^M0 \d+L0 \d+Q0 \d+ 18 \d+L/.test(tb.path) && (tb.path.match(/Q/g) || []).length === 4 && /Z$/.test(tb.path) && (tb.edge.match(/Q/g) || []).length === 4 && /^rgba\(/.test(tb.fill) && /maplibregl-canvas|^map$/.test(String(tb.hitGap)), JSON.stringify({ bar: tb.bar, ear: tb.ear, tilt: tb.tilt, tabs: tb.tabs, path: tb.path, fill: tb.fill, hitGap: tb.hitGap }));
     ok(`[${T}] ліворуч у плашці — час («${tb.eta}»); рейсу немає — більше нічого`, /^\d\d:\d\d$/.test(tb.eta) && tb.remain.length === 0, JSON.stringify({ eta: tb.eta, remain: tb.remain }));
     const ct0 = await calTile(page);
-    ok(`[${T}] праворуч угорі, як і були, дві кнопки (налаштування й вид карти); «Телефон» (калібрування) — плитка у швидких налаштуваннях, у правій нижній клітинці (остання з ${ct0 && ct0.n}): значок лінією, ${ct0 && ct0.w}×${ct0 && ct0.h}`,
-      tb.rail.map(x => x.id).join() === 'bQuick,bMap' && !!ct0 && ct0.last && ct0.n === 9 && ct0.label === 'Телефон' && ct0.fromRight <= 2 && ct0.fromBottom <= 2 && ct0.w >= 84 && ct0.h >= 68 && ct0.inView && ct0.fills === 0 && ct0.fits, JSON.stringify({ rail: tb.rail.map(x => x.id), ct0 }));
+    ok(`[${T}] праворуч угорі, як і були, дві кнопки (налаштування й вид карти); «Телефон» (калібрування) — плитка у швидких налаштуваннях, остання з ${ct0 && ct0.n}${sc.w >= 700 ? '' : ' — у правій нижній клітинці (три в ряд)'}: значок лінією, ${ct0 && ct0.w}×${ct0 && ct0.h}`,
+      tb.rail.map(x => x.id).join() === 'bQuick,bMap' && !!ct0 && ct0.last && ct0.n === 9 && ct0.label === 'Телефон' && (sc.w >= 700 || (ct0.fromRight <= 2 && ct0.fromBottom <= 2)) && ct0.w >= 80 && ct0.h >= 64 && ct0.inView && ct0.fills === 0 && ct0.fits, JSON.stringify({ rail: tb.rail.map(x => x.id), ct0 }));
     ok(`[${T}] калібрування ще не робили — плитка не світиться («${ct0 && ct0.state}»); позначок на маршруті немає — «Мітки» не світяться, числа немає`, !/cal-ok/.test(ct0.cls) && ct0.state === 'калібрування' && !/has/.test(tb.rep) && !tb.badge && tb.repLbl === 'Позначити подію на дорозі', JSON.stringify({ ct0, rep: tb.rep }));
     ok(`[${T}] нижня плашка: нічого не накладається й не обрізано`, (await page.evaluate(layoutCheck)).length === 0 && (await readCheck(page, '#tabbar')).length === 0, JSON.stringify([await page.evaluate(layoutCheck), await readCheck(page, '#tabbar')]));
     await shot(page, '48-bar-' + sc.n);
