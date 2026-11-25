@@ -138,7 +138,13 @@ function onCardClick(e) {
   if (k === 'home' || k === 'work') { S[k] = { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' }; toast(t(k === 'home' ? 'srHomeSaved' : 'srWorkSaved', p.label), 'green', 4000); $('srCard').innerHTML = cardHtml(p); }
 }
 
-function syncTrip() { document.body.classList.toggle('trip-on', !!g.active); if (g.active && sr.card && !$('srCard').hidden) $('srCard').innerHTML = cardHtml(sr.card); }
+let wasActive = null;
+function syncTrip() {
+  const a = !!g.active; if (a === wasActive) return; wasActive = a;
+  document.body.classList.toggle('trip-on', a);
+  if (sr.card && !$('srCard').hidden) $('srCard').innerHTML = cardHtml(sr.card);      // рейс почався чи скінчився — інша головна кнопка
+  requestAnimationFrame(() => window.dispatchEvent(new Event('resize')));             // у рейсі праворуч з'являється лупа — перерахувати місце кнопок
+}
 
 export function initSearch() {
   $('srBar').addEventListener('click', () => openSearch());

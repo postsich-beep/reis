@@ -46,6 +46,12 @@ function layoutVars() {
     r.setProperty('--bl', Math.max(0, Math.round($('bottom').getBoundingClientRect().bottom - top)) + 'px'); }
   // --ex — відстань від правого краю екрана до осі повзунка нахилу: на цій осі стоять «Моє місце», кнопки справа вгорі й (правим краєм) ±100
   { const T = $('tilt').getBoundingClientRect(); if (T.width > 0) r.setProperty('--ex', (Math.round((window.innerWidth - (T.left + T.right) / 2) * 2) / 2) + 'px'); }
+  // (1.1.28) Кнопки справа вгорі (налаштування, тип карти, звук, у рейсі — пошук) не повинні діставати до стовпчика над повзунком
+  // («Моє місце», ±100 без GPS). Не вміщаються стовпчиком — звук (і пошук) стають ліворуч, другим рядком.
+  { const rail = $('rail'), z = $('zoom'), B = document.body;
+    if (rail && z) { B.classList.remove('rail-tight');
+      const rr = rail.getBoundingClientRect(), zr = z.getBoundingClientRect(), col = getComputedStyle(rail).flexDirection === 'column';
+      if (col && rr.height > 0 && zr.bottom > 0 && rr.bottom + 10 > zr.bottom - 146) B.classList.add('rail-tight'); } }
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:

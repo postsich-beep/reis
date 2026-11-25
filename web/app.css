@@ -1450,10 +1450,10 @@ body.rr-on :is(#speed,#cam,#spdPop,#zoom,#attr,#jrAsk){visibility:hidden}
 @media (orientation:landscape) and (max-height:520px){ #bSnd{margin-top:0;margin-right:9px} }
 @media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){ #bSnd{margin-top:10px} }
 /* невисокий телефон (до 600 px): угору місця обмаль — кнопка звуку стає ліворуч від кнопки швидких налаштувань, в один ряд з нею */
-@media (orientation:portrait) and (max-height:600px){
-  #rail{display:grid;grid-template-columns:50px 50px;column-gap:10px;justify-items:center;align-items:start}
-  #bQuick{grid-column:2;grid-row:1} #bMap{grid-column:2;grid-row:2} #bSnd{grid-column:1;grid-row:1;margin-top:0}
-}
+/* (рахує layoutVars: стовпчиком кнопки дістали б до «Мого місця» й ±100 над повзунком) — звук стає ліворуч від налаштувань */
+body.rail-tight #rail{display:grid;grid-template-columns:50px 50px;column-gap:10px;justify-items:center;align-items:start}
+body.rail-tight #bQuick{grid-column:2;grid-row:1} body.rail-tight #bMap{grid-column:2;grid-row:2} body.rail-tight #bSnd{grid-column:1;grid-row:1;margin-top:0}
+body.rail-tight #bSearch{grid-column:1;grid-row:2}
 
 /* ---- 1.1.29: пошук адреси чи місця, як у Google Maps ----
    Без рейсу — рядок пошуку згори карти (над смужкою «що на дорозі»); у рейсі — лупа праворуч під кнопкою звуку. */
