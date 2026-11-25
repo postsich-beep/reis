@@ -3,7 +3,7 @@ import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from '
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
 import { chime, initSfx } from './sfx.js';
-import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords } from './guide.js';
+import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords, selectChoice, confirmChoice, cancelChoice } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
@@ -39,10 +39,19 @@ function layoutVars() {
   r.setProperty('--bh', Math.round($('bottom').getBoundingClientRect().height) + 'px');
   barShape();
   // --bl — скільки знизу зайнято ЛІВОРУЧ (там плашка рівна й низька): над цим стоїть круг швидкості. Якщо над плашкою є щось на всю
-  // ширину чи впритул до лівого краю (кнопки «без GPS», «Нова версія», «прийняти GPS») — круг стає над ним.
+  // ширину («Нова версія», «прийняти GPS») — круг стає над ним. Кнопки «без GPS» (±100) з 1.1.28 стоять праворуч, над повзунком
+  // нахилу, тож круг через них більше не підстрибує.
   { let top = $('tabbar').querySelector('.tb-main').getBoundingClientRect().top;
-    for (const id of ['nudge', 'updBar', 'bAcceptGps']) { const e = $(id), q = e && !e.hidden ? e.getBoundingClientRect() : null; if (q && q.height > 0) top = Math.min(top, q.top); }
+    for (const id of ['updBar', 'bAcceptGps']) { const e = $(id), q = e && !e.hidden ? e.getBoundingClientRect() : null; if (q && q.height > 0) top = Math.min(top, q.top); }
     r.setProperty('--bl', Math.max(0, Math.round($('bottom').getBoundingClientRect().bottom - top)) + 'px'); }
+  // --ex — відстань від правого краю екрана до осі повзунка нахилу: на цій осі стоять «Моє місце», кнопки справа вгорі й (правим краєм) ±100
+  { const T = $('tilt').getBoundingClientRect(); if (T.width > 0) r.setProperty('--ex', (Math.round((window.innerWidth - (T.left + T.right) / 2) * 2) / 2) + 'px'); }
+  // (1.1.28) Кнопки справа вгорі (налаштування, тип карти, звук, у рейсі — пошук) не повинні діставати до стовпчика над повзунком
+  // («Моє місце», ±100 без GPS). Не вміщаються стовпчиком — звук (і пошук) стають ліворуч, другим рядком.
+  { const rail = $('rail'), z = $('zoom'), B = document.body;
+    if (rail && z) { B.classList.remove('rail-tight');
+      const rr = rail.getBoundingClientRect(), zr = z.getBoundingClientRect(), col = getComputedStyle(rail).flexDirection === 'column';
+      if (col && rr.height > 0 && zr.bottom > 0 && rr.bottom + 10 > zr.bottom - 146) B.classList.add('rail-tight'); } }
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:
@@ -215,8 +224,11 @@ function toggleRec() {
 
 function railState() {
   const qb = $('bQuick');
-  qb.innerHTML = ICON.quick + (!S.voice ? `<i class="q-badge mute">${ICON.mute}</i>` : S.rec ? '<i class="q-badge rec"></i>' : '');
-  qb.classList.toggle('muted', !S.voice);
+  // (1.1.28) звук має власну кнопку під типом карти — на кнопці швидких налаштувань лишився тільки знак запису треку
+  qb.innerHTML = ICON.quick + (S.rec ? '<i class="q-badge rec"></i>' : '');
+  const sb = $('bSnd'), on = !!S.voice;
+  if (sb.dataset.on !== String(on)) { sb.dataset.on = String(on); sb.innerHTML = on ? ICON.vol : ICON.mute; sb.classList.toggle('off', !on);
+    sb.setAttribute('aria-pressed', String(on)); sb.setAttribute('aria-label', t(on ? 'sndBtnOn' : 'sndBtnOff')); }
   const mb = $('bMap'), cur = mtShown(), key = cur + (P.online() ? '' : '-nonet');
   if (mb.dataset.k !== key) { mb.dataset.k = key; mb.classList.toggle('nonet', !P.online());
     mb.innerHTML = `<span class="mt-seg on" data-k="${cur}">${MT_PIC[cur]}</span>`;
@@ -239,7 +251,7 @@ const TURN_IC = {
 let turnKey = '', waitHintFor = null, waitVoiced = false;
 function turnBtnSync(lost) {
   const b = $('bTurn'), c = lost ? pos.cp : null;
-  if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
+  if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); document.body.classList.remove('turn-on'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
   const label = c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
   const key = [c.sgn, c.cls, c.state, label, c.handled].join('|');
   if (key !== turnKey) {
@@ -247,7 +259,7 @@ function turnBtnSync(lost) {
     b.className = 'turn-btn ' + c.cls + ' st-' + c.state + (c.handled ? ' hand' : '');
     b.innerHTML = TURN_IC[c.sgn > 0 ? 'r' : c.sgn < 0 ? 'l' : 'o'] + `<span>${esc(label)}</span>`;
   }
-  if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); requestAnimationFrame(layoutVars); }
+  if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); document.body.classList.add('turn-on'); requestAnimationFrame(layoutVars); }
   // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
   if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
     waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
@@ -308,7 +320,7 @@ function hud() {
   const lost = pos.mode === 'dr';
   if (lost !== lostShown) {
     lostShown = lost;
-    $('nudge').hidden = !lost; $('gpsChip').hidden = lost;
+    $('nudge').hidden = !lost; $('gpsChip').hidden = lost; $('zoom').classList.toggle('dr', lost); document.body.classList.toggle('dr-on', lost);   // без GPS місце «Мого місця» над повзунком тримаємо завжди: ±100 не стрибають
     if (!lost) $('bAcceptGps').hidden = true;
     requestAnimationFrame(layoutVars);
   }
@@ -340,7 +352,8 @@ function hud() {
     } else if (g.offRoute || pos.rd == null) {
       man.classList.add('info'); if (g.offRoute) man.classList.add('off');
       $('manIco').innerHTML = manIcon(8); $('manDist').textContent = g.offRoute ? t('offRoute') : t('toRoute');
-      $('manText').textContent = pos.off ? fmtDist(pos.off) : ''; $('manThen').hidden = true;
+      // (1.1.28) маршрут сам не перебудовується: кажемо, що ведемо запланованим і що дотик до плашки — перебудувати
+      $('manText').textContent = g.offRoute ? (pos.off ? fmtDist(pos.off) + ' · ' : '') + t('offRouteTap') : pos.off ? fmtDist(pos.off) : ''; $('manThen').hidden = true;
     } else if (g.next) {
       $('manIco').innerHTML = manIcon(g.next.type) + (g.next.type === 26 && g.next.exits ? '' : '');
       $('manDist').textContent = fmtDist(g.distNext);
@@ -640,10 +653,30 @@ async function softOffer(trip, strict) {
     toast(t('softFound', sv.saves.km, sv.saves.min), 'yellow', 9000);
   } catch (e) { log('info', 'варіант через заборону для фур: ' + (e && e.message)); }
 }
-// Фура чи легковик: для фури — габарити, маса, мости, обмежувач; для легковика — без обмежень
+// (1.1.28) Яким буде рейс — вибирають ДО побудови, і під кнопками одразу написано, що це означає:
+//  • «Фура: суворо» — жорсткі обмеження: лише дорогами, де фурі можна (габарити, маса, мости, знаки). Шлях може бути довшим.
+//  • «Фура: на свій розсуд» — той самий рейс дорогами загального користування: обмеження для фур не враховано, за знаками водій стежить сам.
+//  • «Легкова» — без обмежень і без обмежувача швидкості.
+const vehKind = () => S.vehicle === 'auto' ? 'car' : S.routeMode === 'free' ? 'free' : 'strict';
 function vehHtml() {
-  const v = S.vehicle === 'auto' ? 'auto' : 'truck';
-  return `<div class="seg veh"><button data-veh="truck" class="${v === 'truck' ? 'on' : ''}">${ICON.truck}${t('vehTruck')}</button><button data-veh="auto" class="${v === 'auto' ? 'on' : ''}">${ICON.car}${t('vehCar')}</button></div>`;
+  const k = vehKind(), b = (kind, veh, mode, ico, l1, l2) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}">${ico}<span><b>${l1}</b>${l2 ? `<small>${l2}</small>` : ''}</span></button>`;
+  return `<div class="seg veh veh3">${b('strict', 'truck', 'strict', ICON.truck, t('vehTruck'), t('vehStrict'))}${b('free', 'truck', 'free', ICON.truck, t('vehTruck'), t('vehFree'))}${b('car', 'auto', '', ICON.car, t('vehCar'), '')}</div>
+    <div class="veh-hint ${k}" id="vehHint">${vehHintHtml(k)}</div>`;
+}
+const vehHintHtml = k => `<b>${t('vehHintT_' + k)}</b> ${t('vehHint_' + k)}`;
+// Те саме — одним рядком на екрані вибору маршруту (рейс уже прокладено: з форми, з точки на карті, з архіву). Натиснули інший вид —
+// той самий рейс одразу перераховується для нього. Так вид транспорту видно й можна змінити там, де рейс підтверджують.
+function vehMiniHtml() {
+  const k = vehKind(), b = (kind, veh, mode, ico, lbl) => `<button data-veh="${veh}"${mode ? ` data-mode="${mode}"` : ''} data-kind="${kind}" class="${k === kind ? 'on' : ''}" aria-pressed="${k === kind}" aria-label="${t('vehMiniFull_' + kind)}">${ico}<span>${lbl}</span></button>`;
+  return `<div class="seg veh vehm" role="group" aria-label="${t('vehMiniAria')}">${b('strict', 'truck', 'strict', ICON.truck, t('vehMini_strict'))}${b('free', 'truck', 'free', ICON.truck, t('vehMini_free'))}${b('car', 'auto', '', ICON.car, t('vehCar'))}</div>`;
+}
+async function pickKind(veh, mode) {
+  if (plan.busy || !plan.trip) return;
+  S.vehicle = veh; if (mode) S.routeMode = mode;
+  const box = $('routePick'), k = vehKind();
+  box.classList.add('busy'); box.querySelectorAll('.vehm button').forEach(x => { x.classList.toggle('on', x.dataset.kind === k); x.setAttribute('aria-pressed', String(x.dataset.kind === k)); });
+  try { await doBuild(); } finally { box.classList.remove('busy'); }
+  if (!plan.trip) { toast(plan.err || t('routeFail'), 'red', 7000); openPanel('trip'); }     // не вдалося — показуємо форму з поясненням
 }
 // Варіанти маршруту карточками (до трьох): час, кілометри, головні дороги, обмеження для фури
 function altCardsHtml(force = false) {
@@ -682,7 +715,7 @@ function pickHtml() {
   const tr = plan.trip;
   return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <div class="rp-head">${ptTag('a', 'rp-t')}<b>${esc(tr.a.label || '')}</b>${tr.v ? `${ptTag('v', 'rp-t')}<b>${esc(tr.v.label || '')}</b>` : ''}${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
-    ${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
+    ${vehMiniHtml()}${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
 }
 // для фури проїзду не знайшлося — показуємо звичайний маршрут із червоним попередженням; старт/фініш перенесено на основну дорогу — тихо кажемо
@@ -696,6 +729,7 @@ function softWarnHtml(r, cls = 'rp-warn soft') {
 }
 function pickWarnHtml() {
   const r = plan.routes[plan.sel] || plan.trip.route;
+  if (r && r.costing === 'auto' && !r.truckFail && plan.trip.free) return `<div class="rp-warn soft"><b>${t('freeTitle')}.</b> ${t('freeText')}</div>`;
   return r && r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : softWarnHtml(r) || (r && r.snapped ? `<div class="rp-warn">${t('truckSnapped')}</div>` : '');
 }
 function pickShow() {
@@ -713,6 +747,53 @@ function pickFit() {
 }
 function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
 function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
+/* ---------- (1.1.28) новий маршрут у дорозі: кілька варіантів на вибір ---------- */
+// Водій з'їхав із рейсу й вибрав «Новий маршрут» — показуємо всі варіанти звідси: для фури («суворо»), дорогами загального користування
+// («на свій розсуд»), для легкової — легкові. Картка: вид, час, кілометри, головні дороги. Вибрав і підтвердив — це новий рейс.
+// «Лишити старий» або час вийшов — нічого не міняється.
+const rrOpen = () => $('routePick').dataset.mode === 'rr' && !$('routePick').hidden;
+let rrTick = 0, rrFitN = -1;
+function rrCardsHtml(c) {
+  const best = Math.min(...c.routes.map(x => x.r.time));
+  return `<div class="alts rp-cards rr-cards n${Math.min(4, c.routes.length)}">` + c.routes.map((x, i) => {
+    const r = x.r, truck = r.costing === 'truck', red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
+    const flags = [r.truckFail ? `<i class="bad">${t('rrNoTruck')}</i>` : '', truck && ['alt', 'only', 'chosen', 'go'].includes(r.soft) ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', r.time === best && c.routes.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    return `<button class="alt${i === c.sel ? ' on' : ''}" data-rrv="${i}" aria-pressed="${i === c.sel}"><em class="rr-kind ${x.kind}">${t('rrKind_' + x.kind)}</em><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
+  }).join('') + `</div>`;
+}
+function rrHtml() {
+  const c = g.choice, tr = g.trip, sel = c.routes[c.sel];
+  const warn = !sel ? '' : sel.r.truckFail ? `<div class="rp-warn red"><b>${t('truckFailTitle')}.</b> ${t('truckFailShort')}</div>` : sel.kind === 'free' ? `<div class="rp-warn soft"><b>${t('freeTitle')}.</b> ${t('freeText')}</div>` : softWarnHtml(sel.r);
+  return `<div class="rp-zoom"><button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
+    <div class="rp-head">${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b> <span class="muted">· ${t(c.routes.length ? 'rrPickHint' : 'rrLoading')}</span></div>
+    ${warn}${c.routes.length ? rrCardsHtml(c) : `<div class="rr-wait">${t('rrLoading')}</div>`}${c.state === 'load' && c.routes.length ? `<div class="muted rr-more">${t('rrMore')}</div>` : ''}
+    <div class="rp-btns rr-btns"><button class="btn pri" data-rrc="go" ${sel ? '' : 'disabled'}>${ICON.go}<span>${t('rrGo')}</span></button><button class="btn" data-rrc="x"><span>${t('rrKeep')}</span><i class="rr-sec" id="rrcSec"${c.until ? '' : ' hidden'}>${c.until ? Math.max(0, Math.ceil((c.until - Date.now()) / 1000)) : ''}</i></button></div>`;
+}
+function rrFit() {
+  const box = $('routePick'), c = g.choice; if (box.hidden || !c || !c.routes.length) return;
+  const tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
+  fitRoutes(c.routes.map(x => x.r.coords), top, bottom, zoomPad(box));
+}
+function rrRender() {
+  const c = g.choice, box = $('routePick');
+  if (!c) { if (box.dataset.mode === 'rr') { clearInterval(rrTick); rrTick = 0; rrFitN = -1; box.hidden = true; delete box.dataset.mode; box.innerHTML = ''; mapM.pickRoutes(null); setFollow(true); } return; }
+  if (tsOpen()) tsHide(false);
+  if (currentPanel()) closePanel();
+  quickOpen(false); showPick(null); $('pick').hidden = true;
+  box.dataset.mode = 'rr'; box.innerHTML = rrHtml(); box.hidden = false;
+  mapM.pickRoutes(c.routes.map(x => x.r.coords), c.sel);
+  if (rrFitN !== c.routes.length) { rrFitN = c.routes.length; requestAnimationFrame(rrFit); }      // карту підганяємо, коли додались варіанти (не на кожен дотик)
+  if (!rrTick) rrTick = setInterval(() => { const s = $('rrcSec'), k = g.choice; if (!k || !s) return; if (k.until) { s.hidden = false; s.textContent = Math.max(0, Math.ceil((k.until - Date.now()) / 1000)); } }, 250);
+}
+function rrClick(e) {
+  const b = e.target.closest('button'); if (!b || !g.choice) return;
+  if (b.dataset.rp === 'zin' || b.dataset.rp === 'zout') { zoomBy(b.dataset.rp === 'zin' ? 1 : -1); return; }
+  if (b.dataset.rp === 'fit') { rrFit(); return; }
+  if (b.dataset.rrv != null) { selectChoice(+b.dataset.rrv); return; }
+  if (b.dataset.rrc === 'go') { if (confirmChoice()) toast(t('rrNewToast'), 'green', 5000); return; }
+  if (b.dataset.rrc === 'x') cancelChoice('no');
+}
+
 /* ---------- позначки водіїв: ДТП, поліція, транспортна служба ---------- */
 function repOpen(open) {
   const box = $('repSheet');
@@ -943,6 +1024,8 @@ function tsInput(e) {
 }
 function pickClick(e) {
   if ($('routePick').dataset.mode === 'trip') { tsClick(e); return; }
+  if ($('routePick').dataset.mode === 'rr') { rrClick(e); return; }
+  { const v = e.target.closest('.vehm [data-veh]'); if (v) { pickKind(v.dataset.veh, v.dataset.mode); return; } }
   const c = e.target.closest('[data-alt]'); if (c) { selectAlt(+c.dataset.alt); return; }
   const b = e.target.closest('[data-rp]'); if (!b || !plan.trip) return;
   const k = b.dataset.rp;
@@ -961,7 +1044,7 @@ function planSumHtml() {
       <div class="muted" style="margin-top:4px">${t('detourText')}</div>
       <div class="btns"><button class="btn" data-act="useAlt">${t('useAlt', fmtDist(alt.dist))}</button></div></div>`
     : r.truckFail ? `<div class="card" style="margin-top:8px;border:2px solid var(--red)"><div style="font-weight:700;color:var(--red)">${t('truckFailTitle')}</div><div class="muted" style="margin-top:4px">${t('truckFailText')}</div></div>`
-    : r.costing === 'auto' ? `<div class="muted" style="margin-top:8px;color:var(--red)">${t('altInUse')}</div>`
+    : r.costing === 'auto' ? (S.vehicle === 'auto' ? '' : `<div class="card softcard"><b>${t('freeTitle')}.</b> ${t('freeText')}</div>`)
     : softWarnHtml(r, 'card softcard') || (r.snapped ? `<div class="muted" style="margin-top:8px">${t('truckSnapped')}</div>` : '');
   return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
@@ -1002,7 +1085,8 @@ async function doBuild() {
   plan.busy = true; plan.trip = null; plan.off = null; refresh('trip');
   try {
     const trip = newTrip(plan.a, plan.v, plan.b);
-    trip.costing = S.vehicle === 'auto' ? 'auto' : 'truck';
+    trip.costing = vehKind() === 'strict' ? 'truck' : 'auto';
+    if (vehKind() === 'free') trip.free = true;                    // фура дорогами загального користування — на розсуд водія
     const r = await buildRoute(trip, { alternates: 1 });
     plan.routes = [r, ...(r.alts || [])].slice(0, 2); plan.sel = 0;          // два варіанти, як у BlindDriver
     for (const x of plan.routes) delete x.alts;
@@ -1046,13 +1130,18 @@ function tripClicks(e) {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
   if (d.act === 'build') doBuild();
-  else if (d.veh) { S.vehicle = d.veh; e.currentTarget.querySelectorAll('[data-veh]').forEach(x => x.classList.toggle('on', x.dataset.veh === d.veh)); if (plan.trip) doBuild(); }
+  else if (d.veh) {
+    S.vehicle = d.veh; if (d.mode) S.routeMode = d.mode;
+    const k = vehKind(); e.currentTarget.querySelectorAll('[data-veh]').forEach(x => { x.classList.toggle('on', x.dataset.kind === k); x.setAttribute('aria-pressed', String(x.dataset.kind === k)); });
+    const h = $('vehHint'); if (h) { h.className = 'veh-hint ' + k; h.innerHTML = vehHintHtml(k); }
+    if (plan.trip) doBuild();
+  }
   else if (d.alt != null) selectAlt(+d.alt);
   else if (d.act === 'rerouteFresh') { rerouteNow(true); closePanel(); }
   else if (d.act === 'go' && plan.trip) goTrip(plan.trip);
   else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
     const tr = plan.trip, alt = tr.route.alt;
-    alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.route = alt; tr.regions = []; tr.towns = [];
+    alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.free = true; tr.route = alt; tr.regions = []; tr.towns = [];
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
@@ -1508,12 +1597,13 @@ export function initUI() {
   bus.on('mapPick', p => { if (pm && pm.arm) { ptsPlace(p); return; } if (!aim) onMapPick(p); });
   $('routePick').onclick = pickClick;
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
-  bus.on('panel', name => { if (name) { if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
-  bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && $('routePick').dataset.mode !== 'trip') pickHide(); });
+  bus.on('panel', name => { if (name) { if (rrOpen()) cancelChoice('panel'); else if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
+  bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && !['trip', 'rr'].includes($('routePick').dataset.mode)) pickHide(); });
   bus.on('route', () => { if (tsOpen()) { tsRender(); requestAnimationFrame(tsFit); } });
   bus.on('guide', () => { if (tsOpen()) { const kv = document.querySelector('#routePick .ts-kv'); if (kv) kv.outerHTML = tsKvHtml(); } });
   $('routePick').addEventListener('input', tsInput);
-  bus.on('altTap', k => { if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
+  bus.on('altTap', k => { if (rrOpen()) selectChoice(+k); else if (plan.trip && !g.active && plan.routes[k]) selectAlt(+k); });
+  bus.on('choice', rrRender);
   bus.on('stopTap', x => { if (!aim) onStopTap(x); });
   bus.on('markTap', onMarkTap);
   bus.on('marks', () => refresh('trip'));
@@ -1590,6 +1680,7 @@ export function initUI() {
     if (!$('repSheet').hidden) { repOpen(false); return true; }
     if (aim) { aimEnd(); return true; }
     if (pm) { ptsEnd(true); return true; }
+    if (rrOpen()) { cancelChoice('no'); return true; }          // (1.1.28) «Назад» на виборі нового маршруту — лишити старий
     if (tsOpen()) { tsHide(true); return true; }
     if (!$('routePick').hidden) { pickCancel(); return true; }
     if (!$('pick').hidden) { $('pick').hidden = true; showPick(null); return true; }
@@ -1617,6 +1708,7 @@ export function initUI() {
   bus.on('calib', tabCalSync); bus.on('calibSaved', () => { tabCalSync(); toast(t('cbSaved'), 'green', 5000); });
   bus.on('reports', repTabSync); bus.on('trip', repTabSync);
   $('bMap').onclick = e => { e.stopPropagation(); mapTypeTap(); };
+  $('bSnd').onclick = e => { e.stopPropagation(); S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); P.vibrate(15); };
   // мережа зникла / повернулась: мініатюра на кнопці і — якщо вибрано супутник — коротко водієві
   const netChanged = () => railState();
   window.addEventListener('online', netChanged); window.addEventListener('offline', netChanged);

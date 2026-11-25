@@ -88,6 +88,9 @@ export function truckOptions(soft = 0) {
   if (soft > 0) o.hgv_no_access_penalty = soft;            // менше 43200 — сервер дозволяє дороги без доступу для фур, із цим штрафом
   return o;
 }
+// (1.1.28) «На свій розсуд»: фура їде дорогами загального користування — обмежень для фур сервер не враховує (costing auto),
+// але час у дорозі рахує для фури з обмежувачем, а не для легковика
+function autoOptions() { const v = S.vehicle === 'auto' ? 0 : +((S.truck || {}).vmax); return v > 0 ? { auto: { top_speed: Math.round(v) } } : {}; }
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
 // snap — «чіпляти» точки лише за дороги не нижче цього класу ('unclassified' — без дворів, заправок, житлових вуличок;
 // 'tertiary' — лише траси й проспекти) і лише за добре з'єднані ділянки
@@ -101,7 +104,7 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     return l;
   });
   const body = {
-    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions(soft) } : {},
+    locations, costing, costing_options: costing === 'truck' ? { truck: truckOptions(soft) } : costing === 'auto' ? autoOptions() : {},
     units: 'kilometers', language: S.lang === 'ru' ? 'ru-RU' : 'uk-UA', directions_type: 'instructions'
   };
   if (alternates > 0 && pts.length === 2) body.alternates = alternates;      // запасні варіанти — лише для А → Б без проміжних
@@ -199,7 +202,9 @@ async function truckRoute(pts, heading, alternates, soft = 0) {
   throw first;
 }
 // Будує маршрут рейсу. from — поточна позиція; skipA/skipVia — точки, які вже пройдено.
-export async function buildRoute(trip, { from = null, heading = null, skipA = false, skipVia = false, through = null, alternates = 0 } = {}) {
+// altsFrom — просити запасні варіанти й тоді, коли маршрут будується від поточного місця (1.1.28: «новий маршрут» у дорозі — на вибір)
+export async function buildRoute(trip, { from = null, heading = null, skipA = false, skipVia = false, through = null, alternates = 0, altsFrom = false } = {}) {
+  const nAlt = from && !altsFrom ? 0 : alternates;
   const pts = [from || trip.a];
   if (through && through.length) pts.push(...through);              // повернення на вибраний маршрут: точки вздовж нього (проміжна — серед них)
   else {
@@ -212,14 +217,14 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   const soft0 = costing !== 'truck' ? 0 : trip.soft ? HGV_SOFT.ask : S.hgvBan === 'go' ? HGV_SOFT.go : 0;
   let r;
   if (costing === 'truck') {
-    try { r = await truckRoute(pts, heading, from ? 0 : alternates, soft0); r.costing = 'truck'; if (soft0) r.soft = trip.soft ? (trip.soft === 'only' ? 'only' : 'chosen') : 'go'; }
+    try { r = await truckRoute(pts, heading, nAlt, soft0); r.costing = 'truck'; if (soft0) r.soft = trip.soft ? (trip.soft === 'only' ? 'only' : 'chosen') : 'go'; }
     catch (e) {
       if (!NO_PATH.has(e.code)) throw e;
       // 1.1.12: суворого шляху для фури немає — спершу пробуємо дорогами зі знаком «фурам заборонено» (висота, маса, довжина — дотримані).
       // Це краще за звичайний маршрут для легковика, який не знає про фуру нічого.
       if (!soft0) {
         await sleep(1100);
-        try { r = await requestRoute(pts, heading, 'truck', from ? 0 : alternates, null, HGV_SOFT.ask); r.costing = 'truck'; r.soft = 'only'; trip.soft = 'only'; log('warn', 'для фури шлях є лише дорогою зі знаком «фурам заборонено» — показую його з попередженням'); }
+        try { r = await requestRoute(pts, heading, 'truck', nAlt, null, HGV_SOFT.ask); r.costing = 'truck'; r.soft = 'only'; trip.soft = 'only'; log('warn', 'для фури шлях є лише дорогою зі знаком «фурам заборонено» — показую його з попередженням'); }
         catch (e2) { if (!NO_PATH.has(e2.code)) throw e2; }
       }
       if (!r) {
@@ -227,10 +232,10 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
         // у дорозі (уже з GPS) наступна перебудова знову спробує для фури
         log('warn', 'для фури шляху немає (' + e.code + '), показую без обмежень для фур');
         await sleep(1100);
-        r = await requestRoute(pts, heading, 'auto', from ? 0 : alternates); r.costing = 'auto'; r.truckFail = e.code;
+        r = await requestRoute(pts, heading, 'auto', nAlt); r.costing = 'auto'; r.truckFail = e.code;
       }
     }
-  } else { r = await requestRoute(pts, heading, costing, from ? 0 : alternates); r.costing = costing; }
+  } else { r = await requestRoute(pts, heading, costing, nAlt); r.costing = costing; }
   for (const a of r.alts) { a.costing = r.costing; a.aD = null; a.viaD = null; a.detour = 1; if (r.soft) a.soft = r.soft; }
   // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
   // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.

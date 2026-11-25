@@ -31,6 +31,7 @@ import * as uiCalib from './ui_calib.js';
 import * as journey from './journey.js';
 import * as pipWin from './pip.js';
 import * as uiJourney from './ui_journey.js';
+import { initOfferUi } from './ui_offer.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
@@ -43,7 +44,7 @@ async function boot() {
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   bus.on('offlineBad', () => { if (mapM.map) mapM.applyMapSource(); });
   nav.start(); guide.init(); poi.init(); track.init(); journey.init(); weather.init(); roads.init(); rough.init();
-  initUI(); initLab(); lab.initLabApp(); uiJourney.initJourneyUi(); pipWin.init();
+  initUI(); initLab(); lab.initLabApp(); uiJourney.initJourneyUi(); initOfferUi(); pipWin.init();
   await route.loadTrips();
   await feed.init();
   stopsdb.load(); vplaces.init(); reports.init(); limits.init();

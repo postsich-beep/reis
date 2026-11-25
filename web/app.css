@@ -1329,3 +1329,127 @@ body.pip .maplibregl-ctrl,body.pip .rpq,body.pip .mk-pop{display:none!important}
 #pipView.info b{font-size:clamp(15px,10.5vw,40px);white-space:normal;line-height:1.05}
 #pipView.off b{color:#ff8a8a}
 #pipView:not(:has(.pv-ico)) .pv-t{align-items:center;text-align:center}
+
+/* ---- 1.1.28: сітка головного екрана — усе рівно й на своїх осях ----
+   Правила (телефон вертикально й невеликий планшет):
+   • проміжок між сусідами і до нижньої плашки — 10 px;
+   • правий стовпчик на ОДНІЙ осі з повзунком нахилу: кнопки справа вгорі, «Моє місце» — одразу над повзунком, над ним — ±100 «без GPS»
+     (правим краєм по тій самій лінії). Для цього виступ із повзунком на 6 px ширший, а кнопки стоять за 7 px від краю екрана;
+   • круги ліворуч (знак, швидкість, GPS) — за ті самі 7 px від лівого краю й на 10 px над плашкою; кнопки ±100 їх більше не піднімають;
+   • ⓘ (про карту) — у кутку між плашкою й виступом, а не в стовпчику кнопок. */
+#tripbar{display:none!important}                       /* кнопки «без GPS» переїхали в стовпчик справа; тут лишився лише прихований кружечок GPS */
+#tabbar{--s:64px}
+.nudge{gap:6px}
+body.jv-on #nudge,body:has(#repSheet:not([hidden])) #nudge{visibility:hidden}
+@media (max-width:380px){ #tabbar{--s:64px;--r:68px} }
+@media (max-width:340px){ #tabbar{--s:46px;--r:66px} }
+/* телефон набік: «Моє місце» теж над повзунком, а ±100 — ліворуч від нього в один ряд (угору місця немає); стрілку машини посеред карти
+   вони не закривають — стоять над плашкою, праворуч */
+@media (orientation:landscape) and (max-height:520px){
+  #tabbar{--s:42px;--r:62px}
+  #zoom{right:max(7px,calc(var(--ex,21px) - 25px));bottom:calc(var(--bh,120px) + 8px);flex-direction:row;align-items:flex-end;gap:8px}
+  body:has(#pick:not([hidden])) #zoom{visibility:hidden}          /* меню точки стає на це місце — кнопки на цей час не потрібні */
+}
+@media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){
+  #zoom{right:max(7px,calc(var(--ex,32px) - 25px));bottom:calc(var(--bh,150px) + 10px);gap:10px;align-items:flex-end}
+  #rail{right:max(7px,calc(var(--ex,32px) - 25px))}
+  #bMap{margin-top:10px}
+  /* ⓘ — над плашкою, лівіше кутка, де стає кнопка «Поворот» */
+  #attr{right:calc(var(--ex,32px) + 111px);bottom:calc(var(--bl,var(--bh,150px)) + 4px)}
+  /* Кнопка «Поворот» (без GPS, червона/жовта) — у кутку між плашкою й виступом повзунка: лівіше «Мого місця», одразу над плашкою.
+     ±100 лишаються стовпчиком над «Моїм місцем». Камера на цей час — вище, над кнопкою. */
+  .nudge.has-turn{display:flex;flex-direction:column}
+  /* куток є, поки виступ повзунка вищий за плашку (звичайний стан). Якщо над плашкою щось на всю ширину («Нова версія») — кутка немає:
+     тоді кнопка стає лівіше ±100, а не під ними (зсув 38 px вмикається, коли різниця висот менша за 36 px) */
+  .nudge .turn-btn{position:absolute;right:calc(60px + clamp(0px,(36px - (var(--bh,150px) - var(--bl,98px))) * 100,38px));bottom:calc(var(--bl,var(--bh,150px)) - var(--bh,150px))}
+  /* камера, поки на екрані кнопка «Поворот»: над кругом швидкості ліворуч (праворуч від круга її місце зайняте) */
+  body.turn-on #cam{left:max(7px,calc(var(--ex,32px) - 25px));bottom:calc(var(--bl,var(--bh,150px)) + 170px)}
+  /* круги ліворуч — дзеркально до правого стовпчика: значки знака й GPS так само далеко від лівого краю, як кнопки від правого */
+  #speed{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 23px);bottom:calc(var(--bl,var(--bh,150px)) + 14px)}
+  #cam{left:calc(max(7px,calc(var(--ex,32px) - 25px)) + 143px);bottom:calc(var(--bl,var(--bh,150px)) + 43px)}
+  #spdPop{bottom:calc(var(--bl,var(--bh,150px)) + 140px)}
+}
+/* широкий планшет: плашка вужча за екран, круг швидкості — в лівому куті, «Моє місце» — у правому, на одній висоті з ним (центри на одній
+   лінії) і так само далеко від краю; ±100 — над ним */
+@media (min-width:1010px) and (min-height:521px){ #zoom{right:10px;bottom:calc(var(--sb) + 48px);gap:10px;align-items:flex-end} }
+/* без GPS місце «Мого місця» зарезервоване, навіть коли самої кнопки немає: ±100 і «Поворот» стоять завжди на тих самих місцях */
+#zoom.dr > #bCenter[hidden]{display:grid!important;visibility:hidden;pointer-events:none}
+/* невисокий екран (до 600 px): місця вгору обмаль — місце «Мого місця» не резервуємо (±100 стоять одразу над повзунком),
+   а «Поворот» — лівіше них */
+@media (orientation:portrait) and (max-height:600px){
+  #zoom.dr > #bCenter[hidden]{display:none!important}
+  .nudge .turn-btn{right:98px}
+  body.turn-on #attr{visibility:hidden}                           /* ⓘ стало б під кнопкою «Поворот» — на цей час ховаємо */
+}
+/* вузький телефон (до 340 px): без GPS кнопки ±100 доходять до місця камери праворуч від круга — камера стає над кругом */
+@media (max-width:340px) and (orientation:portrait){ body.dr-on #cam{left:7px;bottom:calc(var(--bl,var(--bh,150px)) + 170px)} }
+/* меню точки на карті стає на місце кнопок «без GPS» — на цей час вони не потрібні */
+body:has(#pick:not([hidden])) #nudge{visibility:hidden}
+@media (min-width:1101px) and (min-height:521px){ #speed{left:33px} }
+
+/* ---- 1.1.28: маршрут у дорозі сам не перебудовується — картка-пропозиція з причиною й зворотним відліком ----
+   Стоїть над нижньою плашкою (під великим пальцем), поверх усього, що відкрито: відповісти треба за 10 секунд. Дві великі кнопки:
+   «Лишити» (з лічильником — це й станеться, коли час вийде) і «Перебудувати». Смужка внизу картки тане разом із часом. */
+#rrAsk{position:absolute;left:8px;right:8px;bottom:calc(var(--bh,150px) + 8px);z-index:26;padding:12px 12px 14px;border-radius:20px;overflow:hidden;
+  background:var(--panel);color:var(--ink);border:2px solid var(--amber);box-shadow:0 6px 24px rgba(0,0,0,.35);animation:qdown .18s ease-out}
+#rrAsk[hidden]{display:none}
+.rr-t{display:flex;align-items:flex-start;gap:10px}
+.rr-ico{flex:none;width:40px;height:40px;border-radius:50%;background:var(--amber);color:var(--amber-ink);display:grid;place-items:center}
+.rr-ico svg{width:24px;height:24px}
+.rr-tx{min-width:0}
+.rr-tx b{display:block;font:800 20px/1.2 var(--f-ui)}
+.rr-tx small{display:block;margin-top:3px;color:var(--ink-2);font-size:15px;line-height:1.3;overflow-wrap:anywhere}
+.rr-b{display:flex;gap:8px;margin-top:12px}
+.rr-b .btn{flex:1;min-height:58px;padding:0 10px;gap:8px;font-size:17px;font-weight:700}
+.rr-b .btn.pri{flex:1.35} .rr-b .btn svg{width:22px;height:22px;flex:none}
+.rr-sec{flex:none;min-width:30px;height:30px;padding:0 6px;border-radius:15px;background:var(--ink);color:var(--panel);font:800 17px/30px var(--f-num);text-align:center;font-style:normal;font-variant-numeric:tabular-nums}
+.rr-bar{position:absolute;left:0;right:0;bottom:0;height:5px;background:rgba(127,127,127,.25)}
+.rr-bar i{display:block;height:100%;width:100%;background:var(--amber);transform-origin:left center;animation:rrbar 10s linear forwards}
+@keyframes rrbar{from{transform:scaleX(1)}to{transform:scaleX(0)}}
+body.rr-on :is(#speed,#cam,#spdPop,#zoom,#attr,#jrAsk){visibility:hidden}
+@media (orientation:landscape) and (max-height:520px){ #rrAsk{left:auto;right:8px;width:calc(46% - 16px);padding:10px 10px 12px} .rr-tx b{font-size:18px} .rr-tx small{font-size:14px} .rr-b .btn{min-height:50px} }
+@media (min-width:700px){ #rrAsk{left:0;right:0;margin-inline:auto;width:min(640px,calc(100% - 16px))} }
+/* вид рейсу (вибирають до побудови): три кнопки у два рядки й пояснення під ними */
+.seg.veh.veh3 button{flex:1 1 auto;height:56px;gap:5px;padding:0 6px;font-size:14px;line-height:1.1;min-width:0}
+.seg.veh.veh3 button span{display:flex;flex-direction:column;align-items:flex-start;min-width:0;text-align:left}
+.seg.veh.veh3 button b{font-weight:700}
+.seg.veh.veh3 button small{font-size:12px;font-weight:600;white-space:nowrap}
+.seg.veh.veh3 svg{flex:none;width:20px;height:20px}
+@media (max-width:380px){ .seg.veh.veh3 button{font-size:13px;gap:4px;padding:0 4px} .seg.veh.veh3 button small{font-size:12px} .seg.veh.veh3 svg{width:17px;height:17px} }
+.veh-hint{margin:-4px 2px 10px;font-size:13px;line-height:1.35;color:var(--ink-2)}
+.veh-hint b{color:var(--ink)}
+.veh-hint.free{padding:8px 10px;border-radius:12px;border:2px solid var(--yellow);color:var(--ink)}
+@media (max-width:340px){ .seg.veh.veh3 svg{display:none} }
+
+/* ---- 1.1.28: з'їхали з рейсу — «Новий маршрут» (варіанти на вибір) або «Назад на рейс»; під ними «Лишити як є» з відліком ---- */
+.rr-no{display:flex;width:100%;margin-top:8px;min-height:48px;padding:0 12px;justify-content:center;align-items:center;gap:10px;font-size:16px;font-weight:700;background:transparent;border:2px solid rgba(127,127,127,.35)}
+.rr-b .btn{font-size:16px;white-space:nowrap;padding:0 8px;gap:6px}
+.rr-b .btn.pri{flex:1.15}
+/* вибір нового маршруту в дорозі — у тій самій шторці, що й вибір варіанта перед рейсом */
+.rr-cards .alt{min-height:92px;padding:8px 11px}
+.rr-cards .alt b{font-size:20px}
+.rr-kind{display:inline-block;align-self:flex-start;margin-bottom:2px;padding:1px 7px;border-radius:8px;background:var(--panel);font-size:12.5px;font-weight:700;font-style:normal;color:var(--ink-2);white-space:nowrap}
+.rr-kind.free{background:var(--yellow);color:#1b1300}
+.rr-kind.strict{background:var(--green);color:#fff}
+.rr-wait{padding:22px 6px;text-align:center;font-size:17px;color:var(--ink-2)}
+.rr-more{margin-top:6px;font-size:13px}
+.rr-btns .btn{gap:8px}
+.rr-btns .btn .rr-sec[hidden]{display:none}
+/* вид рейсу на екрані вибору маршруту: один ряд, рейс одразу перераховується */
+.seg.veh.vehm{margin:0 0 8px}
+.seg.veh.vehm button{flex:1 1 auto;height:44px;gap:5px;padding:0 6px;min-width:0;font-size:14px;font-weight:600}
+.seg.veh.vehm button span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.seg.veh.vehm svg{flex:none;width:19px;height:19px}
+#routePick.busy .vehm,#routePick.busy .alts{opacity:.55;pointer-events:none}
+@media (max-width:340px){ .seg.veh.vehm svg{display:none} .seg.veh.vehm button{font-size:13px;padding:0 4px} }
+/* (1.1.28) кнопка звуку — під кнопкою типу карти, на тій самій осі й з тим самим проміжком */
+#bSnd{margin-top:9px;padding:0;width:50px;height:50px;border-radius:50%;display:grid;place-items:center}
+#bSnd svg{width:28px;height:28px}
+#bSnd.off{color:#fff;background:var(--red);border-color:var(--red)}
+#bSnd:active{transform:scale(.94)}
+@media (orientation:landscape) and (max-height:520px){ #bSnd{margin-top:0;margin-right:9px} }
+@media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){ #bSnd{margin-top:10px} }
+/* невисокий телефон (до 600 px): угору місця обмаль — кнопка звуку стає ліворуч від кнопки швидких налаштувань, в один ряд з нею */
+/* (рахує layoutVars: стовпчиком кнопки дістали б до «Мого місця» й ±100 над повзунком) — звук стає ліворуч від налаштувань */
+body.rail-tight #rail{display:grid;grid-template-columns:50px 50px;column-gap:10px;justify-items:center;align-items:start}
+body.rail-tight #bQuick{grid-column:2;grid-row:1} body.rail-tight #bMap{grid-column:2;grid-row:2} body.rail-tight #bSnd{grid-column:1;grid-row:1;margin-top:0}

@@ -33,10 +33,14 @@
   <button class="rb" id="bQuick" aria-haspopup="dialog" aria-expanded="false"></button>
   <!-- тип карти: один дотик — схема ↔ супутник (супутник лише з інтернетом) -->
   <button class="rb" id="bMap" aria-pressed="false"></button>
+  <!-- (1.1.28) звук (голос підказок): один дотик — вимкнути / увімкнути; червоний перекреслений динамік — вимкнено -->
+  <button class="rb" id="bSnd" aria-pressed="true"></button>
 </nav>
 <div id="quick" role="dialog" hidden></div>
-<!-- справа внизу: «Моє місце» — зʼявляється лише тоді, коли карту зсунули й вона не стежить за машиною -->
+<!-- (1.1.28) Стовпчик справа, просто над повзунком нахилу, на одній осі з ним: одразу над повзунком — «Моє місце» (зʼявляється, коли карту
+     зсунули й вона не стежить за машиною), над ним — кнопки «без GPS» (Поворот, ±100 м), коли вони потрібні -->
 <div id="zoom">
+  <div class="nudge" id="nudge" hidden><button id="bTurn" class="turn-btn" hidden></button><button id="bFwd100"></button><button id="bBack100"></button></div>
   <button class="rb" id="bCenter" hidden></button>
 </div>
 
@@ -59,17 +63,15 @@
 <!-- (1.1.27) програма у вікні поверх інших: лише карта й це — стрілка маневру, скільки до нього, скільки лишилось -->
 <div id="pipView" hidden></div>
 <section id="jrAsk" role="dialog" hidden></section>
+<!-- (1.1.28) пропозиція перебудувати маршрут: причина, зворотний відлік, «Лишити» / «Перебудувати». Сам маршрут у дорозі не міняється -->
+<section id="rrAsk" role="alertdialog" aria-live="assertive" hidden></section>
 <section id="jv" role="dialog" hidden></section>
 
 <footer id="bottom">
   <!-- плашка оновлення: «Нова версія — оновити»; ✕ ховає на 3 години -->
   <div id="updBar" hidden><button id="updGo"></button><button id="updX"></button></div>
   <button id="bAcceptGps" hidden></button>
-  <!-- кнопки «без GPS» (Поворот, ±100 м) — над кнопками, між двома виступами нижньої плашки; видно лише коли потрібні -->
-  <div id="tripbar">
-    <button class="chip none" id="gpsChip"><i></i><span id="gpsText">GPS</span></button>
-    <div class="nudge" id="nudge" hidden><button id="bTurn" class="turn-btn" hidden></button><button id="bFwd100"></button><button id="bBack100"></button></div>
-  </div>
+  <div id="tripbar"><button class="chip none" id="gpsChip"><i></i><span id="gpsText">GPS</span></button></div>
   <!-- (1.1.24) Нижня плашка — за контуром, який намалював Олексій: посередині низька (лише кнопки), по краях два виступи вгору.
        Лівий виступ — час прибуття, під ним скільки лишилось (км, хв). Правий — стрілка нахилу карти на всю висоту.
        Кнопки: Події · РЕЙС · Місця · Мітки; «Рейс» стоїть рівно посередині екрана (лівий виступ = одна кнопка + правий виступ).

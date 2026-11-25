@@ -379,6 +379,7 @@ function addLayers() {
   const w = (a, b, c) => ['interpolate', ['linear'], ['zoom'], 6, a, 12, b, 17, c];
   map.addSource('route', { type: 'geojson', data: EMPTY });
   map.addSource('route-alts', { type: 'geojson', data: EMPTY });
+  map.addSource('route-sel', { type: 'geojson', data: EMPTY });     // (1.1.28) новий маршрут у дорозі: вибраний варіант
   map.addSource('route-done', { type: 'geojson', data: EMPTY });
   // короткий шматок біля стрілки (до ~700 м): оновлюється разом зі стрілкою, тож лінія зникає під нею плавно, а не стрибками
   map.addSource('route-near', { type: 'geojson', data: EMPTY });
@@ -418,6 +419,9 @@ function addLayers() {
   // пройдене — світло-сіро-блакитне поверх синього
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
   map.addLayer({ id: 'done-near', type: 'line', source: 'done-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
+  // (1.1.28) новий маршрут у дорозі — варіанти на вибір: вибраний — бурштиновий із темною облямівкою поверх чинного рейсу, решта — сірі
+  map.addLayer({ id: 'route-sel-case', type: 'line', source: 'route-sel', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#3d2a00', 'line-width': w(6, 10, 17) } }, under);
+  map.addLayer({ id: 'route-sel', type: 'line', source: 'route-sel', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#f5a400', 'line-width': w(3.5, 6.5, 12) } }, under);
   // похибка позиції — лише тонкий пунктирний контур, без заливки
   // (1.1.25) Поїздка з архіву: темний обідок, зверху — колір за швидкістю; ділянки без GPS — ще й білий пунктир посередині
   map.addLayer({ id: 'jv-case', type: 'line', source: 'jv', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#10151c', 'line-width': w(5, 8.5, 14) } }, under);
@@ -638,6 +642,10 @@ export function anchorPoint() {
     const tp = document.getElementById('top'), bt = document.getElementById('bottom');
     if (tp && !tp.hidden) top = Math.max(0, tp.getBoundingClientRect().bottom - cr.top);
     if (bt && !bt.hidden) bot = Math.min(H, bt.getBoundingClientRect().top - cr.top);
+    // (1.1.28) кнопки «без GPS» (Поворот, ±100) тепер стоять стовпчиком справа над повзунком, а не в нижній плашці: стрілку тримаємо
+    // вище за них — щоб дорога біля машини (за нею звіряють ±100) не ховалась під кнопками
+    const nd = document.getElementById('nudge'), nq = nd && !nd.hidden ? nd.getBoundingClientRect() : null;
+    if (nq && nq.height > 0 && nq.left < W / 2 + 120 && nq.top - cr.top - top >= 200) bot = Math.min(bot, nq.top - cr.top);   // на планшеті кнопки далеко збоку — не заважають
     if (bot - top < 160) { top = 0; bot = H; }
   } else {                                       // альбомна: плашки по боках, середина екрана вільна
     const st = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--st')) || 0;
@@ -907,6 +915,21 @@ export function freeView() { view.lastTouch = Date.now(); }
 export function previewAlts(list) {
   const src = map && map.getSource && map.getSource('route-alts'); if (!src) return;
   src.setData({ type: 'FeatureCollection', features: (list || []).map(([k, coords]) => ({ type: 'Feature', properties: { k }, geometry: { type: 'LineString', coordinates: coords.map(c => [c[1], c[0]]) } })) });
+}
+// (1.1.28) Варіанти нового маршруту в дорозі: list — координати кожного; sel — вибраний (яскравий), решта — сірі (дотик вибирає).
+// Чинний рейс при цьому лишається на карті, як був. list = null — прибрати.
+// Уночі звичайну карту перевертає фільтр (body.mapdark/mapsat — без нього): бурштин під ним темніє до брунатного, а темна облямівка
+// світлішає. Тому під фільтром даємо кольори, які ПІСЛЯ фільтра виглядають помаранчевою лінією з темною облямівкою (підібрано на екрані).
+function selPaint() {
+  if (!map || !map.getLayer || !map.getLayer('route-sel')) return;
+  const b = document.body, inv = b.dataset.theme === 'night' && !b.classList.contains('mapdark') && !b.classList.contains('mapsat');
+  try { map.setPaintProperty('route-sel', 'line-color', inv ? 'hsl(24,100%,46%)' : '#f5a400'); map.setPaintProperty('route-sel-case', 'line-color', inv ? 'hsl(42,100%,76%)' : '#3d2a00'); } catch (_) {}
+}
+export function pickRoutes(list, sel = 0) {
+  selPaint();
+  previewAlts(list ? list.map((c, k) => [k, c]).filter(([k]) => k !== sel) : null);
+  const src = map && map.getSource && map.getSource('route-sel'); if (!src) return;
+  src.setData(list && list[sel] ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: list[sel].map(c => [c[1], c[0]]) } } : EMPTY);
 }
 export function previewRoute(coords, route = null) {
   const src = map && map.getSource && map.getSource('route'); if (!src) return;
