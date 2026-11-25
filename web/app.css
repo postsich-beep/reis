@@ -1445,7 +1445,7 @@ body.rr-on :is(#speed,#cam,#spdPop,#zoom,#attr,#jrAsk){visibility:hidden}
 /* (1.1.28) кнопка звуку — під кнопкою типу карти, на тій самій осі й з тим самим проміжком */
 #bSnd{margin-top:9px;padding:0;width:50px;height:50px;border-radius:50%;display:grid;place-items:center}
 #bSnd svg{width:28px;height:28px}
-#bSnd.off{color:#fff;background:var(--red);border-color:var(--red)}
+#bSnd.off{color:var(--amber-ink);background:var(--amber);border-color:var(--amber)}      /* (Олексій: червона дуже відволікає) — помаранчева */
 #bSnd:active{transform:scale(.94)}
 @media (orientation:landscape) and (max-height:520px){ #bSnd{margin-top:0;margin-right:9px} }
 @media (max-width:1009px) and (orientation:portrait), (max-width:1009px) and (min-height:521px){ #bSnd{margin-top:10px} }
