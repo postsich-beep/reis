@@ -267,7 +267,10 @@ function hud() {
   // швидкість
   const sv = speedView(), sp = $('speed'), kmh = sv.kmh || 0;
   const guess = sv.kind === 'approx' || sv.kind === 'est' || sv.kind === 'manual' || sv.kind === 'plan';
-  $('spdVal').textContent = sv.kind === 'none' ? '—' : (guess ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
+  const spdTxt = sv.kind === 'none' ? '—' : (guess ? '≈' : '') + (kmh < 2 ? '0' : Math.round(kmh));
+  $('spdVal').textContent = spdTxt;
+  // (1.1.24) круг менший, знак обмеження — ліворуч угорі: три цифри («100») і «≈100» пишемо дрібніше, щоб знак їх не закривав
+  sp.classList.toggle('d3', !guess && spdTxt.length >= 3); sp.classList.toggle('d4', guess && spdTxt.length >= 4);
   $('spdUnit').textContent = sv.kind === 'none' ? t('spdUnknown') : sv.kind === 'est' ? t('spdEst') : sv.kind === 'plan' ? t('spdPlan') : sv.kind === 'approx' ? t('spdNet') : sv.kind === 'manual' ? t('spdManual') : sv.kind === 'still' && manualSpeed() === 0 ? t('standShort') : t('kmh');
   sp.classList.toggle('est', sv.kind !== 'gps' && sv.kind !== 'still');
   sp.classList.toggle('wide', guess);

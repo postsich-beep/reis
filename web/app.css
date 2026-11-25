@@ -565,7 +565,9 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
 #quick .q-tile,#quick .q-zoom button,#quick .q-x{text-shadow:none}
 @media (orientation:landscape) and (max-height:520px){
   #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
-  .q-tile{min-height:70px}
+  .q-tile{min-height:64px;padding:5px 4px 4px;gap:1px}
+  .q-grid{grid-template-columns:repeat(3,1fr);gap:6px} .q-l{font-size:13px} .q-s{font-size:12px}   /* (1.1.24) дев'ять плиток — три ряди по три, без гортання */
+  .q-zoom{margin-top:6px} .q-zoom button{height:44px}
 }
 @media (max-width:340px){
   .q-grid{grid-template-columns:repeat(3,1fr);gap:6px}
@@ -835,7 +837,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
    Круг трохи менший (92 замість 104) і стоїть нижче: одразу над рівною лівою частиною нижньої плашки (--bl — її висота зліва;
    рахує ui.js: якщо над плашкою стоять кнопки «без GPS» чи «Нова версія» — круг над ними). */
 #speed{left:28px;width:92px;height:92px;bottom:calc(var(--bl,var(--bh,150px)) + 14px)}
-#speed b{font-size:40px} #speed.wide b{font-size:31px}
+#speed b{font-size:40px} #speed.wide b{font-size:31px} #speed.d3 b{font-size:35px} #speed.d4 b{font-size:27px}
 #spdGps{right:auto;left:-24px}
 #cam{left:128px;bottom:calc(var(--bl,var(--bh,150px)) + 22px)}
 #spdPop{bottom:calc(var(--bl,var(--bh,150px)) + 118px)}
@@ -883,7 +885,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .aim-cross::after{top:50%;left:-16px;right:-16px;height:3px;margin-top:-1.5px}
 @media (orientation:landscape) and (max-height:520px){ .aim-bar{left:auto;width:calc(46% - 16px)} }
 /* знак обмеження в населеному пункті — завжди, коли воно діє (а не лише при перевищенні): більший, як справжній знак */
-#spdLim{top:-24px;right:auto;left:-24px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}   /* над кругом, лівіше (1.1.24; раніше правіше) — цифр швидкості не закриває навіть «100» */
+#spdLim{top:-30px;right:auto;left:-24px;width:48px;height:48px;border-width:5px;font:800 19px/38px var(--f-num);box-shadow:0 2px 6px rgba(0,0,0,.28)}   /* над кругом, лівіше (1.1.24; раніше правіше) — цифр швидкості не закриває навіть «100» */
 #spdLim.pop{animation:limpop .6s ease-out}
 @keyframes limpop{0%{transform:scale(.4);opacity:0}60%{transform:scale(1.18);opacity:1}100%{transform:scale(1)}}
 
