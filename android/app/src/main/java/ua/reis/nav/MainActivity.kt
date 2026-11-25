@@ -205,7 +205,8 @@ class MainActivity : Activity() {
         val b = PictureInPictureParams.Builder().setAspectRatio(if (land) Rational(4, 3) else Rational(3, 4))
         if (Build.VERSION.SDK_INT >= 31) {
             b.setAutoEnterEnabled(pipWanted)          // Android 12+: жест «Додому» сам плавно згортає у вікно
-            b.setSeamlessResizeEnabled(true)          // вміст перемальовується під час зміни розміру (у нас карта, не відео)
+            b.setSeamlessResizeEnabled(false)         // у нас не відео, а карта з написами: під час зміни розміру система
+                                                      // показує плавний перехід, а не розтягує старий кадр
         }
         return b.build()
     }
