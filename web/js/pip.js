@@ -37,6 +37,7 @@ export function setOn(on) {
   const box = $('pipView'); if (box) box.hidden = !on;
   setPipView(on);
   if (on) draw();
+  try { window.dispatchEvent(new Event('resize')); } catch (_) {}      // розміри плашок і карти перераховуємо одразу (вікно стало іншим)
   bus.emit('pip', on);
 }
 export function init() {
