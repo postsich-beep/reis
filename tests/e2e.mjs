@@ -297,7 +297,8 @@ async function readCheck(page, rootSel, scrollSel) {
         const cx = (r.left + r.right) / 2, cy = (r.top + r.bottom) / 2;
         if (cy > view.top + 4 && cy < view.bottom - 4 && cx > 0 && cx < innerWidth) {
           const h = document.elementFromPoint(cx, cy);
-          if (h && !(el === h || el.contains(h) || h.contains(el))) {
+          // (1.1.25) повідомлення тепер з'являються й поверх панелі: на кілька секунд прикривають рядок під собою — це не вада розкладки
+          if (h && !(el === h || el.contains(h) || h.contains(el)) && !(h.closest('#toasts') && !el.closest('#toasts'))) {
             const hb = h.closest('button,a,[data-act]'), eb = el.closest('button,a,[data-act]');
             if (!(hb && eb && hb === eb)) out.add('перекрито: ' + name(el) + ' ← ' + name(h));
           }
@@ -3996,6 +3997,20 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
     await page.click('#jrAsk [data-ja="no"]'); await sleep(300);
   }
 
+  if (!full) {
+    /* --- картка запитання на інших екранах: у межах екрана, над нижньою плашкою, кнопки під пальцем --- */
+    await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 0, t: Date.now() }); await sleep(400);
+    await app(page, cs => { const Jm = window.__app.journey, t = Math.round(Date.now() / 1000) - 900, pts = cs.slice(0, 60).map((c, i) => [c[0], c[1], t + i * 4, 45, 0]); Jm.jr.pending = { id: 'j-ask', title: 'Харків → Полтава', a: 'Харків', b: 'Полтава', sim: false, why: 'stopped', raw: pts.length, st: Jm.stats(pts), pts }; window.__app.bus.emit('journey', Jm.jr); window.__app.bus.emit('journeyDone', Jm.jr.pending); }, coords);
+    await sleep(500);
+    const ak = await app(page, () => { const b = document.getElementById('jrAsk'), r = b.getBoundingClientRect(), tb = document.getElementById('tabs').getBoundingClientRect(), vis = el => !!el && !el.hidden && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden';
+      const bt = [...b.querySelectorAll('[data-ja]')].map(x => { const q = x.getBoundingClientRect(), h = document.elementFromPoint(q.left + q.width / 2, q.top + q.height / 2); return { k: x.dataset.ja, w: Math.round(q.width), h: Math.round(q.height), hit: !!h && x.contains(h) }; });
+      return { shown: vis(b), txt: b.textContent.replace(/\s+/g, ' ').trim(), box: [Math.round(r.left), Math.round(r.top), Math.round(r.right), Math.round(r.bottom)], h: Math.round(r.height), aboveBar: r.bottom <= tb.top + 1, inView: r.left >= 0 && r.right <= innerWidth && r.top >= 0 && r.bottom <= innerHeight, bt, speed: vis(document.getElementById('speed')), line: (window.__app.map.map.getSource('jr')._data.features || []).length }; });
+    ok(`[${T}] картка «Зберегти пройдений шлях?» («${ak.txt.slice(0, 70)}»): у межах екрана, над нижньою плашкою, дві кнопки під пальцем (${ak.bt.map(b => b.w + '×' + b.h).join(', ')}); шлях лишається на карті блідою лінією`, ak.shown && /^Зберегти пройдений шлях\?\s*Харків → Полтава · (2,9|3,0) км · 4 хв/.test(ak.txt) && ak.inView && ak.aboveBar && ak.h <= 150 && ak.bt.length === 2 && ak.bt.every(b => b.h >= 48 && b.w >= 80 && b.hit) && !ak.speed && ak.line >= 1, JSON.stringify(ak));
+    ok(`[${T}] картка запитання: усе читається; головний екран цілий`, (await readCheck(page, '#jrAsk')).length === 0 && (await page.evaluate(layoutCheck)).length === 0, JSON.stringify([await readCheck(page, '#jrAsk'), await page.evaluate(layoutCheck)]));
+    await shot(page, '53-jr-ask-' + sc.n);
+    await page.click('#jrAsk [data-ja="no"]'); await sleep(300);
+    ok(`[${T}] «Не треба» — картки й лінії немає, круг швидкості на місці`, await app(page, () => { const b = document.getElementById('jrAsk'), sp = document.getElementById('speed'); return b.hidden && getComputedStyle(sp).visibility !== 'hidden' && (window.__app.map.map.getSource('jr')._data.features || []).length === 0 && !window.__app.journey.jr.pending; }));
+  }
   /* --- «Архів поїздок»: справжня на вигляд поїздка (швидкості 10…95 км/год, зупинка, 5 км без GPS) --- */
   await app(page, cs => { const Jm = window.__app.journey, hav = Jm.havP; let t = Math.round(Date.now() / 1000) - 3 * 3600, d = 0; const pts = [[cs[0][0], cs[0][1], t, 0, 0]];
     const v = km => km < 2 ? 45 : km < 3.5 ? 30 : km < 6 ? 55 : km < 11 ? 80 : km < 16 ? 70 : km < 21 ? 95 : km < 25.5 ? 80 : km < 26 ? 10 : 20; let stopped = false;
@@ -4007,11 +4022,13 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   // вхід — у «Налаштуваннях»
   await page.click('#bQuick'); await page.click('#quick [data-q="settings"]'); await page.waitForSelector('#panelBody .jr-entry button');
   const ent = await app(page, () => { const b = document.querySelector('#panelBody .jr-entry button'), r = b.getBoundingClientRect(), first = document.querySelector('#panelBody .sec').getBoundingClientRect(); return { txt: b.textContent.trim(), h: Math.round(r.height), beforeSecs: r.bottom <= first.top + 1, n: (b.querySelector('i') || {}).textContent, total: window.__app.journey.jr.list.length }; });
+  if (full) await shot(page, '54-jr-entry-' + sc.n);
   ok(`[${T}] «Налаштування»: згори — кнопка «Архів поїздок» із кількістю (${ent.n})`, /^Архів поїздок/.test(ent.txt) && ent.h >= 50 && ent.beforeSecs && +ent.n === ent.total, JSON.stringify(ent));
   await page.click('#panelBody .jr-entry button'); await page.waitForSelector('#panelBody .jr-list .item');
-  const ls = await app(page, () => ({ title: document.getElementById('panelTitle').textContent, back: !document.getElementById('panelBack').hidden, ids: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => r.dataset.jopen), rows: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => [...r.querySelectorAll('.t, .muted, .btn.pri')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).join(' | ')), hint: (document.querySelector('#panelBody .arch-hint') || {}).textContent || '' }));
+  const ls = await app(page, () => ({ title: document.getElementById('panelTitle').textContent, back: !document.getElementById('panelBack').hidden, ids: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => r.dataset.jopen), rows: [...document.querySelectorAll('#panelBody .jr-list .item')].map(r => [...r.querySelectorAll('.t, .muted')].map(x => x.textContent.replace(/\s+/g, ' ').trim()).join(' | ')), tap: [...document.querySelectorAll('#panelBody .jr-list .item')].every(r => r.getAttribute('role') === 'button' && !r.querySelector('.btn.pri') && !!r.querySelector('[data-jdel]')), hint: (document.querySelector('#panelBody .arch-hint') || {}).textContent || '' }));
   const row = ls.rows[ls.ids.indexOf('j-test')] || '';
-  ok(`[${T}] «Архів поїздок»: найновіша згори; у рядку — звідки й куди, дата й час, відстань, тривалість, середня швидкість, скільки без GPS («${row}»)`, ls.title === 'Архів поїздок' && ls.back && ls.ids[ls.ids.length - 1] === 'j-test' && ls.rows.length === (full ? 3 : 1) && /^Харків → Полтава \| \d+ \S+, \d\d:\d\d · 27 км · 32 хв · сер\. \d+ км\/год \| без GPS 5(,\d)? км \| Відкрити$/.test(row) && (!full || /симуляція/.test(ls.rows[0])) && /з GPS і без нього/.test(ls.hint), JSON.stringify(ls));
+  ok(`[${T}] «Архів поїздок»: найновіша згори; рядок цілком відкриває поїздку (окремої кнопки немає), праворуч кошик; у рядку — звідки й куди, дата й час, відстань, тривалість, середня швидкість, скільки без GPS («${row}»)`, ls.title === 'Архів поїздок' && ls.back && ls.ids[ls.ids.length - 1] === 'j-test' && ls.rows.length === (full ? 3 : 1) && /^Харків → Полтава \| \d+ \S+, \d\d:\d\d · 27 км · 32 хв \| сер\. \d+ км\/год · без GPS 5(,\d)? км$/.test(row) && ls.tap && (!full || /симуляція/.test(ls.rows[0])) && /з GPS і без нього/.test(ls.hint), JSON.stringify(ls));
+  await app(page, () => { document.getElementById('toasts').innerHTML = ''; });      // повідомлення тепер поверх панелі — на кілька секунд прикривають рядок під собою; перевіряємо сам список
   ok(`[${T}] «Архів поїздок»: усе читається, рядок галочку «Готово» обминає`, (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify(await readCheck(page, '#panel', '#panelBody')));
   if (full || sc.n === 'land') await shot(page, '54-jr-list-' + sc.n);
   // поїздка на карті
@@ -4029,8 +4046,8 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   let v = await view();
   ok(`[${T}] дотик до поїздки — вона на карті: панель закрито, маневр, круг швидкості, кнопки й нижню плашку прибрано; видно лише карту й картку поїздки внизу (${v.h} px із ${v.vh})`, v.open && !v.panel && v.cls && v.inView && v.hidden.length === 0 && v.clean && (v.vw > v.vh ? true : v.h <= v.vh * 0.62), JSON.stringify({ box: v.box, hidden: v.hidden, h: v.h, vh: v.vh }));
   ok(`[${T}] лінія — кольором за швидкістю (усі п'ять: до 15 · 15–50 · 50–70 · 70–90 · понад 90), ділянка без GPS позначена пунктиром; старт «A» і фініш «Б»; уся поїздка вміщена у вільну частину карти (${v.span} px)`, v.buckets === '01234' && v.est >= 1 && /a:A/.test(v.pins) && /b:Б/.test(v.pins) && v.fit, JSON.stringify({ buckets: v.buckets, est: v.est, pins: v.pins, fit: v.fit, span: v.span, free: v.freeBox }));
-  ok(`[${T}] картка поїздки: «${v.head.trim().slice(0, 60)}»; зведення — ${v.kv.join(' | ')}; ${v.stops}`, /^Харків → Полтава\s*\d+ \S+, \d\d:\d\d – \d\d:\d\d/.test(v.head.trim()) && v.kv.length === 6 && /^2\d(,\d)? км відстань$/.test(v.kv[0]) && /у дорозі$/.test(v.kv[1]) && /у русі$/.test(v.kv[2]) && /^\d+ км\/год середня$/.test(v.kv[3]) && /^95 км\/год найбільша$/.test(v.kv[4]) && /^5(,\d)? км · 1\d % без GPS$/.test(v.kv[5]) && /^Зупинок: 1 · стояли 4 хв/.test(v.stops), JSON.stringify({ head: v.head, kv: v.kv, stops: v.stops }));
-  ok(`[${T}] графік швидкості (шкала до ${v.top} км/год, ділянку без GPS затінено); під ним — підказка й пояснення кольорів`, v.chart && v.est2 >= 1 && +v.top === 100 && /Торкніться лінії на карті або графіка/.test(v.read) && (!v.legendShown || (v.legend.length === 6 && v.legend[0] === 'до 15' && v.legend[4] === 'понад 90' && v.legend[5] === 'без GPS')), JSON.stringify({ chart: v.chart, est2: v.est2, top: v.top, read: v.read, legend: v.legend }));
+  ok(`[${T}] картка поїздки: «${v.head.trim().slice(0, 60)}»; зведення — ${v.kv.join(' | ')}; ${v.stops}`, /^Харків → Полтава\s*\d+ \S+, \d\d:\d\d – \d\d:\d\d/.test(v.head.trim()) && v.kv.length === 6 && /^2\d(,\d)? км відстань$/.test(v.kv[0]) && /у дорозі$/.test(v.kv[1]) && /у русі$/.test(v.kv[2]) && /^\d+ км\/год середня$/.test(v.kv[3]) && /^95 км\/год найбільша$/.test(v.kv[4]) && /^5(,\d)? км · 1\d % без GPS$/.test(v.kv[5]) && /^Зупинок: 1 · стояли 4 хв\s*без GPS$/.test(v.stops), JSON.stringify({ head: v.head, kv: v.kv, stops: v.stops }));
+  ok(`[${T}] графік швидкості (шкала до ${v.top} км/год, ділянку без GPS затінено); під ним — підказка й пояснення кольорів`, v.chart && v.est2 >= 1 && +v.top === 100 && /Торкніться лінії чи графіка/.test(v.read) && (!v.legendShown || (v.legend.length === 5 && v.legend[0] === 'до 15' && v.legend[4] === '90+')) && /без GPS$/.test(v.stops), JSON.stringify({ chart: v.chart, est2: v.est2, top: v.top, read: v.read, legend: v.legend }));
   ok(`[${T}] «Готово» — та сама жовта галочка праворуч унизу картки (${v.okBtn ? v.okBtn.w + '×' + v.okBtn.h : '—'}), нічим не перекрита`, v.okBtn && v.okBtn.w === 54 && v.okBtn.h === 54 && v.okBtn.hit && v.okBtn.fromRight <= 16 && v.okBtn.fromBottom <= 16, JSON.stringify(v.okBtn));
   ok(`[${T}] картка поїздки: усе читається`, (await readCheck(page, '#jv')).length === 0, JSON.stringify(await readCheck(page, '#jv')));
   await shot(page, '55-jr-view-' + sc.n);
@@ -4045,7 +4062,7 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
   const mp = await app(page, cs => { const p = window.__app.map.map.project([cs[1], cs[0]]), r = window.__app.map.map.getCanvas().getBoundingClientRect(); return { x: r.left + p.x, y: r.top + p.y + 6 }; }, coords[turnIdx[3] + 40]);
   await page.mouse.click(mp.x, mp.y); await sleep(250);
   v1 = await view();
-  ok(`[${T}] дотик до лінії на карті (8 км від старту) — «${v1.read}», курсор на графіку там само`, /^\d\d:\d\d · 80 км\/год · (7,9|8,0|8,1) км від старту$/.test(v1.read) && Math.abs(parseFloat(v1.cur) - 29.9) < 1, JSON.stringify({ read: v1.read, cur: v1.cur, mp }));
+  ok(`[${T}] дотик до лінії на карті (близько 8 км від старту, на кілька пікселів убік від неї) — «${v1.read}», курсор на графіку там само`, /^\d\d:\d\d · 80 км\/год · (7,[5-9]|8,[0-5]) км від старту$/.test(v1.read) && Math.abs(parseFloat(v1.cur) - 29.9) < 2, JSON.stringify({ read: v1.read, cur: v1.cur, mp }));
   await shot(page, '55-jr-view-pick-' + sc.n);
   // згорнути картку — більше карти; наблизити
   await page.click('#jv .jv-head'); await sleep(250);

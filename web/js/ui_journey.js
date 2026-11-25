@@ -32,9 +32,10 @@ function askClick(e) {
 function listHtml() {
   const L = list();
   if (!L.length) return `<div class="arch-empty">${ICON.archive}<div>${t('jrEmpty')}</div></div>`;
-  return `<div class="muted arch-hint">${t('jrHint')}</div><div class="list arch jr-list">` + L.map(m => `<div class="item" data-jopen="${esc(m.id)}"><div class="grow"><div class="t">${esc(m.title || '')}</div>
-      <div class="muted">${esc([dayOf(m.t0) + ', ' + clockOf(m.t0), brief(m), t('jrAvg', kmh(m.avg))].join(' · '))}</div>${estNote(m) || m.sim ? `<div class="muted jr-note">${esc([estNote(m), m.sim ? t('jrSim') : ''].filter(Boolean).join(' · '))}</div>` : ''}</div>
-    <button class="btn sm pri" data-jopen="${esc(m.id)}">${t('open')}</button><button class="btn sm arch-del" data-jdel="${esc(m.id)}" aria-label="${t('delete')}">${ICON.trash}</button></div>`).join('') + '</div>';
+  // рядок цілком — кнопка «відкрити на карті» (окремої кнопки немає: тексту лишається більше місця); кошик — праворуч
+  return `<div class="muted arch-hint">${t('jrHint')}</div><div class="list arch jr-list">` + L.map(m => `<div class="item" data-jopen="${esc(m.id)}" role="button" tabindex="0" aria-label="${esc(t('open') + ': ' + (m.title || ''))}"><div class="grow"><div class="t">${esc(m.title || '')}</div>
+      <div class="muted">${esc([dayOf(m.t0) + ', ' + clockOf(m.t0), brief(m)].join(' · '))}</div><div class="muted jr-note">${esc([t('jrAvg', kmh(m.avg)), estNote(m), m.sim ? t('jrSim') : ''].filter(Boolean).join(' · '))}</div></div>
+    <button class="btn sm arch-del" data-jdel="${esc(m.id)}" aria-label="${t('delete')}">${ICON.trash}</button></div>`).join('') + '</div>';
 }
 async function listClick(e) {
   const del = e.target.closest('[data-jdel]');
@@ -84,15 +85,15 @@ function chartPick(e) {
 }
 function html() {
   const m = jv.m, cell = (v, l) => `<div><b>${esc(v)}</b><small>${esc(l)}</small></div>`, share = m.dist > 0 ? Math.round(m.est / m.dist * 100) : 0;
-  const B = JR.BUCKETS, lg = [t('jvTo', B[0]), `${B[0]}–${B[1]}`, `${B[1]}–${B[2]}`, `${B[2]}–${B[3]}`, t('jvOver', B[3])];
+  const B = JR.BUCKETS, lg = [t('jvTo', B[0]), `${B[0]}–${B[1]}`, `${B[1]}–${B[2]}`, `${B[2]}–${B[3]}`, `${B[3]}+`];
   return `<div class="rp-zoom jv-zoom"><button data-jv="zin" aria-label="${t('qZoomIn')}">+</button><button data-jv="zout" aria-label="${t('qZoomOut')}">−</button><button data-jv="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <button class="jv-head" data-jv="min" aria-expanded="${!jv.min}"><span class="grow"><b>${esc(m.title || '')}</b><small>${esc(`${dayOf(m.t0)}, ${clockOf(m.t0)} – ${clockOf(m.t1)}${m.sim ? ' · ' + t('jrSim') : ''}`)}</small></span><em>${ICON.down}</em></button>
     <div class="jv-body">
       <div class="jv-kv">${cell(fmtDist(m.dist), t('jvDist'))}${cell(fmtDur(m.dur), t('jvDur'))}${cell(fmtDur(m.moving), t('jvMoving'))}${cell(kmh(m.avg), t('jvAvg'))}${cell(m.max ? kmh(m.max) : '—', t('jvMax'))}${cell(m.est >= 200 ? `${fmtDist(m.est)} · ${share} %` : t('jvEstNone'), t('jvEst'))}</div>
-      <div class="jv-stops">${m.stops ? t('jvStops', m.stops, fmtDur(m.stopS)) : t('jvStopsNone')}</div>
+      <div class="jv-stops"><span>${m.stops ? t('jvStops', m.stops, fmtDur(m.stopS)) : t('jvStopsNone')}</span>${m.est >= 200 ? `<span class="est"><i></i>${t('jvNoGps')}</span>` : ''}</div>
       ${chartHtml()}
       <div class="jv-read muted" id="jvRead">${t('jvPickHint')}</div>
-      <div class="jv-legend" aria-label="${t('jvLegend')}">${lg.map((x, i) => `<span><i style="background:${SPEED_COLORS[i]}"></i>${esc(x)}</span>`).join('')}<span class="est"><i></i>${t('jvNoGps')}</span></div>
+      <div class="jv-legend" aria-label="${t('jvLegend')}">${lg.map((x, i) => `<span><i style="background:${SPEED_COLORS[i]}"></i>${esc(x)}</span>`).join('')}</div>
     </div>
     <div class="jv-btns"><button class="btn sm" data-jv="gpx">GPX</button><button class="btn sm arch-del" data-jv="del" aria-label="${t('delete')}">${ICON.trash}</button></div>
     <button class="pl-ok" data-jv="done" aria-label="${t('done')}">${ICON.check}</button>`;

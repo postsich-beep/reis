@@ -225,7 +225,9 @@ const JR_DAY = '#5d6a7c', JR_NIGHT = '#b6c1d2';
 let jrNight = null;
 function jrPaint() {
   if (!map || !map.getLayer || !map.getLayer('jr-line')) return;
-  const dark = view.night || satOn(); if (dark === jrNight) return; jrNight = dark;
+  // Уночі звичайну карту «перевертає» фільтр (світле стає темним) — разом із нею й нашу лінію: темно-сіра сама стає світлою.
+  // Світлий колір потрібен лише там, де карта темна без фільтра: супутник і нічна офлайн-карта.
+  const dark = satOn() || nativeDark(); if (dark === jrNight) return; jrNight = dark;
   for (const id of ['jr-line', 'jr-est']) { try { map.setPaintProperty(id, 'line-color', dark ? JR_NIGHT : JR_DAY); map.setPaintProperty(id, 'line-opacity', dark ? 0.55 : 0.5); } catch (_) {} }
 }
 // Лінія рейсу, що йде (або щойно завершеного, поки не відповіли «зберегти?»). Давню частину довгого шляху проріджуємо.
