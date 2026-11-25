@@ -16,6 +16,7 @@ import * as rough from './rough.js';
 import { vp, onMap as vpOnMap } from './vplaces.js';
 import { reps, REP_SVG, shown as repShown, repStamp } from './reports.js';
 import * as P from './platform.js';
+import { shownPts, recording as jrLive, segments as jrSegments, geojson as jrGeo, SPEED_COLORS } from './journey.js';
 
 export let map = null;
 export const view = { follow: true, north: false, night: false, zoomBias: 0, blank: false, lastTouch: 0 };
@@ -156,7 +157,10 @@ export function initMap() {
     if (!seenErr.has(m) && seenErr.size < 20) { seenErr.add(m); log('warn', 'карта: ' + m); }
   });
   map.on('style.load', addLayers);
-  map.on('click', e => { if (tapHook) tapHook({ lat: e.lngLat.lat, lon: e.lngLat.lng }); });
+  map.on('click', e => {
+    if (tapHook) { tapHook({ lat: e.lngLat.lat, lon: e.lngLat.lng }); return; }
+    if (jv && jvTap) { const q = map.unproject([e.point.x + 1, e.point.y]), px = Math.abs(q.lng - e.lngLat.lng) * 111320 * Math.cos(e.lngLat.lat * Math.PI / 180); jvTap({ lat: e.lngLat.lat, lon: e.lngLat.lng, px }); }
+  });
   map.on('styleimagemissing', e => {
     if (map.hasImage(e.id)) return;
     try { const f = e.id === 'cam-ico' ? camImage() : e.id.startsWith('fuel:') ? fuelImage(e.id.slice(5)) : null; if (f) map.addImage(e.id, f.img, { pixelRatio: f.dpr }); } catch (_) {}
@@ -198,6 +202,7 @@ export function initMap() {
   bus.on('vplaces', drawVerified);
   bus.on('reports', drawReports); bus.on('settings', k => { if (k === 'mapVerified') drawVerified(); if (k === 'mapReports') drawReports(); });
   bus.on('stopsdb', drawStops);
+  bus.on('journey', drawJourney); bus.on('view', jrPaint); bus.on('settings', k => { if (k === 'mapType') jrPaint(); });
   bus.on('settings', k => { if (k === 'mapStops' || k === 'mapStopTypes') drawStops(); });
   map.on('render', () => { if (!labTimer) labTimer = setTimeout(labelDots, LAB_EVERY); });
   map.on('idle', () => { clearTimeout(labTimer); labTimer = null; labelDots(); });
@@ -209,11 +214,61 @@ export function initMap() {
   window.addEventListener('resize', () => { cam.anc = null; if (view.follow) follow(true); });
   setInterval(() => {
     applyTheme();
-    if (!view.follow && S.autoCenter && Date.now() - view.lastTouch > 12000 && (g.active || pos.spd > 3)) setFollow(true);
+    if (!view.follow && S.autoCenter && !jv && Date.now() - view.lastTouch > 12000 && (g.active || pos.spd > 3)) setFollow(true);   // поїздку з архіву роздивляються скільки треба
   }, 3000);
   applyTheme();
   return map;
 }
+
+/* ---------- (1.1.25) пройдений шлях ---------- */
+const JR_DAY = '#5d6a7c', JR_NIGHT = '#b6c1d2';
+let jrNight = null;
+function jrPaint() {
+  if (!map || !map.getLayer || !map.getLayer('jr-line')) return;
+  // Уночі звичайну карту «перевертає» фільтр (світле стає темним) — разом із нею й нашу лінію: темно-сіра сама стає світлою.
+  // Світлий колір потрібен лише там, де карта темна без фільтра: супутник і нічна офлайн-карта.
+  const dark = satOn() || nativeDark(); if (dark === jrNight) return; jrNight = dark;
+  for (const id of ['jr-line', 'jr-est']) { try { map.setPaintProperty(id, 'line-color', dark ? JR_NIGHT : JR_DAY); map.setPaintProperty(id, 'line-opacity', dark ? 0.55 : 0.5); } catch (_) {} }
+}
+// Лінія рейсу, що йде (або щойно завершеного, поки не відповіли «зберегти?»). Давню частину довгого шляху проріджуємо.
+function drawJourney() {
+  const src = map && map.getSource && map.getSource('jr'); if (!src) return;
+  let p = shownPts(); if (!p || p.length < 2) { src.setData(EMPTY); return; }
+  if (p.length > 3000) { const head = p.slice(0, p.length - 600), k = Math.ceil(head.length / 2400); p = head.filter((x, i) => i % k === 0 || (i > 0 && head[i - 1][4] !== x[4])).concat(p.slice(p.length - 600)); }
+  // рейс іде — лінію дотягуємо до самої машини (нова точка пишеться раз на 25 м, а стрілка вже попереду)
+  if (jrLive() && pos.lat != null) { const l = p[p.length - 1]; if (Math.abs(l[0] - pos.lat) + Math.abs(l[1] - pos.lon) > 2e-5) p = p.concat([[pos.lat, pos.lon, l[2], l[3], pos.mode === 'gps' ? 0 : 1]]); }
+  src.setData(jrGeo(jrSegments(p, false)));
+}
+// Поїздка з архіву на карті: лінія кольором за швидкістю, старт і фініш, позначка вибраної точки
+let jv = null, jvMarks = [], jvSel = null;
+const jvDot = (cls, txt) => { const el = document.createElement('div'); el.className = 'jv-pin ' + cls; el.textContent = txt || ''; return el; };
+function drawJv() {
+  const src = map && map.getSource && map.getSource('jv'); if (!src) return;
+  for (const m of jvMarks) m.remove(); jvMarks = [];
+  if (!jv) { src.setData(EMPTY); return; }
+  src.setData(jrGeo(jrSegments(jv.pts, true)));
+  const a = jv.pts[0], b = jv.pts[jv.pts.length - 1];
+  jvMarks.push(new maplibregl.Marker({ element: jvDot('a', 'A') }).setLngLat([a[1], a[0]]).addTo(map), new maplibregl.Marker({ element: jvDot('b', 'Б') }).setLngLat([b[1], b[0]]).addTo(map));
+}
+/** Показати поїздку з архіву (pts — [[lat, lon, t, v, m], …]) або прибрати (null). Допоміжні позначки карти на цей час ховаємо. */
+let jvClean = false;
+export function showJourney(pts) {
+  const was = !!jv; jv = pts && pts.length > 1 ? { pts } : null;
+  if (jv && !was) { jvClean = clean; setClean(true); } else if (!jv && was) setClean(jvClean);
+  if (!jv) journeyMark(null);
+  drawJv();
+}
+export const journeyShown = () => !!jv;
+/** Уся поїздка — у вільній частині карти (між верхом екрана й карткою знизу). */
+export function fitJourney(padTop, padBottom) { if (jv) fitRoutes([jv.pts.map(p => [p[0], p[1]])], padTop, padBottom, 34); }
+/** Позначка вибраної точки шляху (p — [lat, lon, …]) або прибрати (null). */
+export function journeyMark(p) {
+  if (jvSel) { jvSel.remove(); jvSel = null; }
+  if (p && map) jvSel = new maplibregl.Marker({ element: jvDot('sel') }).setLngLat([p[1], p[0]]).addTo(map);
+}
+/** Дотик до карти під час перегляду поїздки: fn({ lat, lon, px }) — px: скільки метрів в одному пікселі тут (щоб зрозуміти, чи влучили в лінію). */
+let jvTap = null;
+export function onJourneyTap(fn) { jvTap = fn || null; }
 
 /* ---------- чиста карта для екранів маршруту ---------- */
 // Вибір варіанта маршруту і «Маршрут» у дорозі відкриваються без допоміжних позначок (піт-стопи, плашки АЗС, камери,
@@ -336,6 +391,8 @@ function addLayers() {
   map.addSource('marks', { type: 'geojson', data: EMPTY });
   map.addSource('cps', { type: 'geojson', data: EMPTY });
   map.addSource('plan-line', { type: 'geojson', data: EMPTY });
+  map.addSource('jr', { type: 'geojson', data: EMPTY });      // (1.1.25) пройдений шлях рейсу, що йде, — бліда лінія
+  map.addSource('jv', { type: 'geojson', data: EMPTY });      // поїздка з архіву — кольором за швидкістю
   // Лінії рейсу кладемо під підписи карти: назви вулиць і міст читаються поверх синьої лінії, як у звичних навігаторах.
   // Наші значки (АЗС, стоянки, позначки) лишаються згори.
   const under = firstSymbolId();
@@ -343,6 +400,10 @@ function addLayers() {
   map.addLayer({ id: 'rough-dot', type: 'circle', source: 'rough', minzoom: 10.5, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 10.5, 1.6, 14, 3.5, 17, 6],
     'circle-color': ['match', ['get', 'l'], 'r', '#e5484d', 'y', '#f6bd16', '#2f9e62'], 'circle-opacity': 0.85 } }, under);
+  // (1.1.25) Пройдений шлях — бліда лінія під маршрутом: де їхали насправді, від старту (перебудова маршруту її не стирає).
+  // Суцільна — за GPS, пунктир — без GPS (розрахунок). Колір — у jrPaint(): удень темніший, уночі світліший.
+  map.addLayer({ id: 'jr-line', type: 'line', source: 'jr', filter: ['!=', ['get', 'e'], 1], layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': JR_DAY, 'line-opacity': 0.5, 'line-width': w(2.5, 4.5, 9) } }, under);
+  map.addLayer({ id: 'jr-est', type: 'line', source: 'jr', filter: ['==', ['get', 'e'], 1], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': JR_DAY, 'line-opacity': 0.5, 'line-width': w(2.5, 4.5, 9), 'line-dasharray': [1.6, 1.2] } }, under);
   // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
   map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } }, under);
   map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } }, under);
@@ -358,6 +419,10 @@ function addLayers() {
   map.addLayer({ id: 'route-done', type: 'line', source: 'route-done', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
   map.addLayer({ id: 'done-near', type: 'line', source: 'done-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#a7b6d1', 'line-width': w(3, 6, 12) } }, under);
   // похибка позиції — лише тонкий пунктирний контур, без заливки
+  // (1.1.25) Поїздка з архіву: темний обідок, зверху — колір за швидкістю; ділянки без GPS — ще й білий пунктир посередині
+  map.addLayer({ id: 'jv-case', type: 'line', source: 'jv', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#10151c', 'line-width': w(5, 8.5, 14) } }, under);
+  map.addLayer({ id: 'jv-line', type: 'line', source: 'jv', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': ['match', ['get', 'b'], 0, SPEED_COLORS[0], 1, SPEED_COLORS[1], 2, SPEED_COLORS[2], 3, SPEED_COLORS[3], SPEED_COLORS[4]], 'line-width': w(3, 5.5, 10) } }, under);
+  map.addLayer({ id: 'jv-est', type: 'line', source: 'jv', filter: ['==', ['get', 'e'], 1], layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: { 'line-color': '#ffffff', 'line-width': w(1, 1.6, 2.6), 'line-dasharray': [2, 2.4] } }, under);
   map.addLayer({ id: 'acc-line', type: 'line', source: 'acc', paint: { 'line-color': '#c98600', 'line-width': 1.5, 'line-opacity': 0.8, 'line-dasharray': [3, 3] } }, under);
   // піт-стопи по всій Україні: здалеку — головні (стоянки для фур, великі АЗС), ближче — усі
   const color = ['match', ['get', 't'], 'e', TYPES.e.color, 'f', TYPES.f.color, 's', TYPES.s.color, 'p', TYPES.p.color, 'm', TYPES.m.color, 'h', TYPES.h.color, '#1f2937'];
@@ -410,6 +475,7 @@ function addLayers() {
   map.addLayer({ id: 'plan-line-bg', type: 'line', source: 'plan-line', layout: { 'line-cap': 'round' }, paint: { 'line-color': '#ffffff', 'line-width': 6, 'line-opacity': 0.85 } });
   map.addLayer({ id: 'plan-line', type: 'line', source: 'plan-line', paint: { 'line-color': '#13171c', 'line-width': 3, 'line-dasharray': [1.6, 1.4] } });
   doneD = -1; cpKey = ''; drawRoute(); drawPoi(); drawStops(); drawRough(); drawMarks(); drawCps(); if (planPts) planPoints(planPts);
+  jrNight = null; jrPaint(); drawJourney(); drawJv();
   offlineWatch();
   tuneLabels();
   satLayer();

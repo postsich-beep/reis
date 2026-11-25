@@ -28,6 +28,8 @@ import * as sfx from './sfx.js';
 import * as sensors from './sensors.js';
 import * as calib from './calib.js';
 import * as uiCalib from './ui_calib.js';
+import * as journey from './journey.js';
+import * as uiJourney from './ui_journey.js';
 
 async function boot() {
   log('info', `Рейс ${VERSION.name}, web ${VERSION.web}, ${P.isNative ? 'застосунок' : 'браузер'}`);
@@ -39,16 +41,16 @@ async function boot() {
   try { mapM.initMap(); } catch (e) { log('err', 'карта не запустилась: ' + (e && e.message)); }
   bus.on('offlineReady', () => { if (mapM.map) mapM.applyMapSource(); });
   bus.on('offlineBad', () => { if (mapM.map) mapM.applyMapSource(); });
-  nav.start(); guide.init(); poi.init(); track.init(); weather.init(); roads.init(); rough.init();
-  initUI(); initLab(); lab.initLabApp();
+  nav.start(); guide.init(); poi.init(); track.init(); journey.init(); weather.init(); roads.init(); rough.init();
+  initUI(); initLab(); lab.initLabApp(); uiJourney.initJourneyUi();
   await route.loadTrips();
   await feed.init();
   stopsdb.load(); vplaces.init(); reports.init(); limits.init();
   P.nativeReady(); P.startLocation(); P.keepAwake(S.keepAwake !== false);
-  resumeTrip();
+  resumeTrip().catch(() => false).then(() => journey.afterResume());   // (1.1.25) рейс не відновлено — недописаний пройдений шлях завершуємо й питаємо, чи зберегти
   const b = document.getElementById('boot');
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, lab, ui: { ptsState } };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, journey, uiJourney, lab, ui: { ptsState } };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

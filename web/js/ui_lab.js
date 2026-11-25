@@ -12,6 +12,7 @@ import { drawStops } from './map.js';
 import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } from './sim.js';
 import * as rough from './rough.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
+import { journeysBtnHtml } from './ui_journey.js';
 import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
@@ -135,6 +136,7 @@ function settingsHtml() {
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
   const styleOn = STYLES.find(x => x[1] === S.styleUrl);
   return `${logoHtml()}
+  ${journeysBtnHtml()}
   <div class="sec">${t('secScreen')}</div>
   <div class="muted" style="margin:0 2px 6px">${t('setTheme')}</div>
   ${seg('theme', [['auto', t('themeAuto'), S.theme === 'auto'], ['day', t('themeDay'), S.theme === 'day'], ['night', t('themeNight'), S.theme === 'night']])}
@@ -254,6 +256,7 @@ definePanel('settings', {
         return;
       }
       const a = b.dataset.act;
+      if (a === 'journeys') { openPanel('journeys'); return; }
       if (a === 'testVoice') voiceTest();
       else if (a === 'resetLearn') { resetLearning(); toast(t('done'), 'green', 2500); }
       else if (a === 'clearFeed') { clearFeed(); toast(t('done'), 'green', 2500); }

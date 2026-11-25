@@ -1154,3 +1154,89 @@ body:has(#repSheet:not([hidden]) .rep-near) :is(#speed,#cam,#zoom){visibility:hi
 
 /* ---- 1.1.22: перевірена стоянка для фур у деталях рейсу — рядок-кнопка (дотик — картка місця) ---- */
 .tp-row{width:100%;text-align:left;color:var(--ink);font:inherit}
+
+/* ---- 1.1.25: пройдений шлях і «Архів поїздок» ----
+   Запитання на фініші — картка над нижньою плашкою (під великим пальцем); круг швидкості на цей час ховаємо: рейс закінчився. */
+#jrAsk{position:absolute;left:8px;right:8px;bottom:calc(var(--bh,150px) + 8px);z-index:7;padding:12px 12px 10px;border-radius:20px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:qdown .18s ease-out}
+.ja-t b{display:block;font:700 19px/1.2 var(--f-ui)}
+.ja-t small{display:block;margin-top:3px;color:var(--ink-2);font-size:14px;line-height:1.25;overflow-wrap:anywhere}
+.ja-b{display:flex;gap:8px;margin-top:10px}
+.ja-b .btn{flex:1;min-height:52px;padding:0 10px}
+.ja-b .btn.pri{flex:1.5;gap:7px} .ja-b .btn svg{width:20px;height:20px}
+body.ja-on :is(#speed,#cam,#spdPop){visibility:hidden}
+/* під час планування, вибору точки чи перегляду поїздки картку ховаємо; відкриті вікна (панель, швидкі налаштування, «Маршрут»,
+   «Що на дорозі?») просто лежать поверх неї — без правил :has(), які змушують браузер перераховувати стилі на кожну зміну екрана */
+body.jv-on #jrAsk,body.planning #jrAsk,body.pts-on #jrAsk,body.aiming #jrAsk{display:none}
+/* Повідомлення-відповідь на дотик у відкритій панелі («Видалено. Торкніться — повернути») — поверх панелі, під її заголовком
+   (раніше лишалось під панеллю, і його ніхто не бачив). Повідомлення з дороги панель, як і раніше, закриває. */
+#toasts.over{z-index:22}
+#toasts.over.inpanel{top:calc(var(--st) + 80px)}
+#toasts.over.inpanel .toast:not(.over){display:none}
+/* кнопка в «Налаштуваннях» */
+.jr-entry{margin:0 0 6px}
+.jr-entry .btn{justify-content:flex-start;gap:10px;min-height:54px;padding:0 14px;font-weight:700}
+.jr-entry .btn svg{width:24px;height:24px;flex:none}
+.jr-entry .btn span{flex:1;text-align:left}
+.jr-entry .btn i{flex:none;min-width:26px;height:26px;padding:0 8px;border-radius:13px;display:grid;place-items:center;background:var(--amber);color:var(--amber-ink);font:800 14px/1 var(--f-num);font-style:normal}
+/* список поїздок: дотик до рядка відкриває поїздку */
+.jr-list .item{cursor:pointer;padding-right:8px}
+.jr-note{margin-top:1px}
+/* одна поїздка на карті: усе зайве з екрана прибрано, унизу — картка зі зведенням і графіком швидкості */
+body.jv-on :is(#top,#bottom,#speed,#cam,#spdPop,#rail,#zoom,#bCenter,#toasts .toast:not(.green):not(.yellow)){visibility:hidden}
+#jv{position:absolute;left:8px;right:8px;bottom:calc(var(--sb) + 8px);z-index:9;padding:8px 10px 10px;border-radius:22px;
+  background:rgba(var(--glass-rgb),var(--gs));border:1px solid var(--edge);box-shadow:var(--shadow);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);animation:qdown .18s ease-out}
+.jv-head{display:flex;align-items:center;gap:8px;width:100%;min-height:46px;padding:2px 2px 2px 4px;text-align:left;color:var(--ink)}
+.jv-head .grow{flex:1;min-width:0}
+.jv-head b{display:block;font:700 17px/1.2 var(--f-ui);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jv-head small{display:block;color:var(--ink-2);font-size:13px;margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jv-head em{flex:none;width:40px;height:40px;border-radius:12px;display:grid;place-items:center;background:var(--panel-2);transition:transform .2s}
+.jv-head em svg{width:20px;height:20px}
+#jv.min .jv-head em{transform:rotate(180deg)}
+#jv.min .jv-body{display:none}
+.jv-kv{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px;margin-top:6px}
+.jv-kv>div{background:var(--panel-2);border-radius:12px;padding:6px 4px 5px;text-align:center;min-width:0}
+.jv-kv b{display:block;font:800 17px/1.15 var(--f-num);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.jv-kv small{display:block;color:var(--ink-2);font-size:12px;margin-top:1px;white-space:nowrap}
+.jv-stops{display:flex;justify-content:space-between;gap:8px;margin:7px 4px 0;font-size:13.5px;color:var(--ink-2)}
+.jv-stops .est{display:inline-flex;align-items:center;gap:5px;white-space:nowrap}
+.jv-stops .est i{width:18px;height:0;border-top:2px dashed var(--ink-2)}
+.jv-chart{position:relative;height:64px;margin:8px 0 0;border-radius:10px;background:var(--panel-2);overflow:hidden;touch-action:none;cursor:crosshair}
+.jv-chart svg{position:absolute;inset:0;width:100%;height:100%;display:block}
+.jc-area{fill:rgba(var(--glass2-rgb),.55);stroke:none}
+.jc-mid{stroke:var(--line);stroke-width:1;stroke-dasharray:3 4;vector-effect:non-scaling-stroke;fill:none}
+.jc-line path{fill:none;stroke-width:2.2;stroke-linecap:round;vector-effect:non-scaling-stroke}
+.jc-est rect{fill:rgba(128,138,152,.28)}
+.jc-top,.jc-half{position:absolute;left:5px;z-index:1;font:700 12px/1 var(--f-num);color:var(--ink-2)}
+.jc-top{top:3px} .jc-half{top:calc(50% - 2px)}
+.jc-cur{position:absolute;top:0;bottom:0;width:2px;margin-left:-1px;background:var(--ink);pointer-events:none}
+.jv-read{margin:6px 4px 0;min-height:18px;font:600 13.5px/1.3 var(--f-ui);color:var(--ink)}
+.jv-read.muted{font-weight:400;color:var(--ink-2)}
+.jv-legend{display:flex;flex-wrap:nowrap;justify-content:space-between;gap:0 6px;margin:6px 4px 0;font-size:12px;color:var(--ink-2);overflow:hidden}
+.jv-legend span{display:inline-flex;align-items:center;gap:4px;white-space:nowrap}
+.jv-legend i{width:14px;height:5px;border-radius:3px}
+.jv-btns{display:flex;gap:8px;margin-top:10px;padding-right:66px}
+.jv-btns .btn{min-height:46px;padding:0 16px}
+.jv-btns .arch-del{width:46px;padding:0;color:var(--ink-2)} .jv-btns .arch-del svg{width:20px;height:20px}
+#jv .pl-ok{position:absolute;right:10px;bottom:10px}
+#jv.min .jv-btns{margin-top:6px}
+/* позначки на карті: старт, фініш, вибрана точка */
+.jv-pin{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;font:800 13px/1 var(--f-ui);color:#fff;border:2px solid #fff;box-shadow:0 1px 6px rgba(0,0,0,.5)}
+.jv-pin.a{background:#2f9e62} .jv-pin.b{background:#13171c}
+.jv-pin.sel{width:18px;height:18px;background:var(--amber);border:3px solid #13171c;box-shadow:0 0 0 2px #fff,0 1px 6px rgba(0,0,0,.5)}
+@media (orientation:landscape) and (max-height:520px){
+  #jrAsk{left:auto;right:8px;width:calc(46% - 16px);bottom:calc(var(--bh,150px) + 8px)}
+  #jv{left:auto;right:8px;width:calc(46% - 16px);max-height:calc(100% - var(--st) - 16px);display:flex;flex-direction:column;padding:6px 8px 8px}
+  #jv .jv-body{min-height:0;overflow-y:auto}
+  .jv-chart{height:46px} .jv-kv b{font-size:15px} .jv-kv>div{padding:4px 3px} .jv-legend{display:none}
+  #jv .jv-zoom{right:calc(100% + 10px);bottom:0}
+}
+/* невисокий екран (до 620 px): картка поїздки нижча — карті лишається більше; пояснення кольорів тут не показуємо (кольори ті самі, що й на графіку) */
+@media (max-height:620px) and (orientation:portrait){
+  .jv-kv>div{padding:4px 3px 3px} .jv-kv b{font-size:16px} .jv-kv{gap:5px;margin-top:4px}
+  .jv-chart{height:48px;margin-top:6px} .jv-legend{display:none} .jv-stops{margin-top:5px} .jv-btns{margin-top:8px} .jv-head{min-height:42px}
+}
+@media (min-width:700px) and (min-height:521px){
+  #jrAsk,#jv{left:0;right:0;margin-inline:auto;width:min(640px,calc(100% - 16px))}
+  .jv-chart{height:84px}
+}

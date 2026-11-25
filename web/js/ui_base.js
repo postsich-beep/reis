@@ -86,13 +86,26 @@ export function manIcon(type) {
 }
 
 /* ---------- спливаючі сповіщення ---------- */
+// (1.1.25) Повідомлення-відповідь на дотик у відкритій панелі («Видалено. Торкніться — повернути», «Збережено») показуємо ПОВЕРХ панелі,
+// під її заголовком: раніше воно лишалось під панеллю, і його ніхто не бачив. Повідомлення з дороги (події, позначки) панель,
+// як і раніше, закриває — гортати не заважають; вони чекають на карті.
+let tapT = 0;
+document.addEventListener('click', () => { tapT = Date.now(); }, true);
 export function toast(text, level = '', ms = 7000, onTap) {
   const box = $('toasts'); if (!box) return;
   const el = document.createElement('div'); el.className = 'toast ' + level; el.textContent = text;
-  el.onclick = () => { el.remove(); if (onTap) onTap(); };
+  const P = $('panel'); if (P && !P.hidden && P.classList.contains('full') && Date.now() - tapT < 1500) el.classList.add('over');
+  el.onclick = () => { el.remove(); toastSync(); if (onTap) onTap(); };
   box.appendChild(el);
   while (box.children.length > 3) box.firstChild.remove();
-  setTimeout(() => el.remove(), ms);
+  toastSync();
+  setTimeout(() => { el.remove(); toastSync(); }, ms);
+}
+/** Де стоять повідомлення: є відповідь на дотик — поверх усього; відкрита панель на весь екран — під її заголовком, і лише відповіді. */
+function toastSync() {
+  const box = $('toasts'), P = $('panel'); if (!box) return;
+  const over = !!box.querySelector('.toast.over');
+  box.classList.toggle('over', over); box.classList.toggle('inpanel', over && !!P && !P.hidden && P.classList.contains('full'));
 }
 
 /* ---------- панелі ---------- */
@@ -115,7 +128,7 @@ export function openPanel(name, arg) {
   def.render(body, arg);
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => b.classList.toggle('act', b.dataset.panel === (def.tab || name)));
   bus.emit('panel', name);
-  panelDodgeSoon();
+  panelDodgeSoon(); toastSync();
 }
 // Рядок списку, що саме проходить під галочкою «Готово», відсуває свій правий край — відстань чи кнопка в ньому лишається на видноті
 let dodgeRaf = 0;
@@ -131,7 +144,7 @@ export function closePanel() {
   $('panel').hidden = true; $('panelBody').innerHTML = '';
   document.querySelectorAll('#tabs button[data-panel]').forEach(b => b.classList.remove('act'));
   if (def && def.close) def.close();
-  bus.emit('panel', null);
+  bus.emit('panel', null); toastSync();
 }
 // Перемалювати відкриту панель (не частіше ніж раз на 400 мс), якщо вона показує саме цей екран.
 export function refresh(name) {
