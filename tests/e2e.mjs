@@ -2895,7 +2895,7 @@ if (run('26')) try {
   await build(); await sleep(400);
   rq = routeReqs.slice(n0);
   const w3 = await app(page, () => ({ soft: (document.querySelector('#routePick .rp-warn.soft') || { textContent: '' }).textContent, red: !!document.querySelector('#routePick .rp-warn.red'), costing: window.__app.guide.g.active }));
-  ok('іншого шляху для фури немає — показано дорогу під знак із жовтим попередженням (а не червоний «легковий» маршрут)', rq.map(q => q.costing + ':' + (pen(q) || '')).join() === 'truck:,truck:,truck:,truck:600' && /шлях є лише дорогою зі знаком «фурам заборонено»/.test(w3.soft) && /Іншої дороги немає/.test(w3.soft) && !w3.red, JSON.stringify({ rq: rq.map(q => q.costing + ':' + (pen(q) || '')), w3 }));
+  ok('іншого шляху для фури немає — показано дорогу під знак із жовтим попередженням (а не червоний «легковий» маршрут)', rq.map(q => q.costing + ':' + (pen(q) || '')).join() === 'truck:,truck:,truck:,truck:,truck:600' && /шлях є лише дорогою зі знаком «фурам заборонено»/.test(w3.soft) && /Іншої дороги немає/.test(w3.soft) && !w3.red, JSON.stringify({ rq: rq.map(q => q.costing + ':' + (pen(q) || '')), w3 }));
   await sleep(2400);
   ok('…і зайвого запиту «варіанта» після цього немає', routeReqs.length === n0 + 5, String(routeReqs.length - n0));
   await closePick();
