@@ -1526,3 +1526,36 @@ body.src-on :is(#speed,#cam,#spdPop,#zoom,#attr){visibility:hidden}
 @media (orientation:landscape) and (max-height:520px){ #srCard{left:auto;width:calc(46% - 16px)} }
 @media (min-width:700px){ #srCard{left:0;right:0;margin-inline:auto;width:min(560px,calc(100% - 16px))} }
 @media (max-width:360px){ .src-b .btn.sm span{display:none} }
+
+/* (1.1.32) шторка маршруту: рядок точок — кнопка «змінити точки на карті»; праворуч — «+ Через» (ще одна контрольна точка дотиком до карти) */
+.rp-head .rp-pts{display:flex;align-items:center;gap:6px;min-width:0;flex:1 1 auto;background:none;border:0;padding:0;margin:0;color:inherit;font:inherit;text-align:left;cursor:pointer;overflow:hidden}
+.rp-head .rp-pts b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:0 1 auto}
+.rp-head .rp-addv{flex:none;display:inline-flex;align-items:center;gap:4px;height:36px;padding:0 12px 0 8px;border-radius:18px;border:1.5px solid var(--edge);background:var(--panel-2);color:var(--ink);font:700 14px/1 var(--f-ui)}
+.rp-head .rp-addv svg{width:18px;height:18px}
+.rp-head .rp-addv.on{background:var(--amber);border-color:var(--amber);color:var(--amber-ink)}
+#pick.pick-pt .row .btn.pt-b.pt-cp{flex:1.4 1 0}
+/* рядок точок на шторці: першою стискається примітка «інших варіантів немає», назви точок — останніми */
+.rp-head .rp-pts .muted{flex:0 1000 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rp-head .rp-pts b{flex:0 1 auto;min-width:2.6em}
+
+/* (1.1.32) пошук на карті: місто вгадано — карта вже там; поле й список — «островами» згори, карту під ними видно */
+body.sr-map #search{background:transparent;pointer-events:none}
+body.sr-map #search .sr-head{pointer-events:auto;background:var(--panel);box-shadow:var(--shadow)}
+body.sr-map #search .sr-body{pointer-events:auto;flex:none;max-height:min(32vh,280px);margin:4px 10px 0;padding:2px 0;border-radius:20px;background:var(--panel);box-shadow:var(--shadow)}
+body.sr-map #search .sr-item:last-child{border-bottom:0}
+body.sr-map :is(#rail,#zoom,#speed,#cam,#spdPop,#attr,#tilt,#top,#nudge){visibility:hidden}
+.sr-item.sr-city .sr-ico{background:var(--amber);color:var(--amber-ink)}
+/* повзунок масштабу — скляна «пігулка» на осі правих кнопок: «+» згори, «−» знизу, між ними дорожка з круглою ручкою (як у нахилу) */
+#zoomBar{position:absolute;z-index:31;right:calc(var(--ex,36px) - 23px);width:46px;display:flex;flex-direction:column;align-items:center;--zv:.5;color:var(--ink);
+  border-radius:23px;background:rgba(var(--glass2-rgb),.9);box-shadow:var(--shadow);border:1px solid var(--edge)}
+#zoomBar[hidden]{display:none}
+.zb-btn{flex:none;width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:transparent;color:var(--ink)}
+.zb-btn svg{width:22px;height:22px;fill:none;stroke:currentColor;stroke-width:2.6;stroke-linecap:round}
+#zoomBar.max .zb-in,#zoomBar.min .zb-out{opacity:.35}
+.zb-track{position:relative;flex:1;align-self:stretch;min-height:50px;touch-action:none;cursor:pointer;outline:0}
+.zb-track:focus-visible{box-shadow:inset 0 0 0 3px var(--route);border-radius:12px}
+.zb-track::before{content:"";position:absolute;left:50%;top:15px;bottom:15px;width:6px;margin-left:-3px;border-radius:3px;background:currentColor;opacity:.22}
+.zb-fill{position:absolute;left:50%;bottom:15px;width:6px;margin-left:-3px;border-radius:3px;background:currentColor;opacity:.65;height:calc(var(--zv) * (100% - 30px))}
+.zb-thumb{position:absolute;left:50%;bottom:calc(var(--zv) * (100% - 30px));width:30px;height:30px;margin-left:-15px;border-radius:50%;background:currentColor;box-shadow:0 1px 3px rgba(0,0,0,.45);border:2px solid var(--halo)}
+#zoomBar.drag .zb-thumb{transform:scale(1.18);background:var(--amber)}
+#zoomBar:not(.drag) .zb-thumb,#zoomBar:not(.drag) .zb-fill{transition:bottom .15s ease-out,height .15s ease-out}
