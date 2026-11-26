@@ -161,6 +161,10 @@ export function altAt(point) {
   return k;
 }
 let tapHook = null, lpT = 0;                 // lpT — коли востаннє спрацювало довге натискання
+let lpHeld = false, lpUpT = 0;               // палець, що довгим натисканням відкрив меню точки, ще на екрані / коли його відпустили
+/** (1.1.36) Меню точки з'являється під пальцем, який ще не відпустили. Відпущений палець — не дотик до кнопки меню, що опинилась під ним
+    (без GPS позначка стоїть там, де стає меню, і «Я тут» чи «Контрольна точка» спрацьовували самі). */
+export const pressGuard = () => lpHeld || Date.now() - lpUpT < 450;
 export function setTapHook(fn) { tapHook = fn || null; document.body.classList.toggle('aiming', !!tapHook); }
 export const aiming = () => !!tapHook;
 export function screenToGeo(x, y) { if (!map) return null; const p = map.unproject([x, y]); return { lat: p.lat, lon: p.lng }; }
@@ -513,9 +517,12 @@ function addLayers() {
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
   map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('markTap', f.properties.id); });
   // контрольні повороти рейсу (без GPS): червоні — перехрестя й різкі повороти, жовті — довгі дуги трас
+  // (1.1.36) пройдені лишаються на карті: білі з кольоровим обідком (попереду — суцільні, наступний — більший); до будь-якого можна торкнутись
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
-    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'n'], 1], 5, 3.5], 13, ['case', ['==', ['get', 'n'], 1], 9, 6], 17, ['case', ['==', ['get', 'n'], 1], 14, 10]], 'circle-color': ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16'],
-    'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, 1.2, 14, 2.5], 'circle-opacity': 0.95 } });
+    'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'n'], 1], 5, 3.5], 13, ['case', ['==', ['get', 'n'], 1], 9, 6], 17, ['case', ['==', ['get', 'n'], 1], 14, 10]],
+    'circle-color': ['case', ['==', ['get', 'p'], 1], '#ffffff', ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16']],
+    'circle-stroke-color': ['case', ['==', ['get', 'p'], 1], ['match', ['get', 'c'], 'red', '#e5484d', '#e0a800'], '#ffffff'],
+    'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'p'], 1], 1.8, 1.2], 14, ['case', ['==', ['get', 'p'], 1], 3.5, 2.5]], 'circle-opacity': 0.95 } });
   for (const id of ['stops-major', 'stops-all', 'cams-ico']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
     map.on('mouseenter', id, () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -561,16 +568,21 @@ function tuneLabels() {
   // Офлайн-карта: шар номерів уже в стилі (джерело — addr.js, із запасом у телефоні); ставимо його теж під назви вулиць
   else if (map.getLayer('reis-house') && firstRoad) { try { map.moveLayer('reis-house', firstRoad); } catch (_) {} }
 }
-// Контрольні повороти наперед (до 25 км, до 12 штук): видно, коли GPS немає, або коли водій увімкнув їх у Лабораторії
+// Контрольні повороти рейсу: видно, коли GPS немає, або коли водій увімкнув їх у Лабораторії.
+// (1.1.36, Олексій: «був перехрестя і не було точки; навіть коли перехрестя пройдено, точка має лишатись, щоб я міг на неї повернутись;
+// кожен поворот на маршруті») Показуємо ВСІ повороти рейсу, а не лише 12 найближчих попереду: пройдені лишаються (p: 1 — білі з обідком),
+// наступний — більший (n: 1). Дотик до будь-якого — позначка переходить на нього (cpAt → nav.jumpToCp).
 let cpKey = '';
 function drawCps() {
   const src = map && map.getSource && map.getSource('cps'); if (!src) return;
   let key = 'off', feats = [];
   if (g.active && g.idx && pos.rd != null && pos.onRoute && (pos.mode === 'dr' || S.cpsShow)) {
-    const d = pos.rd, ahead = routeCps().filter(c => c.d1 > d - 20 && c.d < d + 25000).slice(0, 12);
-    const nx = pos.cp ? pos.cp.d : (ahead[0] && ahead[0].d);                   // наступний контрольний поворот — більший кружечок
-    key = ahead.map(c => c.d).join(',') + '|' + nx;
-    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0, d: c.d }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
+    const d = pos.rd, all = routeCps();
+    // наступний: той, на який зараз чекає замок (pos.cp), а без замка — перший попереду за відстанню
+    const nx = pos.cp ? pos.cp.d : ((all.find(c => c.d1 > d - 20) || {}).d);
+    const passed = c => nx != null ? c.d < nx : true;
+    key = all.length + ':' + Math.round(g.idx.total) + '|' + nx;
+    if (key !== cpKey) feats = all.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0, p: passed(c) ? 1 : 0, d: c.d }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
   }
   if (key === cpKey) return;
   cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });
@@ -1100,12 +1112,14 @@ function setupLongPress() {
   cont.addEventListener('touchstart', ev => {
     cancel(); if (ev.touches.length !== 1) return;
     const t = ev.touches[0], t0 = Date.now(); s0 = { x: t.clientX, y: t.clientY };
-    const fire = () => { tm = null; lpT = Date.now(); const r = cont.getBoundingClientRect(), ll = map.unproject([s0.x - r.left, s0.y - r.top]); bus.emit('mapPick', { lat: ll.lat, lon: ll.lng }); };
+    const fire = () => { tm = null; lpT = Date.now(); lpHeld = true; const r = cont.getBoundingClientRect(), ll = map.unproject([s0.x - r.left, s0.y - r.top]); bus.emit('mapPick', { lat: ll.lat, lon: ll.lng }); };
     // таймер спізнився (телефон був зайнятий малюванням) — спершу даємо дійти рухам пальця, що стоять у черзі
     tm = setTimeout(() => { tm = Date.now() - t0 > 850 ? setTimeout(fire, 150) : (fire(), null); }, 650);
   }, { capture: true, passive: true });
   cont.addEventListener('touchmove', ev => { const t = ev.touches[0]; if (tm && (ev.touches.length !== 1 || !t || Math.hypot(t.clientX - s0.x, t.clientY - s0.y) > 12)) cancel(); }, { capture: true, passive: true });
   cont.addEventListener('touchend', cancel, true); cont.addEventListener('touchcancel', cancel, true);
+  const lift = () => { if (lpHeld) { lpHeld = false; lpUpT = Date.now(); } };
+  window.addEventListener('touchend', lift, true); window.addEventListener('touchcancel', lift, true);
   map.on('movestart', e => { if (e.originalEvent) cancel(); });
   map.on('contextmenu', e => bus.emit('mapPick', { lat: e.lngLat.lat, lon: e.lngLat.lng }));
 }

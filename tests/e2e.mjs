@@ -5046,7 +5046,7 @@ if (run('42')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'S10'].in
   await clearToasts(); await page.click('#panelBody [data-fadd="work"]'); await page.waitForSelector('#srBody [data-srme]'); await sleep(200);
   await page.click('#srBody [data-srme]'); await page.waitForSelector('#panelBody .fv-card', { timeout: 5000 }); await sleep(900);
   const w1 = await fv(), wc = card(w1, 'work');
-  ok(`[${T}] Робота — «Моє місце зараз»: збережено як «${w1.work && w1.work.label}» (адреса цього місця, а не «Моє місце зараз»), з координатами`, !wc.cat && wc.t === 'Робота' && w1.work && w1.work.label === 'Пісочин, Харків' && /^Пісочин, Харків, \d\d\.\d+, \d\d\.\d+/.test(wc.s) && Math.abs(w1.work.lat - coords[4][0]) < 1e-6, JSON.stringify({ wc, work: w1.work }));
+  ok(`[${T}] Робота — «Моє місце зараз»: збережено як «${w1.work && w1.work.label}» (адреса цього місця, а не «Моє місце зараз»; координат під назвою немає)`, !wc.cat && wc.t === 'Робота' && w1.work && w1.work.label === 'Пісочин, Харків' && /^Пісочин, Харків( · |$)/.test(wc.s) && !/\d\d\.\d{4}/.test(wc.s) && Math.abs(w1.work.lat - coords[4][0]) < 1e-6, JSON.stringify({ wc, work: w1.work }));
   // ґ) «Додати» в улюблених: «назад» — нічого не додано; знайшли місце — воно в списку; те саме вдруге не додається
   await clearToasts(); await page.click('#panelBody [data-fadd="fav"]'); await page.waitForSelector('#srIn'); await sleep(250);
   const s1 = await srState();
@@ -5228,6 +5228,73 @@ if (run('43')) for (const sc of [
   ok(`[${T}] прохід 43 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 43 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+
+/* ============ прохід 44 (1.1.36): без GPS — усі контрольні повороти на карті, пройдені лишаються, на кожному чекаємо ============
+   Олексій (знімок без GPS, перехрестя вже позаду): «був перехрестя і не було точки. І навіть коли перехрестя пройдено, точка має лишатись,
+   щоб я міг на неї повернутись. Кожен поворот на маршруті… гострий — червоний, 100 % треба 90 градусів, і розрахунок має повернути, якщо ні —
+   стояти й чекати повороту. Або жовтий затяжний, але теж треба чекати в обов'язковому порядку».
+   Було: на карті лише до 12 поворотів ПОПЕРЕДУ — пройдений зникав, і торкнутись його (повернутись) було неможливо. */
+if (run('44')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length, idx0 = turnIdx[1] - 6;                                    // за 300 м до перехрестя «90° ліворуч»
+  const trip = { id: 't-cps', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  await emitN('loc', { prov: 'gps', lat: coords[idx0][0], lon: coords[idx0][1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await app(page, () => { window.__cp = []; window.__app.bus.on('cpPass', e => window.__cp.push(e)); });
+  let Y = 0;                                                                          // накопичений поворот телефона (за годинниковою — плюс)
+  const feed = async (sec, perSec = 0) => { for (let k = 0; k < sec; k++) { Y += perSec; await emitN('sens', { var: 0.05, yaw: Y }); await sleep(1000); } };
+  await feed(7);
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
+  await feed(3);
+  const C = await app(page, () => window.__app.nav.routeCps().map(c => ({ d: c.d, d0: c.d0, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn })));
+  const dots = () => app(page, () => { const s = window.__app.map.map.getSource('cps'), d = s.serialize ? s.serialize().data : s._data; return (d && d.features || []).map(f => f.properties); });
+  const st = () => app(page, () => { const P = window.__app.nav.pos; return { rd: P.rd, mode: P.mode, cp: P.cp ? { d: P.cp.d, state: P.cp.state, cls: P.cp.cls } : null, toast: [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent).join(' | '), btn: document.getElementById('bTurn').textContent.trim() }; });
+  const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  const red = C[0], yel = C.find(c => c.cls === 'yellow' && c.sgn), red2 = C[1];
+  // а) без GPS на карті — УСІ повороти рейсу (не лише найближчі), наступний виділено, пройдених ще немає
+  const d0 = await dots();
+  ok(`без GPS на карті всі контрольні повороти рейсу — ${d0.length} з ${C.length} (${C.map(c => (c.cls === 'red' ? 'червоний' : 'жовтий') + ' ' + c.ang + '°').join(', ')}); наступний один, пройдених немає`,
+    C.length >= 4 && d0.length === C.length && d0.filter(f => f.n === 1).length === 1 && d0.find(f => f.n === 1).d === red.d && d0.every(f => f.p === 0) && red.cls === 'red' && Math.abs(Math.abs(red.ang) - 90) <= 10 && !!yel, JSON.stringify({ d0, C }));
+  // б) червоний (перехрестя 90°): позначка доїхала й СТОЇТЬ — чекає, поки телефон поверне; далі не їде
+  await app(page, d => window.__app.nav.jumpToCp(d), red.d); await feed(9);
+  const r0 = await st(); await feed(8); const r1 = await st();
+  ok(`червоний поворот ${red.ang}°: телефон не повертав — позначка стоїть перед ним і чекає (${Math.round(r0.rd)} → ${Math.round(r1.rd)} м, поворот на ${red.d0}–${red.d1}; стан «${r1.cp && r1.cp.state}», кнопка «${r1.btn.slice(0, 22)}»)`,
+    r1.mode === 'dr' && r1.cp && r1.cp.d === red.d && r1.cp.state === 'wait' && r1.rd < red.d + 5 && Math.abs(r1.rd - r0.rd) <= 8 && r1.rd >= red.d0 - 40, JSON.stringify({ r0, r1, red }));
+  await shot(page, '72-cps-wait-red');
+  // …телефон повернув на 90° — поворот пройдено; точка НЕ зникає: стає білою з обідком (пройдена), наступний — наступний
+  await clearToasts(); await feed(5, Math.sign(red.ang) * 18); await feed(3);
+  const r2 = await st(), d1 = await dots(), ev1 = await app(page, () => window.__cp.slice(-1)[0] || null);
+  ok(`телефон повернув на 90° — поворот пройдено (${ev1 && ev1.by}), позначка за ним (${Math.round(r2.rd)} м); його точка лишилась на карті як пройдена, наступний — ${red2.ang}° на ${red2.d} м`,
+    ev1 && ev1.by === 'gyro' && r2.rd >= red.d - 5 && d1.length === C.length && (d1.find(f => f.d === red.d) || {}).p === 1 && d1.filter(f => f.p === 1).length === 1 && (d1.find(f => f.n === 1) || {}).d === red2.d, JSON.stringify({ r2, ev1, d1 }));
+  // в) жовтий (затяжний / пологий): те саме — стоїть і чекає «в обов'язковому порядку», повернув — пройдено
+  await app(page, d => window.__app.nav.jumpToCp(d), yel.d); await feed(9);
+  const y0 = await st(); await feed(8); const y1 = await st(), d2 = await dots();
+  ok(`жовтий поворот ${yel.ang}°: телефон не повертав — позначка так само стоїть і чекає (${Math.round(y0.rd)} → ${Math.round(y1.rd)} м, поворот на ${yel.d0}–${yel.d1}; стан «${y1.cp && y1.cp.state}»)`,
+    y1.cp && y1.cp.d === yel.d && y1.cp.cls === 'yellow' && y1.cp.state === 'wait' && y1.rd < yel.d + 5 && Math.abs(y1.rd - y0.rd) <= 8, JSON.stringify({ y0, y1, yel }));
+  ok(`усі повороти до нього — на карті як пройдені (${d2.filter(f => f.p === 1).length}), сам він — наступний, решта попереду`, d2.length === C.length && d2.filter(f => f.p === 1).length === C.filter(c => c.d < yel.d).length && d2.filter(f => f.p === 1).every(f => f.d < yel.d) && (d2.find(f => f.n === 1) || {}).d === yel.d, JSON.stringify(d2));
+  await feed(5, Math.sign(yel.ang) * Math.abs(yel.ang) / 5); await feed(3);
+  const y2 = await st(), ev2 = await app(page, () => window.__cp.slice(-1)[0] || null);
+  ok(`телефон повернув на ${Math.abs(yel.ang)}° — жовтий пройдено (${ev2 && ev2.by}), позначка за ним (${Math.round(y2.rd)} м)`, ev2 && ev2.by === 'gyro' && ev2.cp.d === yel.d && y2.rd >= yel.d - 5, JSON.stringify({ y2, ev2 }));
+  // г) дотик до ПРОЙДЕНОЇ точки на карті — позначка повертається на той поворот і знову чекає
+  const back = red2;                                                                 // другий (90° праворуч) — давно позаду
+  await app(page, d => { const m = window.__app.map, idx = window.__app.guide.g.idx, p = idx.at(d); m.setFollow(false); m.view.lastTouch = Date.now() + 600000; m.map.jumpTo({ center: [p.lon, p.lat], zoom: 15 }); }, back.d); await feed(2);
+  const t0 = await app(page, d => { const m = window.__app.map.map, idx = window.__app.guide.g.idx, p = idx.at(d), q = m.project([p.lon, p.lat]), fs = m.queryRenderedFeatures([[q.x - 4, q.y - 4], [q.x + 4, q.y + 4]], { layers: ['cps-dot'] }); return { x: q.x, y: q.y, hit: fs.map(f => f.properties.d + ':' + f.properties.p), fill: m.getPaintProperty('cps-dot', 'circle-color') }; }, back.d);
+  await shot(page, '72-cps-passed');
+  await clearToasts(); await page.mouse.click(t0.x + 6, t0.y - 6); await feed(2);
+  const b1 = await st(); await feed(8); const b2 = await st(), d3 = await dots();
+  ok(`пройдена точка (${back.ang}°, на ${back.d} м) є на карті (біла з обідком) — дотик до неї: позначка повернулась (${Math.round(y2.rd)} → ${Math.round(b1.rd)} м): «${b1.toast.slice(0, 50)}…»`,
+    t0.hit.includes(back.d + ':1') && Math.abs(b1.rd - back.d0) <= 45 && /Позначка — перед вибраним поворотом/.test(b1.toast), JSON.stringify({ t0, b1, back }));
+  ok(`…і знову чекає повороту (${Math.round(b1.rd)} → ${Math.round(b2.rd)} м, стан «${b2.cp && b2.cp.state}»); цей поворот знову «наступний», ті, що за ним, — знову попереду`,
+    b2.cp && b2.cp.d === back.d && b2.cp.state === 'wait' && Math.abs(b2.rd - b1.rd) <= 8 && (d3.find(f => f.n === 1) || {}).d === back.d && d3.filter(f => f.p === 1).length === C.filter(c => c.d < back.d).length, JSON.stringify({ b2, d3 }));
+  // ґ) GPS повернувся — точок на карті немає (карта чиста), як і раніше
+  for (let k = 0; k < 4; k++) { const q = await app(page, () => { const i = window.__app.guide.g.idx, p = i.at(window.__app.nav.pos.rd + 20); return { lat: p.lat, lon: p.lon, brg: p.brg }; }); await emitN('loc', { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 10, brg: q.brg, t: Date.now() }); await feed(1); }
+  const g1 = await st(), d4 = await dots();
+  ok(`GPS повернувся — контрольних поворотів на карті немає (${d4.length})`, g1.mode === 'gps' && d4.length === 0, JSON.stringify({ mode: g1.mode, n: d4.length }));
+  ok('прохід 44 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 44 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);

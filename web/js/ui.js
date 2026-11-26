@@ -716,7 +716,7 @@ function hereRefine(p, apply) {
 function favPickHw(k) {
   bus.emit('pickPlace', { ph: t(k === 'home' ? 'srFindHome' : 'srFindWork'), hint: t(k === 'home' ? 'srSetHome' : 'srSetWork'), back: favsBack, done: (p, me) => {
     const v = herePlace(p, me); S[k] = v; favFlashSet(k);
-    if (me) hereRefine(v, lab => { const c = hwOf(k); if (c && c.lat === v.lat && c.lon === v.lon && c.label === v.label) S[k] = { ...c, label: lab }; });
+    if (me) hereRefine(v, lab => { const c = hwOf(k); if (c && c.lat === v.lat && c.lon === v.lon && c.label === v.label) S[k] = { ...c, label: lab, sub: '' }; });   // є адреса — координати під назвою вже не потрібні
     toast(t(k === 'home' ? 'srHomeSaved' : 'srWorkSaved', me ? t('srMyPlace').toLowerCase() : v.label), 'green', 4000); favsBack();
   } });
 }
@@ -732,8 +732,8 @@ function favAddNew() {
           favEd = { id: f.id, name: '', touched: true, place: null, focus: true };
           hereRefine(v, lab => {
             const c = favs.find(f.id); if (!c || c.label !== v.label) return;
-            favs.update(f.id, { place: { lat: c.lat, lon: c.lon, label: lab, sub: c.sub } });
-            if (favEd && favEd.id === f.id && !favEd.place) { const a = $('fvAddr'), i = $('fvName'); if (a) a.textContent = [lab, c.sub].filter(Boolean).join(', '); if (i) i.placeholder = lab; }   // редактор відкрито — лише адреса, набір не чіпаємо
+            favs.update(f.id, { place: { lat: c.lat, lon: c.lon, label: lab, sub: '' } });
+            if (favEd && favEd.id === f.id && !favEd.place) { const a = $('fvAddr'), i = $('fvName'); if (a) a.textContent = lab; if (i) i.placeholder = lab; }   // редактор відкрито — лише адреса, набір не чіпаємо
           });
         }
       }
@@ -1832,6 +1832,8 @@ export function initUI() {
   bus.on('toast', x => { const s = $('strip'); s.classList.remove('pulse'); void s.offsetWidth; s.classList.add('pulse'); if (S.popups) toast(x.text.replace(/\s+/g, ' ').slice(0, 180), x.level, 9000, () => openPanel('feed')); });
   bus.on('mapPick', p => { if (pm && pm.arm) { ptsPlace(p); return; } if (!aim) onMapPick(p); });
   $('routePick').onclick = pickClick;
+  // (1.1.36) меню точки відкрилось під пальцем довгого натискання — відпущений палець не натискає кнопку, що опинилась під ним
+  $('pick').addEventListener('click', e => { if (mapM.pressGuard()) { e.stopPropagation(); e.preventDefault(); } }, true);
   // панель «Маршрут» (деталі) закрили, а варіант ще не вибрано — повертаємо шторку вибору
   bus.on('panel', name => { if (name) { if (rrOpen()) cancelChoice('panel'); else if (tsOpen()) tsHide(false); else if (!$('routePick').hidden) $('routePick').hidden = true; } else if (plan.trip && !g.active && !plan.busy && !plan.going) pickShow(); });
   bus.on('trip', () => { if (tsOpen() && !g.active) tsHide(true); else if (g.active && !['trip', 'rr'].includes($('routePick').dataset.mode)) pickHide(); });

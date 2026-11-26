@@ -1658,12 +1658,12 @@ button.fv-main:active{opacity:.65}
 .fv-ic.sm{width:40px;height:40px;background:none;color:var(--red)}                 /* саме улюблене місце — сердечко без плашки: розділ видно одразу */
 .fv-ic.sm svg{width:24px;height:24px;stroke:var(--red);fill:var(--red)}
 .fv-acts{display:flex;gap:6px}
-.fv-acts .btn.sm{flex:1;min-width:0;min-height:44px;padding:0 4px;background:var(--panel);white-space:nowrap}
+.fv-acts .btn.sm{flex:1;min-width:0;min-height:46px;padding:0 4px;background:var(--panel);white-space:nowrap}
 .fv-acts .btn.fv-i{flex:none;width:46px;padding:0;color:var(--ink-2)}
 .fv-acts .btn.fv-i svg{width:21px;height:21px}
 .fv-acts .btn.fv-del{color:var(--red-ink,var(--red))}
 .fv-acts .btn.pri{background:var(--amber);color:var(--amber-ink)}
-.fv-add{flex:none;min-height:44px;padding:0 12px 0 9px;gap:5px;background:var(--panel)}
+.fv-card .btn.fv-add{flex:none;min-height:46px;padding:0 12px 0 9px;gap:5px;background:var(--panel)}
 .fv-add svg{width:18px;height:18px}
 .fv-card.flash{animation:fvFlash 1.5s ease-out}
 @keyframes fvFlash{0%,35%{box-shadow:inset 0 0 0 2px var(--amber)}100%{box-shadow:inset 0 0 0 2px transparent}}
@@ -1674,6 +1674,6 @@ button.fv-main:active{opacity:.65}
 .fv-in:focus{outline:none;border-color:var(--amber)}
 .fv-addr{font-size:15px;line-height:1.3}
 .fv-addr.new{font-weight:700}
-.fv-wide{width:100%;min-height:44px;gap:6px;background:var(--panel);margin:2px 0}
+.fv-card .btn.fv-wide{width:100%;min-height:46px;gap:6px;background:var(--panel);margin:2px 0}
 .fv-wide svg{width:19px;height:19px}
-@media (max-width:340px){ .fv-acts .btn.sm{font-size:13.5px} .fv-tx b{font-size:15.5px} .fv-add{padding:0 9px 0 7px} }
+@media (max-width:340px){ .fv-acts .btn.sm{font-size:13.5px} .fv-tx b{font-size:15.5px} .fv-card .btn.fv-add{padding:0 9px 0 7px} }
