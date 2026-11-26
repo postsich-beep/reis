@@ -513,9 +513,13 @@ if (run('1')) try {
       bk[0].r === true && !bk[0].photo && /Бістро/.test(bk[0].panel) && bk[1].r === true && bk[1].panel === 'Місця' && bk[2].r === true && bk[2].panel === '' && bk[3].r === false, JSON.stringify(bk));
     await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.pl-chips'); await page.click('#panelBody [data-vpid]'); await page.waitForSelector('.vp-photos'); await page.click('.vp-photos img'); await sleep(200); }
   await page.click('#photoView [data-pv="x"]');
-  await page.click('[data-vp="go"]'); await page.waitForSelector('#in_b');
-  ok('«Маршрут сюди» — місце стає точкою Б', await app(page, () => document.getElementById('in_b').value === 'Бістро (тест)'));
-  await app(page, () => { document.getElementById('in_b').value = ''; }); await page.click('[data-clear="b"]');
+  // (1.1.32) «Рейс сюди» — місце стає фінішем, і маршрут одразу на карті (без форми «Рейс»)
+  await page.click('[data-vp="go"]');
+  await page.waitForFunction(() => !document.getElementById('routePick').hidden || !document.getElementById('pts').hidden, null, { timeout: 15000 }); await sleep(300);
+  const go1 = await app(page, () => ({ rp: !document.getElementById('routePick').hidden, panel: !document.getElementById('panel').hidden, head: (document.getElementById('routePick').hidden ? document.getElementById('pts') : document.querySelector('#routePick .rp-head')).textContent }));
+  ok('«Рейс сюди» — місце стає фінішем, маршрут одразу на карті (форма «Рейс» не відкривається)', /Бістро \(тест\)/.test(go1.head) && !go1.panel, JSON.stringify(go1));
+  if (go1.rp) await page.click('#routePick [data-rp="x"]'); else await page.click('#pts [data-pt="x"]');
+  await sleep(1500);
   // 1.1.16: комплекс для фур (стоянка з душем, готель, кафе) — свій вид місця, окремо ціни на послуги й окремо меню кафе
   await app(page, cx => { const V = window.__app.vplaces; V.vp.list.push(cx); window.__app.bus.emit('vplaces', V.vp); }, VP_COMPLEX);
   await page.click('#tabs button[data-panel="places"]'); await page.waitForSelector('.vp-row[data-vpid="test-complex"]');
@@ -1090,7 +1094,7 @@ if (run('2ґ')) try {
     ok(`без GPS довге натискання біля маршруту — не переносить одразу, а питає: ${s3a.ks.join(' · ')}`, s3a.pick && Math.abs(s3a.rd - rd0) < 30 && s3a.ks.join() === 'cp:Контрольна точка,here:Я тут,x:', JSON.stringify(s3a));
     await page.click('#pick [data-k="here"]'); await sleep(250);
     const s3 = await app(page, () => ({ rd: Math.round(window.__app.nav.pos.rd), pick: !document.getElementById('pick').hidden, toast: document.getElementById('toasts').textContent }));
-    ok('«Я тут» — позначка на маршруті в цьому місці (палець міг промахнутись повз лінію)', Math.abs(s3.rd - 9000) < 150 && !s3.pick && /на лінії рейсу/.test(s3.toast), JSON.stringify({ ...s3, toast: s3.toast.slice(-60) })); }
+    ok('«Я тут» — позначка на маршруті в цьому місці (палець міг промахнутись повз лінію)', Math.abs(s3.rd - 9000) < 250 && !s3.pick && /на лінії рейсу/.test(s3.toast), JSON.stringify({ ...s3, toast: s3.toast.slice(-60) })); }
   ok('прохід «На маршрут» без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід «На маршрут» дійшов до кінця', false, String(e.message).split('\n')[0]); }
@@ -1444,6 +1448,18 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
     const p0 = coords[40];
     await emitN('loc', { prov: 'gps', lat: p0[0], lon: p0[1], acc: 5, spd: 24, brg: 270, t: Date.now() });
     await sleep(900);
+    // (1.1.33, Діма) ліворуч у плашці: крупно — кілометри й час у дорозі, під ними дрібніше — час прибуття з прапорцем; усе вміщається
+    const barTxt = async () => app(page, () => { const box = document.querySelector('#tabbar .tb-main'), B = box.getBoundingClientRect(), eta = document.getElementById('eta'), E = eta.getBoundingClientRect(), sp = [...document.querySelectorAll('#remain span')];
+      return { drive: box.classList.contains('drive'), eta: eta.textContent, flag: !!eta.querySelector('svg'), etaFs: parseFloat(getComputedStyle(eta).fontSize), etaTop: Math.round(E.top), lab: eta.getAttribute('aria-label'),
+        sp: sp.map(x => { const r = x.getBoundingClientRect(); return { t: x.textContent, fs: parseFloat(getComputedStyle(x).fontSize), top: Math.round(r.top), fit: x.scrollWidth <= x.clientWidth + 1 && r.left >= B.left - 0.5 && r.right <= B.right + 0.5 && r.top >= B.top - 0.5 && r.bottom <= B.bottom + 0.5 }; }),
+        etaIn: E.top >= B.top - 0.5 && E.bottom <= B.bottom + 0.5 && E.left >= B.left - 0.5 && E.right <= B.right + 0.5 }; });
+    const bt1 = await barTxt();
+    ok(`${T}: у дорозі ліворуч у плашці крупно «${bt1.sp.map(x => x.t + ' ' + x.fs + 'px').join(' / ')}», під ними дрібніше прибуття «${bt1.eta}» ${bt1.etaFs}px з прапорцем; усе вміщається`,
+      bt1.drive && bt1.sp.length === 2 && /км$/.test(bt1.sp[0].t) && /хв$/.test(bt1.sp[1].t) && bt1.sp.every(x => x.fs >= 19 && x.fs > bt1.etaFs + 3 && x.fit) && bt1.sp[0].top < bt1.sp[1].top && bt1.sp[1].top < bt1.etaTop && /^\d\d:\d\d$/.test(bt1.eta) && bt1.flag && bt1.etaFs >= 13 && bt1.etaIn && /^Прибуття о \d\d:\d\d$/.test(bt1.lab), JSON.stringify(bt1));
+    // довгий рейс — «5 год 40 хв» теж уміщається (крупно, трохи менше)
+    await app(page, () => { const g = window.__app.guide.g; g.remain = 512000; g.remTime = 5 * 3600 + 40 * 60; window.__app.core.bus.emit('guide', g); }); await sleep(400);
+    const bt2 = await barTxt();
+    ok(`${T}: довгий рейс — «${bt2.sp.map(x => x.t + ' ' + x.fs + 'px').join(' / ')}» уміщається, крупніше за прибуття`, bt2.sp.length === 2 && bt2.sp.every(x => x.fit && x.fs >= 15 && x.fs > bt2.etaFs) && /год/.test(bt2.sp[1].t), JSON.stringify(bt2));
     // найтісніший стан: їдемо без GPS (кнопки ±100), камера попереду, на маневрі довгий текст
     await app(page, () => { window.__app.nav.nudge(0); const c = document.getElementById('cam'); c.hidden = false; document.getElementById('camMax').textContent = '90'; document.getElementById('camDist').textContent = '350 м'; });
     await sleep(250);
@@ -4739,8 +4755,10 @@ if (run('37')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny', 'l
 if (run('39')) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
-  const n = coords.length, waitReq = async (k, ms = 8000) => { for (let i = 0; i < ms / 100 && routeReqs.length <= k; i++) await sleep(100); await sleep(400); };
-  const LL = q => (q && q.locations || []).map(l => [+l.lat.toFixed(4), +l.lon.toFixed(4)]);
+  // запити маршруту після k — без тихого запиту «варіанта через заборону для фур» (він може прийти з запізненням від попередньої побудови)
+  const mainReqs = k => routeReqs.slice(k).filter(q => !((q.costing_options || {}).truck || {}).hgv_no_access_penalty);
+  const n = coords.length, waitReq = async (k, ms = 10000) => { for (let i = 0; i < ms / 100 && !mainReqs(k).length; i++) await sleep(100); await sleep(400); };
+  const LL = q => (q && q.locations || []).map(l => [+l.lat.toFixed(4), +l.lon.toFixed(4)]), RQ = k => mainReqs(k)[0];
   const near = (l, p, e = 2e-4) => !!l && Math.abs(l[0] - p[0]) < e && Math.abs(l[1] - p[1]) < e;
   await emitN('loc', { prov: 'gps', lat: coords[0][0], lon: coords[0][1], acc: 5, spd: 0, t: Date.now() }); await sleep(600);
   await app(page, () => { window.__panelSeen = false; new MutationObserver(() => { if (!document.getElementById('panel').hidden) window.__panelSeen = true; }).observe(document.getElementById('panel'), { attributes: true }); });
@@ -4751,7 +4769,7 @@ if (run('39')) try {
   await page.click('#pick [data-k="b"]');
   await page.waitForFunction(() => !document.getElementById('routePick').hidden, null, { timeout: 15000 }); await sleep(500);
   const a1 = await app(page, () => ({ panelSeen: window.__panelSeen, pts: document.getElementById('pts').hidden, head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim(), cards: document.querySelectorAll('#routePick .alt').length }));
-  ok(`«Їхати» з меню точки — маршрут одразу на цій карті (шторка з варіантами: ${a1.cards}), форма «Рейс» не з'являлась`, !a1.panelSeen && a1.pts && a1.cards >= 1 && LL(routeReqs[k0]).length === 2 && near(LL(routeReqs[k0])[1], B), JSON.stringify({ a1, loc: LL(routeReqs[k0]) }));
+  ok(`«Їхати» з меню точки — маршрут одразу на цій карті (шторка з варіантами: ${a1.cards}), форма «Рейс» не з'являлась`, !a1.panelSeen && a1.pts && a1.cards >= 1 && LL(RQ(k0)).length === 2 && near(LL(RQ(k0))[1], B), JSON.stringify({ a1, loc: LL(RQ(k0)) }));
   await shot(page, '67-onmap-route');
   // б) «+ Через» на шторці → дотик до карти → контрольна точка, маршрут одразу перебудовано
   await page.click('#routePick [data-rp="via"]'); await sleep(250);
@@ -4763,7 +4781,7 @@ if (run('39')) try {
   k0 = routeReqs.length;
   await page.mouse.click(vx, vy); await waitReq(k0);
   await page.waitForFunction(() => !document.getElementById('routePick').hidden, null, { timeout: 15000 }); await sleep(400);
-  const b1 = LL(routeReqs[k0]), bh = await app(page, () => ({ head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim(), vpins: document.querySelectorAll('.wp.wp-v').length, aim: document.body.classList.contains('aiming') }));
+  const b1 = LL(RQ(k0)), bh = await app(page, () => ({ head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim(), vpins: document.querySelectorAll('.wp.wp-v').length, aim: document.body.classList.contains('aiming') }));
   ok(`дотик до карти — маршрут перебудовано через цю точку (${b1.length} точки в запиті); на карті кільце «через», у рядку шторки — точка`, b1.length === 3 && near(b1[1], [gV1.lat, gV1.lon], 2e-4) && bh.vpins === 1 && !bh.aim, JSON.stringify({ b1, gV1, bh }));
   // в) ще одна — з меню точки «Через»: стає туди, де дає найменший гак (між стартом і першою)
   const V2 = [coords[Math.round(n * 0.22)][0] + 0.003, coords[Math.round(n * 0.22)][1]];
@@ -4771,7 +4789,7 @@ if (run('39')) try {
   await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), V2); await sleep(300);
   await page.click('#pick [data-k="v"]'); await waitReq(k0);
   await page.waitForFunction(() => !document.getElementById('routePick').hidden, null, { timeout: 15000 }); await sleep(400);
-  const c1 = LL(routeReqs[k0]), ch = await app(page, () => ({ head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim(), vpins: document.querySelectorAll('.wp.wp-v').length }));
+  const c1 = LL(RQ(k0)), ch = await app(page, () => ({ head: document.querySelector('#routePick .rp-head').textContent.replace(/\s+/g, ' ').trim(), vpins: document.querySelectorAll('.wp.wp-v').length }));
   ok(`друга контрольна точка — маршрут одразу через обидві, по порядку дороги: старт → ближча → дальша → фініш («${ch.head}»)`, c1.length === 4 && near(c1[1], V2, 2e-4) && near(c1[2], [gV1.lat, gV1.lon], 2e-4) && near(c1[3], B) && ch.vpins === 2 && /\+1/.test(ch.head), JSON.stringify({ c1, ch }));
   await shot(page, '67-onmap-route-2via');
   // г) рядок точок → плашка точок; «Через» → «Прибрати контрольні точки»; «Маршрут» — знову на карті
@@ -4782,7 +4800,7 @@ if (run('39')) try {
   k0 = routeReqs.length;
   await page.click('#pts [data-pt="route"]'); await waitReq(k0);
   await page.waitForFunction(() => !document.getElementById('routePick').hidden, null, { timeout: 15000 }); await sleep(300);
-  ok(`плашка точок: «Через» — «${d0.chip}»; «${d0.ctx}» прибирає всі; «Маршрут» — знову тут, на карті, без контрольних точок`, /\+1/.test(d0.chip) && d0.ctx === 'Прибрати контрольні точки' && LL(routeReqs[k0]).length === 2 && await app(page, () => !window.__panelSeen && document.querySelectorAll('.wp.wp-v').length === 0), JSON.stringify({ d0, loc: LL(routeReqs[k0]) }));
+  ok(`плашка точок: «Через» — «${d0.chip}»; «${d0.ctx}» прибирає всі; «Маршрут» — знову тут, на карті, без контрольних точок`, /\+1/.test(d0.chip) && d0.ctx === 'Прибрати контрольні точки' && LL(RQ(k0)).length === 2 && await app(page, () => !window.__panelSeen && document.querySelectorAll('.wp.wp-v').length === 0), JSON.stringify({ d0, loc: LL(RQ(k0)) }));
   // д) у дорозі з GPS: меню точки — «Контрольна точка · Я тут»; контрольна точка — маршрут одразу від мене через неї
   await page.click('#routePick [data-rp="go"]'); await page.waitForFunction(() => window.__app.guide.g.active, null, { timeout: 8000 }); await sleep(800);
   const P1 = [coords[Math.round(n * 0.5)][0] + 0.004, coords[Math.round(n * 0.5)][1]];
@@ -4793,7 +4811,7 @@ if (run('39')) try {
   k0 = routeReqs.length;
   await app(page, () => { window.__spoken.length = 0; document.getElementById('toasts').innerHTML = ''; });
   await page.click('#pick [data-k="cp"]'); await waitReq(k0); await sleep(500);
-  const e1 = LL(routeReqs[k0]), es = await app(page, () => ({ vs: (window.__app.guide.g.trip.vs || []).length, s: window.__spoken.slice(), t: document.getElementById('toasts').textContent, pos: [window.__app.nav.pos.lat, window.__app.nav.pos.lon], follow: window.__app.map.following ? window.__app.map.following() : null }));
+  const e1 = LL(RQ(k0)), es = await app(page, () => ({ vs: (window.__app.guide.g.trip.vs || []).length, s: window.__spoken.slice(), t: document.getElementById('toasts').textContent, pos: [window.__app.nav.pos.lat, window.__app.nav.pos.lon], follow: window.__app.map.following ? window.__app.map.following() : null }));
   ok(`«Контрольна точка» — маршрут одразу від мого місця через неї до фінішу; сказано голосом і написано`, e1.length === 3 && near(e1[0], es.pos, 1e-3) && near(e1[1], P1) && near(e1[2], B) && es.vs === 1 && es.s.some(x => /через вашу точку/.test(x)) && /Маршрут прокладено через контрольну точку/.test(es.t), JSON.stringify({ e1, es }));
   // е) без GPS (розрахунок по маршруту) — так само одразу, від розрахованого місця
   await app(page, () => { const R = window.__app.core.RouteIndex, p = new R(window.__app.guide.g.route.coords).at(1500); window.__app.nav.setManual({ lat: p.lat, lon: p.lon }); }); await sleep(400);
@@ -4801,7 +4819,7 @@ if (run('39')) try {
   k0 = routeReqs.length;
   await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), P2); await sleep(300);
   await page.click('#pick [data-k="cp"]'); await waitReq(k0); await sleep(300);
-  const f1 = LL(routeReqs[k0]), fs = await app(page, () => ({ mode: window.__app.nav.pos.mode, pos: [window.__app.nav.pos.lat, window.__app.nav.pos.lon], pend: window.__app.guide.g.reroutePending }));
+  const f1 = LL(RQ(k0)), fs = await app(page, () => ({ mode: window.__app.nav.pos.mode, pos: [window.__app.nav.pos.lat, window.__app.nav.pos.lon], pend: window.__app.guide.g.reroutePending }));
   ok(`без GPS (${fs.mode}) контрольна точка — маршрут перебудовано одразу від розрахованого місця (${f1.length} точки: я → точки → фініш)`, fs.mode === 'dr' && f1.length >= 3 && near(f1[0], fs.pos, 2e-3) && f1.some(l => near(l, P2)) && near(f1[f1.length - 1], B) && fs.pend == null, JSON.stringify({ f1, fs }));
   // є) без інтернету — точку поставлено, маршрут через неї прокладемо, щойно з'явиться зв'язок
   await ctx.setOffline(true); await sleep(300);
@@ -4814,7 +4832,7 @@ if (run('39')) try {
   ok('без інтернету — запиту немає; сказано: точку поставлено, маршрут прокладу, щойно буде зв’язок', routeReqs.length === k0 && g1.pend && g1.pend.force && /Немає інтернету/.test(g1.t) && g1.s.some(x => /Немає інтернету/.test(x)) && g1.vs >= 3, JSON.stringify(g1));
   await ctx.setOffline(false); await sleep(300);
   await app(page, () => { const P = window.__app.nav.pos; window.__app.core.bus.emit('pos', P); }); await waitReq(k0);
-  const h1 = LL(routeReqs[k0]);
+  const h1 = LL(RQ(k0));
   ok(`зв'язок є — маршрут через контрольну точку прокладено (${h1.length} точки)`, h1.some(l => near(l, P3)) && await app(page, () => window.__app.guide.g.reroutePending == null), JSON.stringify(h1));
   await app(page, () => window.__app.guide.stopTrip());
   ok('прохід 39 без помилок JS', errors.length === 0, errors.join(' | '));

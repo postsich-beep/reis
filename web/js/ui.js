@@ -376,10 +376,24 @@ function hud() {
   if (g.arrived) { parts = t('tripDone').split(' '); sep = ' '; }
   else if (g.active && g.route) { clock = new Date(g.eta); parts = [fmtDist(g.remain), fmtDur(g.remTime)]; }
   else if (plan.trip && plan.trip.route) { const r = plan.trip.route; parts = [fmtDist(r.dist), fmtDur(r.time), t('previewReady')]; pre = true; }
-  $('eta').textContent = fmtClock(clock); if ($('eta').hidden !== pre) $('eta').hidden = pre;
+  // (1.1.33, Діма) у дорозі крупно — кілометри й час у дорозі (їх видно на ходу), час прибуття — дрібніше, під ними, з прапорцем фінішу
+  const drive = !!(g.active && g.route && !g.arrived), tm = $('eta').parentNode, eta = $('eta'), ek = (drive ? 'd' : '') + fmtClock(clock);
+  if (tm.classList.contains('drive') !== drive) { tm.classList.toggle('drive', drive); requestAnimationFrame(fitRemain); }
+  if (eta.dataset.k !== ek) { eta.dataset.k = ek; eta.innerHTML = drive ? ETA_FLAG + `<span>${fmtClock(clock)}</span>` : fmtClock(clock); if (drive) eta.setAttribute('aria-label', t('etaAria', fmtClock(clock))); else eta.removeAttribute('aria-label'); }
+  if (eta.hidden !== pre) eta.hidden = pre;
   const key = parts.join('|'), rm = $('remain');
-  if (rm.dataset.k !== key) { rm.dataset.k = key; rm.innerHTML = parts.map(x => `<span>${esc(x)}</span>`).join(`<i>${sep}</i>`); requestAnimationFrame(layoutVars); }
+  if (rm.dataset.k !== key) { rm.dataset.k = key; rm.innerHTML = parts.map(x => `<span>${esc(x)}</span>`).join(`<i>${sep}</i>`); requestAnimationFrame(() => { fitRemain(); layoutVars(); }); }
 }
+const ETA_FLAG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V3.5M6 4.5h11.5l-2.8 3.8 2.8 3.8H6"/></svg>';
+// крупні «км» і «год хв» мають уміститися в ширину: «5 год 40 хв» трохи зменшуємо (не менше 15 пікселів), коротке — як є
+function fitRemain() {
+  for (const sp of document.querySelectorAll('#remain span')) {
+    sp.style.fontSize = ''; if (!sp.closest('.drive')) continue;
+    let fs = parseFloat(getComputedStyle(sp).fontSize) || 22;
+    while (sp.scrollWidth > sp.clientWidth + 0.5 && fs > 15) { fs -= 1; sp.style.fontSize = fs + 'px'; }
+  }
+}
+window.addEventListener('resize', () => requestAnimationFrame(fitRemain));
 
 /* ---------- рейс без «Поїхали»: водій побудував маршрут і просто поїхав ним — вмикаємо ведення самі ---------- */
 let followSince = 0, followHint = 0;
