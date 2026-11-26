@@ -49,10 +49,10 @@ export function search(q, limit = 8) {
     else if (nq.length >= 3 && (a.includes(' ' + nq) || a.includes('-' + nq) || (b && b.includes(' ' + nq)))) s = 1;
     if (!s) continue;
     const r = pl.rows[i];
-    hits.push([s * 10 + KR[r[2]] * 3 + Math.min(3, Math.log10(1 + r[6]) / 2), i]);
+    hits.push([s * 10 + KR[r[2]] * 3 + Math.min(3, Math.log10(1 + r[6]) / 2), i, s]);
   }
   hits.sort((x, y) => y[0] - x[0]);
-  return hits.slice(0, limit).map(h => toPlace(pl.rows[h[1]]));
+  return hits.slice(0, limit).map(h => ({ ...toPlace(pl.rows[h[1]]), m: h[2] }));          // m: 3 — назва збігається, 2 — починається з набраного, 1 — слово всередині
 }
 
 // Найближчий помітний населений пункт: місто чи селище в межах 25 км, інакше будь-який у межах 8 км.

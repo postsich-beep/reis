@@ -8,7 +8,7 @@ import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnaps
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages } from './route.js';
+import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages, viasOf, viaSlot, VIA_MAX } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
@@ -376,10 +376,24 @@ function hud() {
   if (g.arrived) { parts = t('tripDone').split(' '); sep = ' '; }
   else if (g.active && g.route) { clock = new Date(g.eta); parts = [fmtDist(g.remain), fmtDur(g.remTime)]; }
   else if (plan.trip && plan.trip.route) { const r = plan.trip.route; parts = [fmtDist(r.dist), fmtDur(r.time), t('previewReady')]; pre = true; }
-  $('eta').textContent = fmtClock(clock); if ($('eta').hidden !== pre) $('eta').hidden = pre;
+  // (1.1.33, Діма) у дорозі крупно — кілометри й час у дорозі (їх видно на ходу), час прибуття — дрібніше, під ними, з прапорцем фінішу
+  const drive = !!(g.active && g.route && !g.arrived), tm = $('eta').parentNode, eta = $('eta'), ek = (drive ? 'd' : '') + fmtClock(clock);
+  if (tm.classList.contains('drive') !== drive) { tm.classList.toggle('drive', drive); requestAnimationFrame(fitRemain); }
+  if (eta.dataset.k !== ek) { eta.dataset.k = ek; eta.innerHTML = drive ? ETA_FLAG + `<span>${fmtClock(clock)}</span>` : fmtClock(clock); if (drive) eta.setAttribute('aria-label', t('etaAria', fmtClock(clock))); else eta.removeAttribute('aria-label'); }
+  if (eta.hidden !== pre) eta.hidden = pre;
   const key = parts.join('|'), rm = $('remain');
-  if (rm.dataset.k !== key) { rm.dataset.k = key; rm.innerHTML = parts.map(x => `<span>${esc(x)}</span>`).join(`<i>${sep}</i>`); requestAnimationFrame(layoutVars); }
+  if (rm.dataset.k !== key) { rm.dataset.k = key; rm.innerHTML = parts.map(x => `<span>${esc(x)}</span>`).join(`<i>${sep}</i>`); requestAnimationFrame(() => { fitRemain(); layoutVars(); }); }
 }
+const ETA_FLAG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 21V3.5M6 4.5h11.5l-2.8 3.8 2.8 3.8H6"/></svg>';
+// крупні «км» і «год хв» мають уміститися в ширину: «5 год 40 хв» трохи зменшуємо (не менше 15 пікселів), коротке — як є
+function fitRemain() {
+  for (const sp of document.querySelectorAll('#remain span')) {
+    sp.style.fontSize = ''; if (!sp.closest('.drive')) continue;
+    let fs = parseFloat(getComputedStyle(sp).fontSize) || 22;
+    while (sp.scrollWidth > sp.clientWidth + 0.5 && fs > 15) { fs -= 1; sp.style.fontSize = fs + 'px'; }
+  }
+}
+window.addEventListener('resize', () => requestAnimationFrame(fitRemain));
 
 /* ---------- рейс без «Поїхали»: водій побудував маршрут і просто поїхав ним — вмикаємо ведення самі ---------- */
 let followSince = 0, followHint = 0;
@@ -405,7 +419,7 @@ function whereHtml() {
   const ref = e ? e.d : 0;
   towns.sort((a, b) => Math.abs(a.d - ref) - Math.abs(b.d - ref));
   for (const x of towns.slice(0, 7).sort((a, b) => a.d - b.d)) list.push({ d: x.d, name: x.name, sub: fmtDist(x.d) + ' ' + t('fromStart') });
-  if (g.route && g.route.viaD) list.push({ d: g.route.viaD, name: (g.trip.v && g.trip.v.label) || t('via'), sub: fmtDist(g.route.viaD) + ' ' + t('fromStart') });
+  if (g.route) { const vs = viasOf(g.trip).slice(g.route.viaBase || 0); (g.route.viaDs || (g.route.viaD != null ? [g.route.viaD] : [])).forEach((vd, k) => { if (vd) list.push({ d: vd, name: (vs[k] && vs[k].label) || t('via'), sub: fmtDist(vd) + ' ' + t('fromStart') }); }); }
   return `<div class="ly-head">${t('whereTitle')}</div>` + list.map(x => `<button class="ly-row" data-d="${x.d}"><span class="grow">${esc(x.name)}<small class="muted" style="display:block;font-size:13px">${esc(x.sub)}</small></span></button>`).join('') +
     `<div class="muted" style="margin:6px 4px 2px;font-size:13px">${t('whereHint')}</div>`;
 }
@@ -438,7 +452,8 @@ function stripUpdate() {
 }
 
 /* =====================  ПАНЕЛЬ «РЕЙС»  ===================== */
-const plan = { a: null, v: null, b: null, trip: null, busy: false, err: '', sugg: [], field: null, regBusy: false, off: null, routes: [], sel: 0 };
+// (1.1.32) контрольних точок може бути кілька: plan.vs; plan.v — перша (її показує поле «Через» у формі)
+const plan = { a: null, vs: [], get v() { return this.vs[0] || null; }, set v(p) { this.vs = p ? [p, ...this.vs.slice(1)] : this.vs.slice(1); }, b: null, trip: null, busy: false, err: '', sugg: [], field: null, regBusy: false, off: null, routes: [], sel: 0 };
 let geoTimer = null;
 
 function summaryHtml(trip) {
@@ -582,7 +597,7 @@ function saveCurrentTrip() {
   const tr = plan.trip; if (!tr) return;
   if (tr.route) delete tr.route.alts;
   plan.routes = []; saveTrip(tr); toast(t('saved'), 'green', 4000);
-  plan.trip = null; plan.a = plan.v = plan.b = null; pickHide(); previewRoute(null); previewAlts(null); mapM.previewPoints(null); hud(); openPanel('trip');
+  plan.trip = null; plan.a = plan.b = null; plan.vs = []; pickHide(); previewRoute(null); previewAlts(null); mapM.previewPoints(null); hud(); openPanel('trip');
 }
 function saveTripTap() {
   if (plan.busy) return;
@@ -600,7 +615,7 @@ function archiveHtml() {
 }
 function openSavedTrip(id) {
   const tr = getTrips().find(x => x.id === id); if (!tr || !tr.route) return;
-  plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.v = tr.v; plan.b = tr.b; plan.off = null;
+  plan.routes = []; plan.sel = 0; plan.trip = tr; plan.a = tr.a; plan.vs = viasOf(tr).slice(); plan.b = tr.b; plan.off = null;
   mapM.previewPoints(tr); previewRoute(tr.route.coords, tr.route); hud(); openPanel('trip'); loadRegions(tr);
 }
 function archClicks(e) {
@@ -716,7 +731,7 @@ function rpMarksToggle(b) {
 function pickHtml() {
   const tr = plan.trip;
   return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
-    <div class="rp-head">${ptTag('a', 'rp-t')}<b>${esc(tr.a.label || '')}</b>${tr.v ? `${ptTag('v', 'rp-t')}<b>${esc(tr.v.label || '')}</b>` : ''}${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
+    <div class="rp-head"><button class="rp-pts" data-rp="pts" aria-label="${t('rpEditPts')}">${ptTag('a', 'rp-t')}<b>${esc(tr.a.label || '')}</b>${viasOf(tr).length ? `${ptTag('v', 'rp-t')}<b>${esc(viasOf(tr)[0].label || '')}${viasOf(tr).length > 1 ? ' +' + (viasOf(tr).length - 1) : ''}</b>` : ''}${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</button><button class="rp-addv${viaArm ? ' on' : ''}" data-rp="via" aria-pressed="${viaArm}" aria-label="${t('rpAddViaFull')}">${ICON.plus}<span>${t('rpAddVia')}</span></button></div>
     ${vehMiniHtml()}${pickWarnHtml()}${altCardsHtml(true).replace('class="alts ', 'class="alts rp-cards ')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
 }
@@ -747,7 +762,15 @@ function pickFit() {
   const tp = $('top'), top = (tp.hidden ? 0 : tp.getBoundingClientRect().bottom) + 24, bottom = box.getBoundingClientRect().height + 34;
   fitRoutes(plan.routes.map(r => r.coords), top, bottom, zoomPad(box));
 }
-function pickHide() { const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
+function pickHide() { viaArmSet(false); const box = $('routePick'); if (!box.hidden) { box.hidden = true; freeView(); } }
+// (1.1.32) «+ Через» на шторці маршруту: наступний дотик до карти — ще одна контрольна точка, маршрут одразу перебудовується тут же
+let viaArm = false;
+function viaArmSet(on) {
+  if (viaArm === on) return; viaArm = on;
+  mapM.setTapHook(on ? p => { viaArmSet(false); ptsSet('v', p); } : null);
+  const b = document.querySelector('#routePick .rp-addv'); if (b) { b.classList.toggle('on', on); b.setAttribute('aria-pressed', String(on)); }
+  if (on) toast(t('rpAddViaHint'), '', 6000);
+}
 function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); hud(); setFollow(true); }   // скасували — карта знову за машиною
 /* ---------- (1.1.28) новий маршрут у дорозі: кілька варіантів на вибір ---------- */
 // Водій з'їхав із рейсу й вибрав «Новий маршрут» — показуємо всі варіанти звідси: для фури («суворо»), дорогами загального користування
@@ -893,7 +916,7 @@ const ptBtnsHtml = (short = false) => { const go = startIsMe() ? 'ptGoHere' : 'p
   <button class="btn pri pt-b pt-go" data-k="b"${al(go)}>${ptTag('b', 'rp-t')}${lb(go)}</button>`; };
 const ptsMe = () => startIsMe() && pos.lat != null ? { lat: pos.lat, lon: pos.lon } : null;
 function ptsDist() {
-  const pts = [startIsMe() ? ptsMe() : plan.a, plan.v, plan.b].filter(Boolean); if (pts.length < 2) return null;
+  const pts = [startIsMe() ? ptsMe() : plan.a, ...plan.vs, plan.b].filter(Boolean); if (pts.length < 2) return null;
   const legs = []; for (let i = 1; i < pts.length; i++) legs.push(hav(pts[i - 1], pts[i]));
   return { legs, total: legs.reduce((a, b) => a + b, 0), fromMe: startIsMe() };
 }
@@ -907,29 +930,33 @@ function ptsOpen(arm, form) {
 function ptsRender() {
   if (!pm) return;
   const box = $('pts'), d = ptsDist(), me = ptsMe(), arm = pm.arm, isMe = startIsMe();
-  const chip = k => { const p = k === 'a' && isMe ? null : plan[k], txt = p ? p.label : k === 'a' ? t(me ? 'myPlace' : 'ptNoGps') : t(k === 'v' ? 'ptViaNo' : 'ptNotSet');
+  const chip = k => { const p = k === 'a' && isMe ? null : plan[k], txt = p ? p.label + (k === 'v' && plan.vs.length > 1 ? ' +' + (plan.vs.length - 1) : '') : k === 'a' ? t(me ? 'myPlace' : 'ptNoGps') : t(k === 'v' ? 'ptViaNo' : 'ptNotSet');
     return `<button class="pt-chip${arm === k ? ' on' : ''}${p || (k === 'a' && me) ? ' set' : ''}" data-pt="${k}" aria-label="${t(PT_NAME[k])}" aria-pressed="${arm === k}">${ptTag(k, 'rp-t')}<span><small>${t(PT_NAME[k])}</small><b>${esc(txt)}</b></span></button>`; };
   const sum = d ? (d.legs.length > 1 ? d.legs.map(x => fmtDist(x)).join(' + ') + ' = ' : '') + `<b>${fmtDist(d.total)}</b> ${t('ptStraight')}` + (d.fromMe ? ' · ' + t('ptFromMe') : '') : t('ptIdleHint');
-  const any = !isMe || plan.v || plan.b;
+  const any = !isMe || plan.vs.length || plan.b;
   // що зробить наступний дотик до карти — і (для старту) другий спосіб: «з мого місця»
   const armLine = arm ? `<div class="pt-arm ${arm}" id="ptArm">${ICON.pin}<span>${t('ptArmHint', t(PT_NAME[arm]).toLowerCase())}</span></div>` : '';
   // та сама пара, що й у формі «Рейс»: «З мого місця» (зелена, коли вибрано) — або дотик до карти
   const ctx = arm === 'a' ? `<button class="btn pt-ctx${isMe ? ' on' : ''}" data-pt="me" aria-pressed="${isMe}">${ICON.here}<span>${t('ptFromMeBtn')}</span></button>`
-    : arm === 'v' && plan.v ? `<button class="btn pt-ctx" data-pt="del">${ICON.x}<span>${t('ptViaDel')}</span></button>` : '';
+    : arm === 'v' && plan.vs.length ? `<button class="btn pt-ctx" data-pt="del">${ICON.x}<span>${t(plan.vs.length > 1 ? 'ptViaDelAll' : 'ptViaDel')}</span></button>` : '';
   box.innerHTML = `<div class="aim-bar pt-bar">
     <div class="pt-chips">${chip('a')}${chip('v')}${chip('b')}</div>
     <div class="pt-mid"><div class="pt-sum" id="ptSum">${sum}</div>
       ${any ? `<button class="pt-ic" data-pt="reset" aria-label="${t('ptReset')}">${ICON.trash}</button>` : ''}<button class="pt-ic" data-pt="x" aria-label="${t('close')}">${ICON.x}</button></div>
     ${armLine}
-    <div class="row">${ctx}<button class="btn dark" data-pt="route" ${plan.b ? '' : 'disabled'}>${ICON.route}${t('ptRoute')}</button></div></div>`;
-  mapM.planPoints({ a: isMe ? null : plan.a, v: plan.v, b: plan.b, me });
+    <div class="row">${ctx}<button class="btn dark" data-pt="route" ${plan.b && !plan.busy ? '' : 'disabled'}>${ICON.route}${t(plan.busy ? 'building' : 'ptRoute')}</button></div></div>`;
+  mapM.planPoints({ a: isMe ? null : plan.a, vs: plan.vs, b: plan.b, me });
   mapM.setTapHook(arm ? p => ptsPlace(p) : null);            // дотик до карти ставить точку лише тоді, коли вона цього чекає
   requestAnimationFrame(layoutVars);
 }
 function ptsPut(k, p) {
   const pt = { lat: p.lat, lon: p.lon, label: p.label || p.lat.toFixed(5) + ', ' + p.lon.toFixed(5) };
-  plan[k] = pt; plan.trip = null; plan.routes = [];
-  if (!p.label) reverse(p.lat, p.lon).then(r => { if (r && plan[k] === pt) { pt.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || pt.label; const i = $('in_' + k); if (i) i.value = pt.label; ptsRender(); } }).catch(() => {});
+  if (k === 'v') {           // (1.1.32) ще одна контрольна точка — туди, де вона дає найменший гак
+    if (plan.vs.length >= VIA_MAX) { toast(t('viaMax', VIA_MAX), 'yellow', 5000); return null; }
+    const list = plan.vs.slice(); list.splice(plan.b ? viaSlot(startIsMe() ? ptsMe() : plan.a, list, plan.b, pt) : list.length, 0, pt); plan.vs = list;
+  } else plan[k] = pt;
+  plan.trip = null; plan.routes = [];
+  if (!p.label) reverse(p.lat, p.lon).then(r => { if (r && (plan[k] === pt || plan.vs.includes(pt))) { pt.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || pt.label; const i = $('in_' + k); if (i && plan[k] === pt) i.value = pt.label; ptsRender(); if (plan.trip && !$('routePick').hidden) pickShow(); } }).catch(() => {});
   return pt;
 }
 // після старту логічно одразу вказати фініш; без GPS після фінішу — старт. В інших випадках ніщо не чекає дотику.
@@ -939,8 +966,23 @@ function ptsPlace(p) {
   const k = pm.arm; ptsPut(k, p); P.vibrate(40);
   pm.arm = ptsNextArm(k); ptsRender();
 }
-/** Точку вибрано з картки на карті (довге натискання, піт-стоп, позначка): ставимо й лишаємось на карті з плашкою точок. */
-function ptsSet(k, p) { ptsPut(k, p); ptsOpen(ptsNextArm(k)); }
+/** Точку вибрано з картки на карті (довге натискання, піт-стоп, позначка). (1.1.32) Є фініш і зрозуміло, звідки, — маршрут одразу
+ *  прокладається тут, на карті (шторка з варіантами), без форми «Рейс»; ще одна точка «Через» — маршрут перебудовується. Інакше —
+ *  плашка точок на карті чекає, доки вкажуть решту. */
+function ptsSet(k, p) {
+  if (!ptsPut(k, p)) return;
+  if (plan.b && ptsHasStart()) { mapBuild(); return; }
+  ptsOpen(ptsNextArm(k));
+}
+const ptsHasStart = () => startIsMe() ? pos.lat != null : !!plan.a;
+// Прокласти маршрут тут, на карті: плашка точок показує «Прокладаю маршрут…», потім — шторка з варіантами. Помилка — на плашці й повідомленням.
+async function mapBuild() {
+  if (plan.busy) return;
+  if (!plan.b) { ptsOpen('b'); return; }
+  if (!ptsHasStart()) { ptsOpen('a'); toast(t('ptNeedStart'), 'yellow', 6000); return; }
+  plan.onMap = true; ptsOpen(null);
+  await doBuild();
+}
 function ptsEnd(back) {
   if (!pm) return;
   const form = pm.form; pm = null; $('pts').hidden = true; $('pts').innerHTML = ''; document.body.classList.remove('pts-on'); mapM.setTapHook(null); mapM.planPoints(null);
@@ -952,9 +994,9 @@ function ptsClick(e) {
   if (k === 'x') { ptsEnd(true); return; }
   if (k === 'a' || k === 'v' || k === 'b') { pm.arm = pm.arm === k ? null : k; ptsRender(); return; }
   if (k === 'me') { plan.a = null; pm.arm = ptsNextArm('a'); ptsRender(); return; }
-  if (k === 'del') { plan.v = null; pm.arm = null; ptsRender(); return; }
-  if (k === 'reset') { plan.a = plan.v = plan.b = null; pm.arm = null; ptsRender(); return; }
-  if (k === 'route') { if (!plan.b) return; ptsEnd(false); openPanel('trip'); doBuild(); }
+  if (k === 'del') { plan.vs = []; pm.arm = null; ptsRender(); return; }
+  if (k === 'reset') { plan.a = plan.b = null; plan.vs = []; pm.arm = null; ptsRender(); return; }
+  if (k === 'route') { if (!plan.b || plan.busy) return; mapBuild(); }
 }
 export const ptsState = () => pm ? { arm: pm.arm, form: pm.form, me: startIsMe(), dist: ptsDist() } : null;
 // Проїжджаємо чужу позначку — «Поліція ще тут?» над самою позначкою
@@ -1034,6 +1076,9 @@ function pickClick(e) {
   if (k === 'marks') { rpMarksToggle(b); return; }
   if (k === 'zin' || k === 'zout') { zoomBy(k === 'zin' ? 1 : -1); return; }
   if (k === 'fit') { pickFit(); return; }
+  if (k === 'via') { viaArmSet(!viaArm); return; }
+  if (k === 'pts') { viaArmSet(false); ptsOpen(null); return; }                // змінити точки: плашка точок на карті, далі «Маршрут»
+  viaArmSet(false);
   if (k === 'go') { pickHide(); goTrip(plan.trip); }
   else if (k === 'save') { const tr = plan.trip; if (tr.route) delete tr.route.alts; saveTrip(tr); toast(t('saved'), 'green', 3000); pickCancel(); }
   else if (k === 'info') { pickHide(); openPanel('trip'); }
@@ -1077,8 +1122,8 @@ async function findPlaces(q) {
 // (1.1.29) «Їхати сюди» з пошуку: старт — моє місце, фініш — знайдене місце; рейс одразу прокладається (з вибором варіанта й виду рейсу)
 export function routeTo(p) {
   if (!p || g.active) return;
-  plan.a = null; plan.v = null; plan.b = { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' }; plan.trip = null; plan.routes = []; plan.sel = 0;
-  openPanel('trip'); doBuild();
+  plan.a = null; plan.vs = []; plan.b = { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' }; plan.trip = null; plan.routes = []; plan.sel = 0;
+  mapBuild();                 // (1.1.32) прокладаємо тут, на карті — без форми «Рейс»
 }
 // Дім і Робота — першими серед недавніх у полях «Рейсу»
 const homeWork = () => ['home', 'work'].map(k => S[k] && S[k].lat != null ? { ...S[k], label: S[k].label, sub: t(k === 'home' ? 'srHome' : 'srWork') + (S[k].sub ? ' · ' + S[k].sub : '') } : null).filter(Boolean);
@@ -1090,14 +1135,14 @@ async function doBuild() {
     const inp = $('in_' + k), txt = inp ? inp.value.trim() : k === 'a' && startIsMe() ? '' : plan[k] ? plan[k].label : '';
     if (txt && (!plan[k] || plan[k].label !== txt)) {
       const r = await findPlaces(txt);
-      if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); plan.saveAfter = false; refresh('trip'); return; }
+      if (r[0]) plan[k] = r[0]; else { plan.err = P.online() ? t('notFound', txt) : t('netErr'); plan.saveAfter = false; refresh('trip'); mapErr(); return; }
     } else if (!txt) plan[k] = null;
   }
   if (startIsMe()) plan.a = pos.lat != null ? { lat: pos.lat, lon: pos.lon, label: t('myPlace'), me: true } : null;   // «моє місце» — щоразу свіже
-  if (!plan.a || !plan.b) { plan.err = t('needAB'); plan.saveAfter = false; refresh('trip'); return; }
-  plan.busy = true; plan.trip = null; plan.off = null; refresh('trip');
+  if (!plan.a || !plan.b) { plan.err = t('needAB'); plan.saveAfter = false; refresh('trip'); mapErr(); return; }
+  plan.busy = true; plan.trip = null; plan.off = null; refresh('trip'); if (pm) ptsRender();
   try {
-    const trip = newTrip(plan.a, plan.v, plan.b);
+    const trip = newTrip(plan.a, plan.vs, plan.b);
     trip.costing = vehKind() === 'strict' ? 'truck' : 'auto';
     if (vehKind() === 'free') trip.free = true;                    // фура дорогами загального користування — на розсуд водія
     const r = await buildRoute(trip, { alternates: 2 });
@@ -1108,6 +1153,7 @@ async function doBuild() {
     loadRegions(trip);
     plan.busy = false;
     if (plan.saveAfter) { plan.saveAfter = false; saveCurrentTrip(); return; }       // «Зберегти рейс» без прокладеного рейсу: проклали — і одразу в архів
+    if (plan.onMap) { plan.onMap = false; ptsEnd(false); }
     closePanel(); pickShow();
     softOffer(trip, r); return;
   } catch (e) {
@@ -1115,8 +1161,10 @@ async function doBuild() {
     plan.err = e.code ? t('routeFail') + ' ' + (e.code === 171 ? t('noEdge') : [170, 442].includes(e.code) ? t('noPath') : (e.message || '')) : t('netErr') + ' ' + (e.message || '');
     log('warn', 'маршрут: ' + e.message);
   }
-  plan.busy = false; plan.saveAfter = false; refresh('trip');
+  plan.busy = false; plan.saveAfter = false; refresh('trip'); mapErr();
 }
+// прокладали на карті й не вийшло — плашка точок лишається (можна поправити точку), причина — повідомленням
+function mapErr() { if (!plan.onMap) return; plan.onMap = false; if (pm) ptsRender(); if (plan.err) toast(plan.err, 'red', 9000); }
 async function goTrip(trip, opts = {}) {
   plan.going = true; pickHide();
   if (trip.route) delete trip.route.alts;
@@ -1129,7 +1177,7 @@ async function goTrip(trip, opts = {}) {
   await startTrip(trip, opts);
   setRouteContext(trip.regions, trip.towns);
   setFollow(true);
-  plan.trip = null; plan.a = plan.v = plan.b = null;
+  plan.trip = null; plan.a = plan.b = null; plan.vs = [];
   plan.going = false;
   if (!trip.regions || !trip.regions.length) loadRegions(trip);
   if (S.offline && P.online() && !offlineActive()) runOffline(trip.route);
@@ -1154,7 +1202,7 @@ function tripClicks(e) {
   else if (d.act === 'go' && plan.trip) goTrip(plan.trip);
   else if (d.act === 'useAlt' && plan.trip && plan.trip.route.alt) {
     const tr = plan.trip, alt = tr.route.alt;
-    alt.aD = null; alt.viaD = tr.route.viaD; alt.detour = 1; tr.costing = 'auto'; tr.free = true; tr.route = alt; tr.regions = []; tr.towns = [];
+    alt.aD = null; alt.viaD = tr.route.viaD; alt.viaDs = tr.route.viaDs; alt.viaBase = tr.route.viaBase; alt.detour = 1; tr.costing = 'auto'; tr.free = true; tr.route = alt; tr.regions = []; tr.towns = [];
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
@@ -1365,32 +1413,45 @@ definePanel('place', {
       else if (k === 'go') {
         const pt = { lat: p.lat, lon: p.lon, label: p.name, sub: [p.road, vpTxt(p.town)].filter(Boolean).join(' · ') };
         if (g.active) { setVia(pt); closePanel(); toast(t('vpViaDone', p.name), 'green', 6000); }
-        else { plan.b = pt; plan.trip = null; plan.routes = []; openPanel('trip'); }
+        else { closePanel(); routeTo(pt); }                       // (1.1.32) маршрут — одразу на карті
       } else if (k === 'setloc') { vpPickFor = p.id; closePanel(); toast(t('vpSetLocHint'), '', 9000); }
     };
   },
   update(body) { if (vpCur) body.innerHTML = placeHtml(vpCur); }
 });
 
+let cpAsked = false;                 // контрольну точку поставили з меню точки — після перебудови скажемо, що готово
+// назва контрольної точки — з адреси, коли вона відома (без інтернету лишається «Контрольна точка»)
+function cpLabelLater(p) {
+  reverse(p.lat, p.lon).then(r => { if (!r || !g.trip) return; const v = viasOf(g.trip).find(x => x.lat === p.lat && x.lon === p.lon); if (v) { v.label = [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') || v.label; bus.emit('guide', g); } }).catch(() => {});
+}
 function onMapPick(p) {
   if (vpPickFor) { const id = vpPickFor; vpPickFor = null; vpSetLocation(id, p); vpCur = byIdVp(id); toast(t('vpLocSet'), 'green', 5000); openPanel('place'); return; }
-  // Без GPS довге натискання біля маршруту = «я тут, на маршруті»: попадати пальцем точно в лінію на ходу незручно.
+  // Без GPS «Я тут» біля маршруту = «я тут, на маршруті»: попадати пальцем точно в лінію на ходу незручно.
+  // (1.1.32) Раніше таке натискання одразу переносило місце; тепер спершу вибір: «Я тут» чи «Контрольна точка» (водій вирішує сам).
+  let snapD = null;
   if (g.active && g.idx && pos.mode !== 'gps') {
     const l = g.idx.locate(p, null), z = mapM.map ? mapM.map.getZoom() : 12;
     const mpp = 156543 * Math.cos(p.lat * Math.PI / 180) / Math.pow(2, z);          // метрів на піксель
-    if (l && l.off <= Math.max(150, mpp * 70)) { placeAtD(l.d); setFollow(true); toast(t('snapPress'), 'green', 5000); return; }
+    if (l && l.off <= Math.max(150, mpp * 70)) snapD = l.d;
   }
   showPick(p);
   // (1.1.22) Меню точки — один ряд значків: Старт · Через · Їхати сюди · Я тут · ✕. Тло майже прозоре — карту під ним видно.
   // «Я бачив тут душ» звідси прибрано (душ позначають на картці місця: АЗС, стоянка).
   const box = $('pick'); box.hidden = false; box.className = 'pick-pt';
   box.innerHTML = `<div class="pk-cap">${t('pickTitle')} ${p.lat.toFixed(5)}, ${p.lon.toFixed(5)}</div><div class="row pk-row">
-    ${g.active ? '' : ptBtnsHtml(true)}<button class="btn pt-b pt-me" data-k="here" aria-label="${t('iAmHereFull')}">${ptTag('me', 'rp-t')}<span>${t('iAmHere')}</span></button><button class="btn pk-x" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
+    ${g.active ? `<button class="btn pri pt-b pt-cp" data-k="cp" aria-label="${t('cpHereFull')}">${ptTag('v', 'rp-t')}<span>${t('cpHere')}</span></button>` : ptBtnsHtml(true)}<button class="btn pt-b pt-me" data-k="here" aria-label="${t('iAmHereFull')}">${ptTag('me', 'rp-t')}<span>${t('iAmHere')}</span></button><button class="btn pk-x" data-k="x" aria-label="${t('clear')}">${ICON.x}</button></div>`;
   box.onclick = e => {
     const b = e.target.closest('button'); if (!b) return;
     box.hidden = true;
     const k = b.dataset.k; if (k === 'x') { showPick(null); return; }
-    if (k === 'here') { showPick(null); setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return; }
+    if (k === 'here') {
+      showPick(null);
+      if (snapD != null && g.active && pos.mode !== 'gps') { placeAtD(snapD); setFollow(true); toast(t('snapPress'), 'green', 5000); return; }
+      setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return;
+    }
+    // (1.1.32) Контрольна точка в дорозі: маршрут одразу перебудовується від поточного (чи розрахованого, без GPS) місця через неї
+    if (k === 'cp') { showPick(null); setFollow(true); cpAsked = true; if (setVia({ lat: p.lat, lon: p.lon, label: t('cpLabel') }) >= 0) toast(t(P.online() ? 'cpSet' : 'cpNet'), P.online() ? 'green' : 'yellow', 7000); cpLabelLater(p); return; }
     showPick(null); ptsSet(k, { lat: p.lat, lon: p.lon });
   };
 }
@@ -1662,6 +1723,11 @@ export function initUI() {
   });
   bus.on('truckFail', () => { say(t('voiceTruckFail')); toast(t('truckFailTitle') + '\n' + t('truckFailText'), 'red', 12000); });
   bus.on('rerouteWait', () => { say(t('voiceRerouteWait')); toast(t('rerouteWait'), 'yellow', 9000); });
+  // (1.1.32) контрольна точка в дорозі
+  bus.on('rerouteNet', () => say(t('voiceCpNet')));
+  bus.on('viaRouted', () => { if (cpAsked) { cpAsked = false; toast(t('cpDone'), 'green', 5000); } setFollow(true); });
+  bus.on('viaFail', e => { toast(e && e.net ? t('cpNet') : t('cpFail'), e && e.net ? 'yellow' : 'red', 9000); });
+  bus.on('viaMax', n => toast(t('viaMax', n), 'yellow', 6000));
   bus.on('gpsBack', d => { if (d.reason !== 'sim') { say(t('voiceBack')); toast(t('gpsBackToast', d.err), 'green', 5000); } });
   bus.on('arrived', () => { toast(t('arrived'), 'green', 8000); });
   bus.on('mapBlank', () => toast(t('mapBlank'), 'yellow', 9000));

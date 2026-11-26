@@ -5,7 +5,7 @@ import { pos, routeCps } from './nav.js';
 import { g } from './guide.js';
 import { poi } from './poi.js';
 import { feed, relevance, zoneRegions } from './feed.js';
-import { OBLAST_CENTER, oblastName } from './route.js';
+import { OBLAST_CENTER, oblastName, viasOf } from './route.js';
 import { off, offlineActive, offlineStyle, tilesBad, tileBytesAt } from './offline.js';
 import { houseLayer, HOUSE_Z } from './addr.js';
 export { HOUSE_Z };
@@ -608,7 +608,7 @@ export function setTilt(v, live = false) {
 // у нижній частині вільної карти — і дивиться строго вгору; рухається й повертається карта під нею.
 // Позицію між фіксами (раз на секунду) ведемо плавно кадр за кадром: і стрілку, і камеру — однією точкою,
 // тому стрілка не «гуляє» відносно центру, як було з окремою анімацією камери.
-export const ANCHOR = { frac: 0.75 };          // частка висоти вільної карти від її верху до стрілки (1.1.29: Діма — «на пару міліметрів нижче, більше простору попереду»; було 0,72)
+export const ANCHOR = { frac: 0.79 };          // частка висоти вільної карти від її верху до стрілки (1.1.29: Діма — «на пару міліметрів нижче, більше простору попереду»; було 0,72; 1.1.32: Олексій — «ще трохи нижче», було 0,75)
 const cam = { cur: null, from: null, to: null, t0: 0, dur: 0, lastPosT: 0, brg: null, tBrg: 0, z: null, raf: 0, lastT: 0, drawT: 0, blendUntil: 0, pad: null, anc: null, ancT: 0,
   dd: null, rdT: 0, rdAt: 0, v: 0, idx: null, onR: false };
 export const camState = cam;
@@ -770,7 +770,7 @@ let previewTrip = null;
 export function previewPoints(tr) { previewTrip = tr || null; drawRoute(); }
 function drawPins(tr) {
   const add = (p, cls, txt) => { if (p) wps.push(new maplibregl.Marker({ element: wpEl(cls, txt), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map)); };
-  add(tr.a, 'wp-a', 'a'); add(tr.v, 'wp-v', 'v'); add(tr.b, 'wp-b', 'b');
+  add(tr.a, 'wp-a', 'a'); for (const v of viasOf(tr)) add(v, 'wp-v', 'v'); add(tr.b, 'wp-b', 'b');
 }
 /* ---------- точки рейсу, поставлені просто на карті (1.1.12): значки й пряма між ними ---------- */
 let planMarks = [], planPts = null;
@@ -779,8 +779,9 @@ export function planPoints(pts) {
   for (const m of planMarks) m.remove(); planMarks = [];
   const src = map && map.getSource && map.getSource('plan-line');
   if (!map || !pts) { if (src) src.setData(EMPTY); return; }
-  for (const k of ['a', 'v', 'b']) if (pts[k]) planMarks.push(new maplibregl.Marker({ element: wpEl('wp-' + k + ' wp-plan', k), anchor: 'bottom' }).setLngLat([pts[k].lon, pts[k].lat]).addTo(map));
-  const line = [pts.a || pts.me, pts.v, pts.b].filter(Boolean);
+  const vs = pts.vs || (pts.v ? [pts.v] : []), mk = (k, p) => planMarks.push(new maplibregl.Marker({ element: wpEl('wp-' + k + ' wp-plan', k), anchor: 'bottom' }).setLngLat([p.lon, p.lat]).addTo(map));
+  if (pts.a) mk('a', pts.a); for (const v of vs) mk('v', v); if (pts.b) mk('b', pts.b);
+  const line = [pts.a || pts.me, ...vs, pts.b].filter(Boolean);
   if (src) src.setData(line.length >= 2 ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: line.map(p => [p.lon, p.lat]) } } : EMPTY);
 }
 export const planPointsShown = () => planMarks.length;

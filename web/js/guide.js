@@ -2,13 +2,13 @@
 import { bus, log, S, RouteIndex, hav, clamp, db } from './core.js';
 import { pos, setRoute } from './nav.js';
 import { speak, stopSpeak, online } from './platform.js';
-import { buildRoute } from './route.js';
+import { buildRoute, viasOf, setVias, viaSlot, VIA_MAX } from './route.js';
 import { t } from './i18n.js';
 
 export const g = {
   trip: null, route: null, idx: null, active: false, arrived: false,
   manI: 0, next: null, after: null, distNext: 0, remain: 0, remTime: 0, eta: 0,
-  rerouting: false, offRoute: false, passedA: true, passedV: false, leadPending: false, reroutePending: null,
+  rerouting: false, offRoute: false, passedA: true, passedV: false, passedN: 0, leadPending: false, reroutePending: null,
   offer: null,               // (1.1.28) пропозиція, що чекає на відповідь водія: { id, kind, title, text, secs, at, until, actions: [{ id, label, pri }] }
   choice: null               // (1.1.28) вибір нового маршруту в дорозі: { id, state: 'load' | 'ready', routes: [{ kind, r }], sel, until }
 };
@@ -50,10 +50,10 @@ const ACTIVE_KEY = 'activeTrip', ACTIVE_MAX_H = 18;
 function saveActive() {
   if (!g.active || !g.trip || !g.route) return;
   const r = { ...g.route }; delete r._hz; delete r.heat;
-  db.set('kv', ACTIVE_KEY, { trip: { ...g.trip, route: undefined }, route: r, passedA: g.passedA, passedV: g.passedV, at: Date.now() }).catch(() => {});
+  db.set('kv', ACTIVE_KEY, { trip: { ...g.trip, route: undefined }, route: r, passedA: g.passedA, passedV: g.passedV, passedN: g.passedN, at: Date.now() }).catch(() => {});
 }
 let flagsSaved = '';
-function saveFlags() { const k = g.passedA + ':' + g.passedV; if (k !== flagsSaved) { flagsSaved = k; saveActive(); } }
+function saveFlags() { const k = g.passedA + ':' + g.passedN; if (k !== flagsSaved) { flagsSaved = k; saveActive(); } }
 // Позначка «рейс завершено» пишеться одразу (localStorage — синхронний): якщо застосунок закрили чи оновили
 // в ту ж мить, видалення з бази могло не встигнути — і зупинений рейс «воскресав».
 const DONE_KEY = 'reis.tripDone';
@@ -67,7 +67,8 @@ export async function resumeActive() {
     if (done >= s.at) { db.del('kv', ACTIVE_KEY); return false; }
     g.trip = { ...s.trip, route: s.route }; g.active = true; g.arrived = false;
     applyRoute(s.route, true);
-    g.passedA = !!s.passedA || g.passedA; g.passedV = !!s.passedV || g.passedV;
+    g.passedA = !!s.passedA || g.passedA;
+    viaPassed(Math.max(g.passedN, s.passedN != null ? +s.passedN : s.passedV ? viasOf(g.trip).length : 0));
     say(t('voiceResume'));
     bus.emit('trip', g);
     log('info', 'рейс відновлено після перезапуску');
@@ -75,13 +76,19 @@ export async function resumeActive() {
   } catch (e) { log('warn', 'відновлення рейсу: ' + e.message); return false; }
 }
 
+// (1.1.32) Пройдені контрольні точки: g.passedN — скільки (вони йдуть по порядку), g.passedV — чи пройдено всі
+let viaDone = [], viaBase = 0;
+function viaPassed(n) { const all = viasOf(g.trip).length; g.passedN = Math.max(0, Math.min(all, n)); g.passedV = g.passedN >= all; }
 function applyRoute(route, resumed = false) {
   g.route = route; g.idx = new RouteIndex(route.coords);
   for (const m of route.mans) m.d0 = g.idx.cum[Math.min(m.i0, g.idx.cum.length - 1)];
   g.manI = 0; lastManI = -1; said = {}; offSince = 0; g.offRoute = false; offAsked = false; onSince = 0;
   if (g.offer) closeOffer('route');
   if (g.choice) closeChoice('route');
-  g.passedA = route.aD == null; g.passedV = route.viaD == null;
+  g.passedA = route.aD == null;
+  viaDone = (route.viaDs || (route.viaD != null ? [route.viaD] : [])).map(d => d == null);     // точку не знайдено на лінії — стежити за нею не можемо
+  viaBase = route.viaDs ? route.viaBase || 0 : 0;
+  viaPassed(viaBase + viaDone.filter(Boolean).length);
   setRoute(g.idx, route.mans);
   bus.emit('route', g);
   update();
@@ -104,7 +111,7 @@ function throughChosen() {
   const start = l.d + 3000, end = idx.total - 4000; if (start >= end) return null;
   const n = Math.min(12, Math.max(1, Math.ceil((end - start) / 40000))), pts = [];
   for (let i = 0; i < n; i++) { const d = start + (end - start) * i / n, p = idx.at(d); pts.push({ lat: p.lat, lon: p.lon, brg: p.brg, d }); }
-  if (g.trip.v && !g.passedV) { const lv = idx.locate(g.trip.v, null); if (lv && lv.d > l.d) pts.push({ lat: g.trip.v.lat, lon: g.trip.v.lon, d: lv.d }); }
+  for (const v of viasOf(g.trip).slice(g.passedN)) { const lv = idx.locate(v, null); if (lv && lv.d > l.d) pts.push({ lat: v.lat, lon: v.lon, d: lv.d }); }
   return pts.sort((a, b) => a.d - b.d).map(({ lat, lon, brg }) => ({ lat, lon, brg }));
 }
 // (1.1.28) Стартуємо не з точки А: підводимо до неї, а далі ведемо ТИМ САМИМ рейсом, який водій побачив і вибрав, — крізь точки на його
@@ -115,7 +122,7 @@ function leadThrough(route) {
   if (end - start < 5000) return null;                      // короткий рейс — варіантам ніде розійтись
   const n = Math.min(10, Math.max(1, Math.ceil((end - start) / 40000))), pts = [{ lat: g.trip.a.lat, lon: g.trip.a.lon, d: 0 }];
   for (let i = 0; i < n; i++) { const d = start + (end - start) * i / n, p = idx.at(d); pts.push({ lat: p.lat, lon: p.lon, brg: p.brg, d }); }
-  if (g.trip.v) { const lv = idx.locate(g.trip.v, null); if (lv && lv.off < 400) pts.push({ lat: g.trip.v.lat, lon: g.trip.v.lon, d: lv.d }); else return null; }
+  for (const v of viasOf(g.trip)) { const lv = idx.locate(v, null); if (lv && lv.off < 400) pts.push({ lat: v.lat, lon: v.lon, d: lv.d }); else return null; }
   return pts.sort((a, b) => a.d - b.d).map(({ lat, lon, brg }) => brg == null ? { lat, lon } : { lat, lon, brg });
 }
 async function buildLead(heading) {
@@ -214,7 +221,7 @@ export async function newRouteChoice() {
     if (!alive()) return false;
     try {
       const like = { ...tr, costing: kind === 'strict' ? 'truck' : 'auto', soft: kind === 'strict' ? tr.soft : null };
-      const r = await buildRoute(like, { from, heading, skipA: g.passedA, skipVia: g.passedV, alternates: 1, altsFrom: true });
+      const r = await buildRoute(like, { from, heading, skipA: g.passedA, skipVia: g.passedN, alternates: 1, altsFrom: true });
       if (!alive()) return false;
       const got = [r, ...(r.alts || [])]; delete r.alts;
       for (const x of got) {
@@ -259,14 +266,23 @@ export function cancelChoice(why = 'no') {
   if (why === 'timeout') say(t('rrStayVoice'));
 }
 
-async function reroute(lead = false, fresh = false) {
-  if (g.rerouting || !g.trip) return;
+async function reroute(lead = false, fresh = false, force = false) {
+  if (!g.trip) return;
+  if (g.rerouting) { if (force) g.reroutePending = { lead, fresh: true, force: true }; return; }      // контрольну точку поставили під час перерахунку — ще раз, уже з нею
   // Без GPS рейс НЕ перебудовуємо: місце лише розраховане, перебудова від нього може повести не туди.
-  // Прохання водія (новий шлях, «заїхати через») запам'ятовуємо й виконуємо, щойно GPS повернеться.
-  if (pos.mode !== 'gps') {
+  // Прохання водія («новий шлях») запам'ятовуємо й виконуємо, щойно GPS повернеться.
+  // (1.1.32) Виняток — контрольна точка, яку водій сам поставив на карті (force): він бачить дорогу й вирішив їхати через неї —
+  // перебудовуємо одразу від розрахованого місця. Без інтернету — щойно з'явиться зв'язок.
+  if (pos.mode !== 'gps' && !force) {
     const was = g.reroutePending;
-    g.reroutePending = { lead: lead || !!(was && was.lead), fresh: fresh || !!(was && was.fresh) };
+    g.reroutePending = { lead: lead || !!(was && was.lead), fresh: fresh || !!(was && was.fresh), force: !!(was && was.force) };
     if (!was) { log('info', 'перебудову рейсу відкладено до GPS'); bus.emit('rerouteWait', g.reroutePending); }
+    bus.emit('guide', g); return;
+  }
+  if (force && !online()) {
+    const was = g.reroutePending;
+    g.reroutePending = { lead: lead || !!(was && was.lead), fresh: true, force: true };
+    log('info', 'контрольна точка: інтернету немає — перебудую, щойно з\'явиться'); bus.emit('rerouteNet', g.reroutePending);
     bus.emit('guide', g); return;
   }
   g.reroutePending = null;
@@ -280,17 +296,27 @@ async function reroute(lead = false, fresh = false) {
     let r = null;
     if (through) { try { r = await buildRoute(g.trip, { from: pos, heading, through }); } catch (e) { log('warn', 'повернення на вибраний маршрут: ' + e.message); } }
     if (!r && lead) r = await buildLead(heading);                       // підведення до А — тим самим вибраним рейсом
-    if (!r) r = await buildRoute(g.trip, { from: pos, heading, skipA: lead ? false : g.passedA, skipVia: g.passedV });
+    if (!r) r = await buildRoute(g.trip, { from: pos.lat != null ? pos : viasOf(g.trip)[g.passedN] || g.trip.a, heading, skipA: lead ? false : g.passedA, skipVia: pos.lat != null ? g.passedN : g.passedN + 1 });
     if (fresh) g.trip.chosen = chosenOf(r);
     if (g.active) {
-      applyRoute(r); say(t(through ? 'voiceRejoin' : 'voiceReroute'));
+      applyRoute(r); say(t(force ? 'voiceViaRoute' : through ? 'voiceRejoin' : 'voiceReroute'));
       if (r.truckFail) bus.emit('truckFail', r);         // для фури проїзду немає — веду звичайним, водій попереджений
+      if (force) bus.emit('viaRouted', r);
     }
-  } catch (e) { log('warn', 'перерахунок: ' + e.message); }
+  } catch (e) { log('warn', 'перерахунок: ' + e.message); if (force) { if (!online()) g.reroutePending = { lead, fresh: true, force: true }; bus.emit('viaFail', { net: !online(), msg: e.message }); } }
   g.rerouting = false; bus.emit('guide', g);
 }
-// Заїхати по дорозі: точка стає проміжною, маршрут перебудовується від поточного місця.
-export function setVia(p) { if (!g.trip) return; g.trip.v = p; g.passedV = false; rerouteNow(true); }
+// Заїхати по дорозі / контрольна точка: точка стає ще однією проміжною (туди, де дає найменший гак, але не раніше пройдених),
+// маршрут перебудовується від поточного місця одразу — і без GPS теж (водій сам бачить, куди їде). Повертає номер точки або -1.
+export function setVia(p) {
+  if (!g.trip || !p) return -1;
+  const vs = viasOf(g.trip).slice(), pt = { lat: p.lat, lon: p.lon, label: p.label || '' };
+  if (vs.length >= VIA_MAX) { const left = vs.slice(g.passedN); if (!left.length && g.passedN) { vs.splice(0, g.passedN); g.passedN = 0; } else { bus.emit('viaMax', VIA_MAX); return -1; } }
+  const i = viaSlot(pos.lat != null ? pos : null, vs.slice(g.passedN), g.trip.b, pt, 0) + g.passedN;
+  vs.splice(i, 0, pt); setVias(g.trip, vs); viaPassed(g.passedN);
+  lastReroute = 0; reroute(false, true, true);
+  return i;
+}
 export function rerouteNow(fresh = false) { lastReroute = 0; if (pos.lat != null && (online() || pos.mode !== 'gps')) reroute(false, fresh); }
 
 function announce() {
@@ -308,7 +334,7 @@ function announce() {
 function update() {
   if (!g.active || !g.idx || pos.lat == null) return;
   const mans = g.route.mans, idx = g.idx, now = Date.now();
-  if (g.reroutePending && pos.mode === 'gps' && !g.rerouting && online()) { const p = g.reroutePending; log('info', 'GPS є — виконую відкладену перебудову'); reroute(p.lead, p.fresh); return; }
+  if (g.reroutePending && (pos.mode === 'gps' || g.reroutePending.force) && !g.rerouting && online()) { const p = g.reroutePending; log('info', p.force && pos.mode !== 'gps' ? 'є зв\'язок — прокладаю через контрольну точку' : 'GPS є — виконую відкладену перебудову'); reroute(p.lead, p.fresh, !!p.force); return; }
   if (g.leadPending && pos.mode === 'gps') {
     g.leadPending = false;
     if (hav(pos, g.trip.a) > 400 && online()) { reroute(true); return; }
@@ -332,7 +358,9 @@ function update() {
 
   const d = pos.rd == null ? 0 : pos.rd;
   if (g.route.aD != null && d >= g.route.aD - 80) g.passedA = true;
-  if (g.route.viaD != null && d >= g.route.viaD - 80) g.passedV = true;
+  { const ds = g.route.viaDs || (g.route.viaD != null ? [g.route.viaD] : []); let ch = false;
+    ds.forEach((vd, k) => { if (vd != null && !viaDone[k] && d >= vd - 80) { viaDone[k] = true; ch = true; } });
+    if (ch) viaPassed(viaBase + viaDone.filter(Boolean).length); }
   saveFlags();
 
   let i = g.manI;
