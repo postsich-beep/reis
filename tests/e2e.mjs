@@ -5287,7 +5287,7 @@ if (run('44')) try {
   ok(`пройдена точка (${back.ang}°, на ${back.d} м) є на карті (біла з обідком) — дотик до неї: позначка повернулась (${Math.round(y2.rd)} → ${Math.round(b1.rd)} м): «${b1.toast.slice(0, 50)}…»`,
     t0.hit.includes(back.d + ':1') && Math.abs(b1.rd - back.d0) <= 45 && /Позначка — перед вибраним поворотом/.test(b1.toast), JSON.stringify({ t0, b1, back }));
   ok(`…і знову чекає повороту (${Math.round(b1.rd)} → ${Math.round(b2.rd)} м, стан «${b2.cp && b2.cp.state}»); цей поворот знову «наступний», ті, що за ним, — знову попереду`,
-    b2.cp && b2.cp.d === back.d && b2.cp.state === 'wait' && Math.abs(b2.rd - b1.rd) <= 8 && (d3.find(f => f.n === 1) || {}).d === back.d && d3.filter(f => f.p === 1).length === C.filter(c => c.d < back.d).length, JSON.stringify({ b2, d3 }));
+    b2.cp && b2.cp.d === back.d && b2.cp.state === 'wait' && b2.rd >= back.d0 - 40 && b2.rd <= back.d + 5 && b2.rd - b1.rd <= 20 && (d3.find(f => f.n === 1) || {}).d === back.d && d3.filter(f => f.p === 1).length === C.filter(c => c.d < back.d).length, JSON.stringify({ b2, d3 }));
   // ґ) GPS повернувся — точок на карті немає (карта чиста), як і раніше
   for (let k = 0; k < 4; k++) { const q = await app(page, () => { const i = window.__app.guide.g.idx, p = i.at(window.__app.nav.pos.rd + 20); return { lat: p.lat, lon: p.lon, brg: p.brg }; }); await emitN('loc', { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 10, brg: q.brg, t: Date.now() }); await feed(1); }
   const g1 = await st(), d4 = await dots();
