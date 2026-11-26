@@ -1,6 +1,6 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
-import { OBD_ICON, openObd, tileState as obdTile } from './ui_obd.js';
+import { openObd, tileState as obdTile } from './ui_obd.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn, jumpToCp } from './nav.js';
 import { chime, initSfx } from './sfx.js';
@@ -49,11 +49,23 @@ function layoutVars() {
   // --ex — відстань від правого краю екрана до осі повзунка нахилу: на цій осі стоять «Моє місце», кнопки справа вгорі й (правим краєм) ±100
   { const T = $('tilt').getBoundingClientRect(); if (T.width > 0) r.setProperty('--ex', (Math.round((window.innerWidth - (T.left + T.right) / 2) * 2) / 2) + 'px'); }
   // (1.1.28) Кнопки справа вгорі (налаштування, тип карти, звук, у рейсі — пошук) не повинні діставати до стовпчика над повзунком
-  // («Моє місце», ±100 без GPS). Не вміщаються стовпчиком — звук (і пошук) стають ліворуч, другим рядком.
+  // («Моє місце», ±100 без GPS). Не вміщаються стовпчиком — звук (і пошук) стають ліворуч, другим рядком (rail-tight).
+  // (1.1.35, Діма: «налаштування, карта і звук — в один стовпчик, якщо можливо») Один стовпчик тримаємо, доки можна:
+  //  • уміщається й тоді, коли над повзунком стоять ±100 і «Моє місце» (146 px), — таким стовпчик і є завжди, зникнення GPS його не смикає;
+  //  • не вміщається звичайним — кнопки стають трохи меншими й щільніше (48…42 px, rail-compact);
+  //  • і так ні — з GPS під кнопками лишаємо місце тільки для «Мого місця» (воно з'являється, коли карту зсунули), ±100 там немає;
+  //    без GPS — звук і пошук ліворуч, другим стовпчиком: сім кнопок одна над одною на невисокому екрані не стануть;
+  //  • на планшеті набік (плашка по центру, праворуч від неї вільно) кнопки стоять у правому куті й стовпчику над повзунком не заважають.
   { const rail = $('rail'), z = $('zoom'), B = document.body;
-    if (rail && z) { B.classList.remove('rail-tight');
-      const rr = rail.getBoundingClientRect(), zr = z.getBoundingClientRect(), col = getComputedStyle(rail).flexDirection === 'column';
-      if (col && rr.height > 0 && zr.bottom > 0 && rr.bottom + 10 > zr.bottom - 146) B.classList.add('rail-tight'); } }
+    if (rail && z) { B.classList.remove('rail-tight', 'rail-compact'); for (const k of ['--rbs', '--rbg', '--rbk']) rail.style.removeProperty(k);
+      const rr = rail.getBoundingClientRect(), zr = z.getBoundingClientRect(), n = [...rail.children].filter(e => e.offsetWidth > 0).length;
+      const same = rr.left < zr.right && zr.right - Math.max(zr.width, 50) < rr.right;                        // на одній вертикалі зі стовпчиком над повзунком
+      if (getComputedStyle(rail).flexDirection === 'column' && rr.height > 0 && zr.bottom > 0 && same && n > 1) {
+        const dr = z.classList.contains('dr'), room = keep => zr.bottom - keep - 10 - rr.top;
+        const fit = h => [[50, 10], [48, 8], [46, 7], [44, 6], [42, 6]].find(([d, g]) => n * d + (n - 1) * g <= h);
+        const f = fit(room(Math.max(146, dr ? zr.height : 0))) || (dr ? null : fit(room(50)));
+        if (!f) B.classList.add('rail-tight');
+        else if (f[0] < 50) { B.classList.add('rail-compact'); rail.style.setProperty('--rbs', f[0] + 'px'); rail.style.setProperty('--rbg', f[1] + 'px'); rail.style.setProperty('--rbk', (f[0] / 50).toFixed(2)); } } } }
   tiltFit();
 }
 // Нахил карти (1.1.22): стрілка вгору-вниз у крайньому правому куті нижньої плашки, без тла. Її місце на тонкій рисці показує нахил:
@@ -177,7 +189,9 @@ function mapTypeTap() {
   railState();
 }
 function quickHtml() {
-  const head = title => `<div class="q-head"><b>${title}</b><button class="q-x" data-q="close" aria-label="${t('close')}">${ICON.x}</button></div>`;
+  // (1.1.35, Олексій) модуль OBD — просто значок у заголовку (зелений — пристрій підключено й увімкнено, сірий — ні), без окремого рядка
+  const ob = obdTile();
+  const head = title => `<div class="q-head"><b>${title}</b><button class="q-obd${ob.on ? ' on' : ''}" data-q="obd" aria-label="${t('obdTitle')}: ${esc(ob.txt)}"><span>OBD</span></button><button class="q-x" data-q="close" aria-label="${t('close')}">${ICON.x}</button></div>`;
   const tile = (k, icon, label, state, on, extra = '') => `<button class="q-tile${on ? ' on' : ''}${extra}" data-q="${k}" aria-pressed="${!!on}">${icon}<span class="q-l">${label}</span><span class="q-s">${state}</span></button>`;
   const th = S.theme || 'auto';
   return head(t('quickTitle')) + `<div class="q-grid">
@@ -190,10 +204,8 @@ function quickHtml() {
     ${tile('awake', ICON.awake, t('qAwake'), S.keepAwake !== false ? t('qAwakeOn') : t('qAwakeOff'), S.keepAwake !== false)}
     ${tile('settings', ICON.gear, t('qSettings'), t('qAll'), false)}
     ${tile('cal', ICON.calTab, t('qCal'), t(calFresh() ? 'qCalOk' : calGet() ? 'qCalOld' : 'qCalNo'), false, calFresh() ? ' cal-ok' : '')}
-  </div>${obdRowHtml()}`;        // (1.1.26) рядка «− Масштаб +» тут більше немає: карту наближають двома пальцями
+  </div>`;        // (1.1.26) рядка «− Масштаб +» тут більше немає: карту наближають двома пальцями
 }
-// (1.1.33) модуль OBD — окремий рядок на всю ширину під плитками: зелений — показання йдуть, сірий — немає зв'язку чи вимкнено
-function obdRowHtml() { const s = obdTile(); return `<button class="q-obd${s.on ? ' on' : ''}" data-q="obd" aria-label="${t('obdTitle')}: ${esc(s.txt)}">${OBD_ICON}<span class="q-obd-t"><b>${t('obdTitle')}</b><small>${esc(s.txt)}</small></span><i class="q-obd-dot"></i></button>`; }
 function quickRender() { const box = $('quick'); if (!box.hidden) box.innerHTML = quickHtml(); }
 function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => quickOpen(false), Q_IDLE); }
 // open: false — закрити; інше — відкрити плитки

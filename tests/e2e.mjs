@@ -1582,7 +1582,7 @@ if (run('4')) for (const sc of SCREENS.filter(x => !process.env.SCR || process.e
       const [px, py] = await app(page, () => { const m = window.__app.map.map, P = window.__app.nav.pos, s = m.project([P.lon, P.lat]), r = m.getContainer().getBoundingClientRect(); return [Math.round(r.left + s.x + 25), Math.round(r.top + s.y)]; });
       const hit0 = await app(page, ([x, y]) => { const e = document.elementFromPoint(x, y); return e ? (e.id || e.className || e.tagName) + ' < ' + ((e.parentElement && (e.parentElement.id || e.parentElement.className)) || '') : null; }, [px, py]);
       await longPress(px, py);
-      ok(`${T}: без GPS довге натискання біля маршруту — меню «Контрольна точка · Я тут»; «Я тут» — на маршруті`, await app(page, () => !document.getElementById('pick').hidden && /Контрольна точка/.test(document.getElementById('pick').textContent)), JSON.stringify({ px, py, hit0, pick: await app(page, () => ({ hidden: document.getElementById('pick').hidden, txt: document.getElementById('pick').textContent.slice(0, 80), toasts: document.getElementById('toasts').textContent.slice(0, 120), mode: window.__app.nav.pos.mode, onRoute: window.__app.nav.pos.onRoute })) }));
+      ok(`${T}: без GPS довге натискання біля маршруту — меню «Контрольна точка · Я тут»; «Я тут» — на маршруті`, await app(page, () => !document.getElementById('pick').hidden && /Контрольна точка/.test(document.getElementById('pick').textContent)), JSON.stringify({ px, py, hit0, pick: await app(page, () => ({ hidden: document.getElementById('pick').hidden, txt: document.getElementById('pick').textContent.slice(0, 80), toasts: document.getElementById('toasts').textContent.slice(0, 120), mode: window.__app.nav.pos.mode, onRoute: window.__app.nav.pos.onRoute, rect: (() => { const P = document.getElementById('pick'); const was = P.hidden; P.hidden = false; const r = P.getBoundingClientRect(), o = [r.left, r.top, r.right, r.bottom].map(Math.round); P.hidden = was; return o; })(), cls: document.body.className, anc: window.__app.map.anchorPoint().y })) }));
       await page.click('#pick [data-k="here"]'); await sleep(250);
       ok(`${T}: …«Я тут» — «ви тут, на маршруті»`, await app(page, () => document.getElementById('pick').hidden && /на лінії рейсу/.test(document.getElementById('toasts').textContent)));
       await app(page, p => { window.__app.map.flyTo({ lat: p[0] + 0.05, lon: p[1] }, 14); }, coords[60]); await sleep(900);
@@ -3451,22 +3451,23 @@ if (run('30')) for (const sc of SCREENS.filter(x => ['S10', 'tiny', 'land', 'tab
   const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
   // а) кнопка справа вгорі — під швидкими налаштуваннями (кнопки «Шари» з 1.1.20 немає)
   const order = await app(page, () => [...document.querySelectorAll('#rail > button')].map(b => b.id)), bm = await R('#bMap'), s0 = await st();
-  ok(`[${T}] справа вгорі — одна кругла кнопка типу карти (50×50) під швидкими налаштуваннями: на ній значок того виду, що зараз, — складена карта (схема); другого значка немає; нічого її не перекриває`, order.slice(0, 2).join() === 'bQuick,bMap' && bm.seen && bm.w === 50 && bm.h === 50 && bm.r <= bm.vw && bm.b <= bm.vh
-    && s0.segs.split(',').length === 1 && /^scheme:30:\d+$/.test(s0.segs) && s0.cur === 'scheme' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && /зараз схема/.test(s0.label), JSON.stringify({ order, bm, s0 }));
+  const railComp = await app(page, () => document.body.classList.contains('rail-compact'));     // (1.1.35) стовпчик стиснуто, щоб не ділити на два: кнопки 42…48 px, значки відповідно менші
+  ok(`[${T}] справа вгорі — одна кругла кнопка типу карти (${bm.w}×${bm.h}) під швидкими налаштуваннями: на ній значок того виду, що зараз, — складена карта (схема); другого значка немає; нічого її не перекриває`, order.slice(0, 2).join() === 'bQuick,bMap' && bm.seen && bm.w === bm.h && (bm.w === 50 || (railComp && bm.w >= 42 && bm.w < 50)) && bm.r <= bm.vw && bm.b <= bm.vh
+    && s0.segs.split(',').length === 1 && (railComp ? /^scheme:(2[5-9]|30):\d+$/ : /^scheme:30:\d+$/).test(s0.segs) && s0.cur === 'scheme' && !s0.sat && s0.want === 'scheme' && s0.pressed === 'false' && /зараз схема/.test(s0.label), JSON.stringify({ order, bm, s0 }));
   // б) один дотик — супутник: жодного віконця, знімки під лініями рейсу й нашими значками, напряму (не в наш кеш), джерело підписано
   const net0 = s0.net; await clearToasts();
   await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
   for (let i = 0; i < 40 && !SAT.req.length; i++) await sleep(150); await sleep(500);
   const s1 = await st();
   await shot(page, '41-sat-' + sc.n);
-  ok(`[${T}] один дотик — одразу супутник (як «2D / 3D»): жодного віконця з вибором і жодного повідомлення (карта змінилась — і так видно); значок на кнопці змінився — тепер супутник над Землею (один)`, s1.want === 'sat' && s1.sat && !s1.popup && s1.toast.trim() === '' && s1.cur === 'sat' && /^sat:30:\d+$/.test(s1.segs) && s1.pressed === 'true' && /зараз супутник/.test(s1.label), JSON.stringify(s1));
+  ok(`[${T}] один дотик — одразу супутник (як «2D / 3D»): жодного віконця з вибором і жодного повідомлення (карта змінилась — і так видно); значок на кнопці змінився — тепер супутник над Землею (один)`, s1.want === 'sat' && s1.sat && !s1.popup && s1.toast.trim() === '' && s1.cur === 'sat' && (railComp ? /^sat:(2[5-9]|30):\d+$/ : /^sat:30:\d+$/).test(s1.segs) && s1.pressed === 'true' && /зараз супутник/.test(s1.label), JSON.stringify(s1));
   ok(`[${T}] знімки є (квадрати з сервера знімків), лежать ПІД лініями рейсу й нашими значками; джерело знімків підписано; у власний кеш карти не осідають`, s1.iSat >= 0 && s1.iSat < s1.iRough && s1.iRough < s1.iRoute && SAT.req.length > 0 && /\/World_Imagery\/MapServer\/tile\/\d+\/\d+\/\d+$/.test(SAT.req[0]) && s1.body && /Esri/.test(s1.attr) && s1.net === net0, JSON.stringify({ s1, req: SAT.req.slice(0, 2), n: SAT.req.length, net0 }));
   // в) ще дотик — схема: знімки прибрано, сервер знімків більше не питаємо
   await clearToasts(); await page.click('#bMap'); await sleep(250);
   const s2t = (await st()).toast;                                         // одразу після дотику: повідомлень немає
   SAT.req = []; await app(page, () => window.__app.map.map.panBy([300, 200], { duration: 0 })); await sleep(900);
   const s2 = await st();
-  ok(`[${T}] ще дотик — назад схема: знімки прибрано, нових запитів немає; теж без повідомлень; на кнопці знову складена карта`, s2.want === 'scheme' && !s2.sat && !s2.body && !s2.popup && SAT.req.length === 0 && s2t.trim() === '' && s2.cur === 'scheme' && /^scheme:30:\d+$/.test(s2.segs), JSON.stringify({ s2, s2t, n: SAT.req.length }));
+  ok(`[${T}] ще дотик — назад схема: знімки прибрано, нових запитів немає; теж без повідомлень; на кнопці знову складена карта`, s2.want === 'scheme' && !s2.sat && !s2.body && !s2.popup && SAT.req.length === 0 && s2t.trim() === '' && s2.cur === 'scheme' && (railComp ? /^scheme:(2[5-9]|30):\d+$/ : /^scheme:30:\d+$/).test(s2.segs), JSON.stringify({ s2, s2t, n: SAT.req.length }));
   if (main) {
     await page.click('#bMap'); await page.waitForFunction(() => !!window.__app.map.map.getLayer('reis-sat'), null, { timeout: 5000 }).catch(() => {});
     // г) уночі знімок не «перевертається» фільтром нічної карти
@@ -4477,12 +4478,14 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
     ok(`[${T}] «Моє місце» — одразу над повзунком нахилу (проміжок ${a.center && a.bar ? Math.round(a.bar.t - a.center.b) : '?'} px)${exact ? ` і на одній осі з ним (хрестик ${a.center.cx}, ручка ${a.thumb.cx})` : ''}; у межах екрана`,
       !!a.center && near(a.bar.t - a.center.b, 10) && (!exact || near(a.center.cx, a.thumb.cx)) && a.center.r <= a.W - 4 && Math.abs(a.center.cx - a.thumb.cx) <= 10, JSON.stringify({ center: a.center, thumb: a.thumb, bar: a.bar }));
     const tight = await app(page, () => document.body.classList.contains('rail-tight'));
-    if (!tight) ok(`[${T}] (1.1.28) кнопка звуку — під кнопкою типу карти, ${exact ? `на тій самій осі (${a.snd && a.snd.cx})` : `під нею (${a.snd && a.snd.cx} і ${a.map.cx})`}, проміжок ${a.snd ? Math.round(a.snd.t - a.map.b) : '?'} px, такого ж розміру (${a.snd && a.snd.w}×${a.snd && a.snd.h})`,
-      !!a.snd && near(a.snd.cx, exact ? a.tilt.cx : a.map.cx) && near(a.snd.t - a.map.b, 10) && near(a.snd.w, a.map.w) && near(a.snd.h, a.map.h), JSON.stringify({ snd: a.snd, map: a.map }));
+    // (1.1.35) щоб лишитися одним стовпчиком, кнопки можуть стати трохи меншими й щільніше (rail-compact): проміжок 6…8 px, але скрізь однаковий
+    const comp = await app(page, () => document.body.classList.contains('rail-compact')), rg = comp ? Math.round(a.map.t - a.quick.b) : 10;
+    if (!tight) ok(`[${T}] (1.1.28) кнопка звуку — під кнопкою типу карти, ${exact ? `на тій самій осі (${a.snd && a.snd.cx})` : `під нею (${a.snd && a.snd.cx} і ${a.map.cx})`}, проміжок ${a.snd ? Math.round(a.snd.t - a.map.b) : '?'} px, такого ж розміру (${a.snd && a.snd.w}×${a.snd && a.snd.h})${comp ? ' — стовпчик стиснуто, щоб не ділити на два' : ''}`,
+      !!a.snd && near(a.snd.cx, exact ? a.tilt.cx : a.map.cx) && rg >= 6 && rg <= 10 && near(a.snd.t - a.map.b, rg) && near(a.snd.w, a.map.w) && near(a.snd.h, a.map.h) && a.snd.w >= 42 && (comp ? a.snd.w < 50 : near(a.snd.w, 50)), JSON.stringify({ snd: a.snd, map: a.map, quick: a.quick, comp }));
     else if (phone) ok(`[${T}] (1.1.28) стовпчиком кнопки дістали б до кнопок над повзунком — кнопка звуку ліворуч від швидких налаштувань, в один ряд (проміжок ${a.snd ? Math.round(a.quick.l - a.snd.r) : '?'} px), стовпчик кнопок не дістає до кнопок унизу`,
       !!a.snd && near(a.snd.t, a.quick.t) && near(a.quick.l - a.snd.r, 10) && near(a.snd.w, a.map.w), JSON.stringify({ snd: a.snd, quick: a.quick }));
     if (exact) ok(`[${T}] кнопки справа вгорі — на тій самій осі (${a.quick.cx}, ${a.map.cx} | повзунок ${a.tilt.cx}); між ними ${Math.round(a.map.t - a.quick.b)} px, до верхньої плашки ${Math.round(a.quick.t - a.top.b)} px`,
-      near(a.quick.cx, a.tilt.cx) && near(a.map.cx, a.tilt.cx) && near(a.map.t - a.quick.b, 10) && near(a.quick.t - a.top.b, 10), JSON.stringify({ quick: a.quick, map: a.map, tilt: a.tilt, top: a.top }));
+      near(a.quick.cx, a.tilt.cx) && near(a.map.cx, a.tilt.cx) && near(a.map.t - a.quick.b, rg) && near(a.quick.t - a.top.b, 10), JSON.stringify({ quick: a.quick, map: a.map, tilt: a.tilt, top: a.top }));
     ok(`[${T}] круги ліворуч опущено до плашки: кружечок GPS — за ${Math.round(a.flat.t - a.gps.b)} px над нею; від лівого краю (${a.gps.l}) стільки ж, як «Моє місце» від правого (${+(a.W - a.center.r).toFixed(1)})`,
       near(a.flat.t - a.gps.b, 10) && near(a.gps.l, a.W - a.center.r) && a.speed.b <= a.flat.t - 4, JSON.stringify({ gps: a.gps, speed: a.speed, flat: a.flat, center: a.center }));
     ok(`[${T}] ⓘ (про карту) — у кутку між плашкою й виступом повзунка: не в стовпчику кнопок, нічого не закриває`, !!a.attr && a.attr.r <= a.tilt.l + 1 && a.attr.b <= a.flat.t && a.attr.t >= a.bar.t && (await lay()).length === 0, JSON.stringify({ attr: a.attr, tilt: a.tilt, lay: await lay() }));
@@ -4507,7 +4510,7 @@ if (run('36')) for (const sc of [...SCREENS.filter(x => ['S10', 'small', 'tiny',
   if (phone) {
     const low = sc.h <= 600;                                       // невисокий екран: місце «Мого місця» не резервуємо, «Поворот» — лівіше ±100
     ok(`[${T}] ±100 стоять ${low ? 'одразу над повзунком' : 'над місцем для «Мого місця» (воно зарезервоване, тож кнопки не стрибають)'}: до повзунка ${Math.round(c.bar.t - c.back.b)} px; правим краєм — по лінії кнопок справа (${c.back.r} і ${c.quick ? c.quick.r : '—'}); ↑100 над ↓100`,
-      near(c.bar.t - c.back.b, low ? 10 : 70) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
+      near(c.bar.t - c.back.b, low ? 10 : 70) && c.fwd.b <= c.back.t && near(c.fwd.r, c.back.r) && (!exact || near(c.back.r, c.quick.r, c.quick.w < 50 ? 3 : 1)) && c.back.r <= c.W - 4 && c.fwd.l >= c.tilt.l - 60, JSON.stringify({ fwd: c.fwd, back: c.back, bar: c.bar, quick: c.quick }));
     if (low) ok(`[${T}] кнопка «Поворот» — над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше кнопок ±100 (на ${c.turn ? Math.round(c.back.l - c.turn.r) : '?'} px); нічого не закриває`,
       !!c.turn && near(c.flat.t - c.turn.b, 10) && near(c.back.l - c.turn.r, 10) && c.turn.l >= c.speed.r + 4 && (await lay()).length === 0, JSON.stringify({ turn: c.turn, back: c.back, flat: c.flat, speed: c.speed, lay: await lay() }));
     else ok(`[${T}] кнопка «Поворот» — у кутку між плашкою й виступом повзунка: одразу над плашкою (${c.turn ? Math.round(c.flat.t - c.turn.b) : '?'} px), лівіше місця «Мого місця» (на ${c.turn ? Math.round(c.back.r - 50 - c.turn.r) : '?'} px), нижче кнопок ±100; нічого не закриває`,
@@ -4903,65 +4906,94 @@ if (run('40')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny'].in
   ok(`[${T}] прохід 40 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 40 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
-/* ============ прохід 41 (1.1.33): модуль OBD — рядок у швидких налаштуваннях, вікно з перемикачем і показаннями, розшифровка J1939 ============ */
+/* ============ прохід 41 (1.1.33, 1.1.35): модуль OBD — значок у швидких налаштуваннях, вікно з перемикачем і показаннями, розшифровка J1939 ============
+   1.1.35 (Олексій): у швидких налаштуваннях — просто значок «OBD» (зелений чи ні), без окремого рядка; модуль «апріорі вимкнений»,
+   доки пристрій зчитування не підключено (перемикач неактивний, «Підключіть пристрій зчитування»), далі його можна вмикати й вимикати. */
 if (run('41')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land', 'tablet'].includes(x.n)).filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
   const T = sc.title, full = sc.n === 'xiaomi';
-  const row = () => app(page, () => { const b = document.querySelector('#quick .q-obd'), g = document.querySelector('#quick .q-grid'); if (!b) return null; const r = b.getBoundingClientRect(), G = g.getBoundingClientRect(), Q = document.getElementById('quick').getBoundingClientRect();
-    return { on: b.classList.contains('on'), t: b.querySelector('.q-obd-t b').textContent + ' ' + b.querySelector('.q-obd-t small').textContent, l: Math.round(r.left - G.left), r: Math.round(G.right - r.right), below: r.top >= G.bottom - 0.5, inQ: r.bottom <= Q.bottom + 0.5 && r.top >= Q.top, h: Math.round(r.height), inView: r.bottom <= innerHeight && r.top >= 0, fit: [...b.querySelectorAll('b,small')].every(e => e.scrollWidth <= e.clientWidth + 1) }; });
+  const ico = () => app(page, () => { const b = document.querySelector('#quick .q-obd'), h = document.querySelector('#quick .q-head'), x = document.querySelector('#quick .q-x'), tt = h.querySelector('b'), g = document.querySelector('#quick .q-grid'); if (!b) return null;
+    const r = b.getBoundingClientRect(), X = x.getBoundingClientRect(), H = h.getBoundingClientRect(), tr = [...g.querySelectorAll('.q-tile')].map(e => e.getBoundingClientRect());
+    return { on: b.classList.contains('on'), t: b.textContent.trim(), lab: b.getAttribute('aria-label'), h: Math.round(r.height), w: Math.round(r.width), leftOfX: r.right <= X.left + 0.5, inHead: r.top >= H.top - 0.5 && r.bottom <= H.bottom + 0.5, midY: Math.abs((r.top + r.bottom) / 2 - (X.top + X.bottom) / 2) <= 1,
+      title: tt.textContent, titleFit: tt.scrollWidth <= tt.clientWidth + 1, tiles: tr.length, rows: new Set(tr.map(q => Math.round(q.top))).size, cols: new Set(tr.map(q => Math.round(q.left))).size, extra: document.querySelectorAll('#quick > *').length, bg: getComputedStyle(b.querySelector('span')).backgroundColor }; });
   const box = () => app(page, () => { const B = document.getElementById('obdBox'); if (B.hidden) return { open: false }; const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
-    return { open: true, box: R(B), title: B.querySelector('h2').textContent, sw: R(B.querySelector('.obd-sw')), swOn: B.querySelector('.obd-sw').classList.contains('on'), swTxt: B.querySelector('.obd-sw').textContent.trim(), st: B.querySelector('.obd-st').textContent.replace(/\s+/g, ' ').trim(), stCls: B.querySelector('.obd-st').className,
-      rows: [...B.querySelectorAll('.obd-r')].map(r => ({ k: r.dataset.k, v: r.querySelector('b').textContent.replace(/[\u00a0\u202f]/g, ' '), na: r.classList.contains('na') })), legal: B.querySelector('.obd-legal').textContent, back: R(B.querySelector('.obd-back')), backTxt: B.querySelector('.obd-back').textContent.trim(), W: innerWidth, H: innerHeight,
+    const sw = B.querySelector('.obd-sw');
+    return { open: true, box: R(B), title: B.querySelector('h2').textContent, sw: R(sw), swOn: sw.classList.contains('on'), swDis: sw.classList.contains('dis'), swAria: sw.getAttribute('aria-disabled'), swOp: +getComputedStyle(sw).opacity, swTxt: sw.textContent.trim(), st: B.querySelector('.obd-st').textContent.replace(/\s+/g, ' ').trim(), stCls: B.querySelector('.obd-st').className,
+      rows: [...B.querySelectorAll('.obd-r')].map(r => ({ k: r.dataset.k, v: r.querySelector('b').textContent.replace(/[  ]/g, ' '), na: r.classList.contains('na') })), legal: B.querySelector('.obd-legal').textContent, back: R(B.querySelector('.obd-back')), backTxt: B.querySelector('.obd-back').textContent.trim(), W: innerWidth, H: innerHeight,
       groups: [...B.querySelectorAll('.obd-gh')].map(x => x.textContent) }; });
-  // а) швидкі налаштування: під дев'ятьма плитками — рядок «Модуль OBD» на всю ширину, сірий, «вимкнено»
+  // а) швидкі налаштування: дев'ять плиток 3×3, як і було; модуль OBD — значок «OBD» у заголовку ліворуч від хрестика, сірий
   await page.click('#bQuick'); await sleep(300);
-  const q0 = await row();
-  ok(`[${T}] швидкі налаштування: під плитками рядок «${q0 && q0.t}» на всю ширину (відступи ${q0 && q0.l}/${q0 && q0.r}), сірий; весь у панелі й на екрані`, !!q0 && !q0.on && /^Модуль OBD вимкнено$/.test(q0.t) && q0.l === 0 && q0.r === 0 && q0.below && q0.inQ && q0.inView && q0.h >= 48 && q0.fit, JSON.stringify(q0));
-  if (full || sc.n === 'land') await shot(page, '69-obd-quick-' + sc.n);
-  // б) дотик — вікно на весь екран: угорі назва й перемикач, унизу «Назад»; без зв'язку показання сірі «—»
+  const q0 = await ico();
+  ok(`[${T}] швидкі налаштування: значок «${q0 && q0.t}» у заголовку ліворуч від хрестика (${q0 && q0.w}×${q0 && q0.h}), сірий; плиток ${q0 && q0.tiles} (${q0 && q0.rows}×${q0 && q0.cols}), окремого рядка немає; заголовок «${q0 && q0.title}» не обрізано`,
+    !!q0 && !q0.on && q0.t === 'OBD' && q0.leftOfX && q0.inHead && q0.midY && q0.h >= 44 && q0.w >= 44 && q0.tiles === 9 && (sc.n === 'tablet' || (q0.rows === 3 && q0.cols === 3)) && q0.extra === 2 && q0.titleFit && /не підключено/.test(q0.lab), JSON.stringify(q0));
+  if (full || sc.n === 'tiny') await shot(page, '69-obd-quick-' + sc.n);
+  // б) дотик — вікно: пристрою немає — перемикач неактивний, «Пристрій зчитування не підключено. Підключіть пристрій зчитування…»
   await page.click('#quick .q-obd'); await sleep(300);
   const b0 = await box();
-  ok(`[${T}] дотик — вікно «${b0.title}» на весь екран: угорі праворуч перемикач «${b0.swTxt}», унизу «${b0.backTxt}»`, b0.open && b0.box.t === 0 && b0.box.h === b0.H && b0.title === 'Модуль OBD' && !b0.swOn && b0.sw.r >= b0.box.r - 20 && b0.sw.t < 80 && b0.sw.h >= 44 && b0.backTxt === 'Назад' && b0.back.b >= b0.H - 40 && b0.back.h >= 50 && b0.back.w >= b0.box.w - 40 && await app(page, () => document.getElementById('quick').hidden), JSON.stringify({ box: b0.box, sw: b0.sw, back: b0.back }));
-  ok(`[${T}] вимкнено — «${b0.st}»; ${b0.rows.length} показань у групах ${b0.groups.join(' · ')} — усі сірі «—»`, /^Модуль вимкнено/.test(b0.st) && b0.rows.length === 24 && b0.rows.every(r => r.na && r.v === '—') && b0.groups.join() === 'Рух,Стійкість,Керування,Паливо,Стан машини', JSON.stringify(b0.rows.slice(0, 3)));
+  ok(`[${T}] дотик — вікно «${b0.title}» на весь екран: угорі праворуч перемикач, унизу «${b0.backTxt}»`, b0.open && b0.box.t === 0 && b0.box.h === b0.H && b0.title === 'Модуль OBD' && b0.sw.r >= b0.box.r - 20 && b0.sw.t < 80 && b0.sw.h >= 44 && b0.backTxt === 'Назад' && b0.back.b >= b0.H - 40 && b0.back.h >= 50 && b0.back.w >= b0.box.w - 40 && await app(page, () => document.getElementById('quick').hidden), JSON.stringify({ box: b0.box, sw: b0.sw, back: b0.back }));
+  ok(`[${T}] пристрій не підключено — перемикач неактивний (блідий, «${b0.swTxt}»): «${b0.st.slice(0, 90)}…»; ${b0.rows.length} показань — сірі «—»`, !b0.swOn && b0.swDis && b0.swAria === 'true' && b0.swOp < 0.6 && /^Пристрій зчитування не підключено/.test(b0.st) && /Підключіть пристрій зчитування \(модуль OBD\)/.test(b0.st) && /підключення модуля ще немає/.test(b0.st) && b0.rows.length === 24 && b0.rows.every(r => r.na && r.v === '—') && b0.groups.join() === 'Рух,Стійкість,Керування,Паливо,Стан машини', b0.st);
   ok(`[${T}] пометка: модуль лише слухає, у машину нічого не надсилає, даних про водія не бере`, /Модуль лише слухає — у машину нічого не надсилає/.test(b0.legal) && /не надсилає в машину жодних команд/.test(b0.legal) && /даних про водія/.test(b0.legal) && /за згодою власника/.test(b0.legal), b0.legal.slice(0, 120));
   ok(`[${T}] вікно OBD: усе читається й нічого не обрізано (з прокруткою списку)`, (await readCheck(page, '#obdBox', '#obdBody')).length === 0, JSON.stringify(await readCheck(page, '#obdBox', '#obdBody')));
   if (full || sc.n === 'tiny') await shot(page, '69-obd-off-' + sc.n);
-  // в) увімкнули — ця версія оболонки ще не вміє підключати: «Немає зв'язку з OBD», чесно чому
-  await page.click('#obdBox [data-obd="sw"]'); await sleep(300);
+  // в) дотик до неактивного перемикача нічого не вмикає — рядок стану блимає: спершу підключіть пристрій
+  await page.click('#obdBox [data-obd="sw"]', { force: true }); await sleep(200);       // force: Playwright сам не тисне на aria-disabled, а палець — тисне
   const b1 = await box();
-  ok(`[${T}] перемикач — зелений «${b1.swTxt}»; зв'язку немає: «${b1.st.slice(0, 60)}…»`, b1.swOn && b1.swTxt === 'Увімк.' && /^Немає зв’язку з OBD/.test(b1.st) && /ще не вміє підключати модуль/.test(b1.st) && b1.rows.every(r => r.na), b1.st);
-  // г) модуль на зв'язку (як із оболонки): кадри J1939 — розшифровані показання, рядок зелений
+  ok(`[${T}] неактивний перемикач не вмикається (умикати нічого) — підказка «підключіть пристрій» блимає`, !b1.swOn && b1.swDis && /nudge/.test(b1.stCls) && /^Пристрій зчитування не підключено/.test(b1.st) && await app(page, () => !window.__app.obd.isOn() && window.__app.S.obd !== true), JSON.stringify({ sw: b1.swOn, cls: b1.stCls }));
+  // г) пристрій підключився (каже оболонка) — модуль умикається сам, перемикач активний; показань ще немає
+  await app(page, () => window.__reis('obdLink', { state: 'conn', dev: 'WiCAN Pro' })); await sleep(400);
+  const b2a = await box();
+  ok(`[${T}] пристрій підключено — перемикач активний і ввімкнений сам («${b2a.swTxt}»): «${b2a.st}»`, b2a.swOn && !b2a.swDis && b2a.swAria === 'false' && b2a.swOp > 0.9 && b2a.swTxt === 'Увімк.' && /^Підключено: WiCAN Pro/.test(b2a.st) && /Показань поки немає — увімкніть запалювання/.test(b2a.st) && b2a.rows.every(r => r.na), b2a.st);
+  // ґ) кадри J1939 — розшифровані показання
   const FR = [['18FEF100', '00 00 55 00 00 00 00 00'], ['0CF00400', 'F0 7D 82 30 2A 00 F0 7D'], ['18F00503', '89 00 00 8F 00 00 00 00'], ['18FEC1EE', 'A0 86 01 00 00 00 00 00'],
     ['18F0090B', '32 7E 00 8F 7E 00 80 7D'], ['18F0010B', '10 32 00 00 00 00 00 00'], ['18FEFC17', 'FF A6 00 00 00 00 00 00'], ['18FEEE00', '7D 00 00 00 00 00 00 00'], ['18FEF700', '00 00 00 00 30 02 00 00'], ['18FEF500', '00 00 00 C0 24 00 00 00']];
-  await app(page, fr => { window.__reis('obdLink', { state: 'ok', dev: 'WiCAN Pro' }); window.__reis('obd', { f: fr }); }, FR); await sleep(500);
+  await app(page, fr => window.__reis('obd', { f: fr }), FR); await sleep(500);
   const b2 = await box(), V = k => (b2.rows.find(r => r.k === k) || {}).v;
   ok(`[${T}] показання розшифровано: ${['speedW', 'rpm', 'gear', 'dist', 'steer', 'yaw', 'abs', 'brake', 'fuelLvl', 'cool', 'batt', 'amb'].map(k => V(k)).join(' · ')}`,
-    /^Підключено: WiCAN Pro/.test(b2.st) && /ok/.test(b2.stCls) && V('speedW') === '85 км/год' && V('rpm') === '1 350 об/хв' && V('gear') === '18' && V('dist') === '500,0 км' && V('steer') === '10°' && V('yaw') === '2,0 °/с' && V('abs') === 'втручається' && V('brake') === '20 %' && V('fuelLvl') === '66 %' && V('cool') === '85 °C' && V('batt') === '28,0 В' && V('amb') === '21 °C' && (b2.rows.find(r => r.k === 'speedT') || {}).na, JSON.stringify(b2.rows.map(r => r.k + ':' + r.v)));
+    /^Підключено: WiCAN Pro$/.test(b2.st) && /ok/.test(b2.stCls) && V('speedW') === '85 км/год' && V('rpm') === '1 350 об/хв' && V('gear') === '18' && V('dist') === '500,0 км' && V('steer') === '10°' && V('yaw') === '2,0 °/с' && V('abs') === 'втручається' && V('brake') === '20 %' && V('fuelLvl') === '66 %' && V('cool') === '85 °C' && V('batt') === '28,0 В' && V('amb') === '21 °C' && (b2.rows.find(r => r.k === 'speedT') || {}).na, JSON.stringify(b2.rows.map(r => r.k + ':' + r.v)));
   if (full) await shot(page, '69-obd-live-' + sc.n);
   const u = await app(page, () => { const O = window.__app.obd; return { p1: O.pgnOf(0x18F00900), p2: O.pgnOf(0x18EA0017), p3: O.pgnOf(0x0CFE6CEE), na: O.feed('18FEF100', 'FF FF FF FF FF FF FF FF') }; });
   ok(`[${T}] розшифровка J1939: PGN із ідентифікатора (VDC2 ${u.p1.toString(16)}, запит ${u.p2.toString(16)}, TCO1 ${u.p3.toString(16)}); «немає значення» (FF) — не показуємо`, u.p1 === 0xF009 && u.p2 === 0xEA00 && u.p3 === 0xFE6C && u.na === 0, JSON.stringify(u));
+  // д) вимкнули перемикачем — показань не беремо й не показуємо, пристрій лишається підключеним; значок сірий
+  await page.click('#obdBox [data-obd="sw"]'); await sleep(250);
+  await app(page, fr => window.__reis('obd', { f: fr }), FR); await sleep(400);
+  const b3 = await box();
+  ok(`[${T}] вимкнули перемикачем — «${b3.st}»; показання сірі, нових кадрів не беремо`, !b3.swOn && !b3.swDis && /^Підключено: WiCAN Pro\. Модуль вимкнено/.test(b3.st) && /Увімкніть перемикач угорі/.test(b3.st) && b3.rows.every(r => r.na) && await app(page, () => window.__app.obd.freshCount() === 0 && window.__app.S.obd === false), b3.st);
   await page.click('#obdBox [data-obd="back"]'); await sleep(200);
   await page.click('#bQuick'); await sleep(250);
-  const q1 = await row();
-  ok(`[${T}] «Назад» — вікно закрито; у швидких налаштуваннях рядок зелений: «${q1 && q1.t}»`, !(await box()).open && q1 && q1.on && /підключено · показань: \d+/.test(q1.t), JSON.stringify(q1));
-  await page.click('#quick [data-q="close"]'); await sleep(150);
-  // ґ) показання перестали йти — за 5 с «немає зв'язку», рядок знову сірий
-  await sleep(6200);
+  const q1 = await ico();
+  ok(`[${T}] «Назад» — вікно закрито; значок у швидких налаштуваннях сірий («${q1 && q1.lab}»)`, !(await box()).open && q1 && !q1.on && /підключено, модуль вимкнено/.test(q1.lab), JSON.stringify(q1));
+  // е) увімкнули знову — показання йдуть, значок зелений
+  await page.click('#quick .q-obd'); await sleep(250);
+  await page.click('#obdBox [data-obd="sw"]'); await sleep(200);
+  await app(page, fr => window.__reis('obd', { f: fr }), FR); await sleep(400);
+  const b4 = await box();
+  await app(page, () => window.__reisBack()); await sleep(200);
   await page.click('#bQuick'); await sleep(250);
-  const q2 = await row();
-  ok(`[${T}] показань немає понад 5 с — рядок сірий: «${q2 && q2.t}»`, q2 && !q2.on && /немає зв’язку/.test(q2.t), JSON.stringify(q2));
-  // д) приклад показань (як виглядатиме) — чесно позначено; закрили вікно — прикладу немає
+  const q2 = await ico();
+  ok(`[${T}] увімкнули знову — показання йдуть; значок зелений («${q2 && q2.lab}»)`, b4.swOn && /^Підключено: WiCAN Pro$/.test(b4.st) && b4.rows.filter(r => !r.na).length >= 15 && q2 && q2.on && /47, 158, 98/.test(q2.bg) && /модуль увімкнено/.test(q2.lab), JSON.stringify({ st: b4.st, q2 }));
+  if (full) await shot(page, '69-obd-quick-on-' + sc.n);
+  await page.click('#quick [data-q="close"]'); await sleep(150);
+  // є) показання перестали йти — у вікні «показань поки немає»; пристрій відключили — перемикач знову неактивний, значок сірий
+  await sleep(6200);
+  await page.click('#bQuick'); await sleep(200); await page.click('#quick .q-obd'); await sleep(250);
+  const b5 = await box();
+  ok(`[${T}] кадрів немає понад 5 с — «${b5.st}», показання сірі; перемикач лишається ввімкненим`, b5.swOn && /Показань поки немає/.test(b5.st) && b5.rows.every(r => r.na), b5.st);
+  await app(page, () => window.__reis('obdLink', { state: 'none' })); await sleep(300);
+  const b6 = await box();
+  await app(page, () => window.__reisBack()); await sleep(200);
+  await page.click('#bQuick'); await sleep(250);
+  const q3 = await ico();
+  ok(`[${T}] пристрій відключили — перемикач знову неактивний («${b6.st.slice(0, 36)}…»), значок сірий`, !b6.swOn && b6.swDis && /^Пристрій зчитування не підключено/.test(b6.st) && q3 && !q3.on, JSON.stringify({ st: b6.st, q3 }));
+  // ж) приклад показань (як виглядатиме) — чесно позначено; закрили вікно — прикладу немає
   await page.click('#quick .q-obd'); await sleep(250);
   await page.click('#obdBox [data-obd="demo"]'); await sleep(300);
-  const b3 = await box();
-  ok(`[${T}] «Показати приклад» — «${b3.st.slice(0, 40)}…», показання заповнено`, /^Приклад показань \(не з вашої машини\)/.test(b3.st) && b3.rows.filter(r => !r.na).length >= 20, b3.st);
+  const b7 = await box();
+  ok(`[${T}] «Показати приклад» — «${b7.st.slice(0, 40)}…», показання заповнено; перемикач лишається неактивним`, /^Приклад показань \(не з вашої машини\)/.test(b7.st) && b7.rows.filter(r => !r.na).length >= 20 && b7.swDis && !b7.swOn, b7.st);
   const back = await app(page, () => window.__reisBack());
   ok(`[${T}] системна «Назад» закриває вікно; прикладу після закриття немає`, back === true && !(await box()).open && await app(page, () => !window.__app.obd.st.demo && window.__app.obd.freshCount() === 0));
-  await app(page, () => window.__app.obd.setOn(false));
   ok(`[${T}] прохід 41 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 41 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
-/* ---------- 42 (1.1.34): «Улюблені місця», дотик до сірого варіанта на карті, плитка «Звук» без червоного ---------- */
 if (run('42')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'S10'].includes(x.n)).filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
   const T = sc.title, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
@@ -5054,6 +5086,60 @@ if (run('42')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'S10'].in
   ok(`[${T}] прохід 42 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 42 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+
+/* ============ прохід 43 (1.1.35, Діма): планшет набік і вікно на пів екрана ============
+   Діма (знімки з планшета): «настройки, карта и звук, если возможно перенести в один столбик» — на планшеті, покладеному набік, кнопки
+   праворуч стояли у два стовпчики; «когда открыто два окна также звук поиск и карта, плюс в этом режиме треугольник который ведёт уехал
+   верх от рейса» — те саме у вікні на пів екрана, і стрілка машини там стояла помітно вище над кнопкою «Рейс», ніж на весь екран.
+   Розміри — оцінка зі знімків (планшет ~1000×540 у CSS-пікселях, вікно ~494×540); поруч перевіряємо сусідні розміри. */
+const gap43 = {};
+if (run('43')) for (const sc of [
+  { n: 'dland', w: 1000, h: 540, dpr: 1, title: 'планшет Діми набік ~1000×540' }, { n: 'dland2', w: 960, h: 552, dpr: 1, title: 'планшет набік 960×552' }, { n: 'dland3', w: 1024, h: 600, dpr: 1, title: 'планшет набік 1024×600' },
+  { n: 'dsplit', w: 494, h: 540, dpr: 1, title: 'вікно на пів планшета ~494×540' }, { n: 'dsplit2', w: 640, h: 540, dpr: 1, title: 'вікно на дві третини 640×540' }, { n: 'dsplit3', w: 500, h: 600, dpr: 1, title: 'вікно на пів планшета 500×600' }
+].filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+  const T = sc.title, n = coords.length, emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const trip = { id: 't-43', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: turnIdx[2], len: 3500, time: 300 }, { type: 15, ins: 'Поверніть ліворуч', street: 'вулиця Соборності', streets: ['вулиця Соборності'], i0: turnIdx[2], i1: n - 1, len: 23300, time: 1400 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  const meas = () => app(page, () => { const vis = el => !!el && !el.hidden && !el.closest('[hidden]') && getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden' && el.getBoundingClientRect().width > 0;
+    const R = e => { if (!vis(e)) return null; const r = e.getBoundingClientRect(); return { l: +r.left.toFixed(1), t: +r.top.toFixed(1), r: +r.right.toFixed(1), b: +r.bottom.toFixed(1), cx: +((r.left + r.right) / 2).toFixed(1), cy: +((r.top + r.bottom) / 2).toFixed(1), w: +r.width.toFixed(1), h: +r.height.toFixed(1) }; };
+    const q = s => R(document.querySelector(s)), rail = ['#bQuick', '#bMap', '#bSnd', '#bSearch'].map(q).filter(Boolean), a = window.__app.map.anchorPoint();
+    return { rail, top: q('#top'), center: q('#bCenter'), fwd: q('#bFwd100'), back: q('#bBack100'), tilt: q('#tilt'), bar: q('#tabbar'), tabs: q('#tabs'), go: q('#tabs [data-panel="trip"]') || q('#tabs > button:nth-child(3)'), man: q('#man'), speed: q('#speed'),
+      anc: { x: Math.round(a.x), y: Math.round(a.y) }, W: innerWidth, H: innerHeight, cls: document.body.className.split(' ').filter(c => /^rail-/.test(c)).join(' '), dir: getComputedStyle(document.getElementById('rail')).flexDirection }; });
+  const lay = async () => await page.evaluate(layoutCheck);
+  const oneCol = m => m.rail.length >= 3 && m.rail.every(b => Math.abs(b.cx - m.rail[0].cx) <= 1) && m.rail.every((b, i) => !i || b.t >= m.rail[i - 1].b + 5);
+  const free = (m, list) => list.filter(Boolean).every(o => m.rail.every(b => !(Math.min(b.r, o.r) - Math.max(b.l, o.l) > 1 && Math.min(b.b, o.b) - Math.max(b.t, o.t) > 1)));
+  await emitN('loc', { prov: 'gps', lat: coords[4][0], lon: coords[4][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(700);
+  // а) без рейсу: налаштування, карта, звук — одним стовпчиком
+  const a = await meas(); await shot(page, `70-dima-${sc.n}-1`);
+  ok(`[${T}] без рейсу: ${a.rail.length} кнопки праворуч — одним стовпчиком (осі ${a.rail.map(b => b.cx).join(', ')}; розмір ${a.rail[0].w}×${a.rail[0].h}${a.cls ? ', ' + a.cls : ''}); нічого не накладається`, a.rail.length === 3 && oneCol(a) && a.rail.every(b => b.w >= 42 && b.h >= 42 && b.r <= a.W - 4) && free(a, [a.top, a.tilt, a.center]) && (await lay()).length === 0, JSON.stringify({ rail: a.rail, top: a.top, cls: a.cls, lay: await lay() }));
+  // б) рейс: додається пошук — чотири кнопки, і теж одним стовпчиком
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip); await sleep(500);
+  await emitN('loc', { prov: 'gps', lat: coords[6][0], lon: coords[6][1], acc: 5, spd: 12, brg: 270, t: Date.now() }); await sleep(900);
+  await app(page, () => window.__app.map.setFollow(true)); await sleep(700);
+  const b = await meas(); await shot(page, `70-dima-${sc.n}-2`);
+  ok(`[${T}] рейс: ${b.rail.length} кнопки (з пошуком) — одним стовпчиком (осі ${b.rail.map(x => x.cx).join(', ')}; розмір ${b.rail[0].w}×${b.rail[0].h}${b.cls ? ', ' + b.cls : ''}); підказку повороту й повзунок не закривають`, b.rail.length === 4 && oneCol(b) && b.rail.every(x => x.w >= 42 && x.h >= 42 && x.r <= b.W - 4) && free(b, [b.top, b.man, b.tilt]) && (await lay()).length === 0, JSON.stringify({ rail: b.rail, top: b.top, man: b.man, cls: b.cls, lay: await lay() }));
+  gap43[sc.n] = Math.round(b.tabs.t - b.anc.y);
+  ok(`[${T}] стрілка машини — на ${gap43[sc.n]} px над нижньою плашкою (екран ${b.H} px, точка ${b.anc.y})`, b.anc.y > b.H * 0.5 && gap43[sc.n] >= 28 && gap43[sc.n] <= 60, JSON.stringify({ anc: b.anc, tabs: b.tabs, H: b.H }));
+  if (sc.n === 'dsplit' && gap43.dland != null) ok(`[${T}] (Діма: «у двох вікнах трикутник поїхав угору від "Рейсу"») стрілка над плашкою на тій самій висоті, що й на весь екран: ${gap43.dsplit} і ${gap43.dland} px`, Math.abs(gap43.dsplit - gap43.dland) <= 2, JSON.stringify(gap43));
+  // в) карту зсунули — «Моє місце» над повзунком; стовпчик до нього не дістає
+  await app(page, () => { window.__app.map.setFollow(false); window.__app.map.view.lastTouch = Date.now() + 600000; window.dispatchEvent(new Event('resize')); }); await sleep(800);
+  const c = await meas(); await shot(page, `70-dima-${sc.n}-3`);
+  ok(`[${T}] карту зсунули: «Моє місце» над повзунком; ${c.rail.length} кнопки лишаються одним стовпчиком і до нього не дістають (${c.center ? Math.round(c.center.t - c.rail[c.rail.length - 1].b) : '?'} px)${c.cls ? ', ' + c.cls : ''}`, !!c.center && c.rail.length === 4 && oneCol(c) && free(c, [c.center, c.tilt, c.top, c.man]) && (await lay()).length === 0, JSON.stringify({ rail: c.rail, center: c.center, cls: c.cls, lay: await lay() }));
+  // г) GPS зник: ±100 над повзунком — стовпчик їх не закриває
+  await app(page, () => { window.__app.map.view.lastTouch = 0; window.__app.map.setFollow(true); window.__app.nav.nudge(0); }); await sleep(1300);
+  await app(page, () => window.__app.map.setFollow(true)); await sleep(900);
+  const d = await meas(); await shot(page, `70-dima-${sc.n}-4`);
+  ok(`[${T}] без GPS: ±100 над повзунком, кнопок праворуч ${d.rail.length} — ${d.cls === 'rail-tight' ? 'у два стовпчики (одним не вміщаються)' : 'одним стовпчиком'}; ±100 не закривають`, !!d.fwd && !!d.back && d.rail.length === 4 && free(d, [d.fwd, d.back, d.center, d.tilt, d.top, d.man]) && (await lay()).length === 0, JSON.stringify({ rail: d.rail, fwd: d.fwd, back: d.back, cls: d.cls, lay: await lay() }));
+  // ґ) GPS повернувся — знову один стовпчик
+  const p6 = await app(page, () => { const i = window.__app.guide.g.idx, q = i.at((window.__app.nav.pos.rd || 0) + 30); return { lat: q.lat, lon: q.lon, brg: q.brg }; });
+  for (let k = 0; k < 4; k++) { await emitN('loc', { prov: 'gps', lat: p6.lat, lon: p6.lon, acc: 5, spd: 12, brg: p6.brg, t: Date.now() }); await sleep(450); }
+  await app(page, () => window.__app.map.setFollow(true)); await sleep(700);
+  const e = await meas();
+  ok(`[${T}] GPS повернувся — ±100 зникли, ${e.rail.length} кнопки знову одним стовпчиком${e.cls ? ' (' + e.cls + ', ' + e.rail[0].w + ' px)' : ''}`, !e.fwd && e.rail.length === 4 && oneCol(e) && (await lay()).length === 0, JSON.stringify({ rail: e.rail, cls: e.cls, fwd: e.fwd, lay: await lay() }));
+  ok(`[${T}] прохід 43 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`[${sc.title}] прохід 43 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);
