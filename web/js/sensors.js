@@ -54,7 +54,7 @@ function onOri(e) { if (e.alpha == null && e.beta == null) return; ms.alpha = e.
 export function motionHint() {
   if (typeof globalThis.__motionHint === 'function') return globalThis.__motionHint();      // стенд: підміна датчиків
   if (!ms.ok || Date.now() - ms.t > 2500) return null;
-  return { handled: Date.now() - lastHandled < 1200, tilt: ms.tilt, peak: ms.peak };
+  return { handled: Date.now() - lastHandled < 1200, tilt: ms.tilt, peak: ms.peak, up: ms.up.slice() };   // (1.1.34) up — нахил телефона відносно землі
 }
 export function startMotion() {
   if (started || typeof window === 'undefined' || !window.addEventListener || typeof DeviceMotionEvent === 'undefined') return;

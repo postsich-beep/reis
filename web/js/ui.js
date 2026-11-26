@@ -2,13 +2,14 @@
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
 import { OBD_ICON, openObd, tileState as obdTile } from './ui_obd.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
+import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn, jumpToCp } from './nav.js';
 import { chime, initSfx } from './sfx.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords, selectChoice, confirmChoice, cancelChoice } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
+import * as favs from './favs.js';
 import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages, viasOf, viaSlot, VIA_MAX } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
@@ -180,7 +181,7 @@ function quickHtml() {
   const tile = (k, icon, label, state, on, extra = '') => `<button class="q-tile${on ? ' on' : ''}${extra}" data-q="${k}" aria-pressed="${!!on}">${icon}<span class="q-l">${label}</span><span class="q-s">${state}</span></button>`;
   const th = S.theme || 'auto';
   return head(t('quickTitle')) + `<div class="q-grid">
-    ${tile('voice', S.voice ? ICON.vol : ICON.mute, t('qVoice'), S.voice ? t('qOn') : t('qOff'), S.voice, S.voice ? '' : ' warn')}
+    ${tile('voice', S.voice ? ICON.vol : ICON.mute, t('qVoice'), S.voice ? t('qOn') : t('qOff'), S.voice)}
     ${tile('3d', `<b class="q-txt">${S.view3d ? '3D' : '2D'}</b>`, t('qView'), S.view3d ? t('q3d') : t('q2d'), S.view3d)}
     ${tile('north', view.north ? ICON.north : ICON.head, t('qOrient'), view.north ? t('qNorthUp') : t('qHeadUp'), view.north)}
     ${tile('center', ICON.center, t('qCenter'), view.follow ? t('qFollowOn') : t('qFollowOff'), view.follow)}
@@ -593,7 +594,8 @@ const canSaveTrip = () => !!plan.trip || !!plan.b || !!($('in_b') && $('in_b').v
 function tripToolsHtml() {
   const n = archList().length;
   return `<button class="tt-b" data-act="archive"><em class="tt-ic" aria-hidden="true">${ICON.archive}${n ? `<i>${n}</i>` : ''}</em><span>${t('tripArchive')}</span></button>
-    <button class="tt-b${canSaveTrip() ? ' can' : ''}" data-act="saveTrip" ${plan.busy ? 'disabled' : ''}><em class="tt-ic" aria-hidden="true">${ICON.save}</em><span>${t('tripSave')}</span></button>`;
+    <button class="tt-b${canSaveTrip() ? ' can' : ''}" data-act="saveTrip" ${plan.busy ? 'disabled' : ''}><em class="tt-ic" aria-hidden="true">${ICON.save}</em><span>${t('tripSave')}</span></button>
+    <button class="tt-b tt-fav" data-act="favs" aria-label="${t('favBtn')}" title="${t('favBtn')}"><em class="tt-ic" aria-hidden="true">${ICON.heart}${favs.count() ? `<i>${favs.count()}</i>` : ''}</em></button>`;
 }
 function tripToolsSync() { const b = $('tripTools'); if (b) b.innerHTML = tripToolsHtml(); }
 /** Зберегти прокладений рейс і почати з чистого аркуша (його видно в «Архіві рейсів»). */
@@ -636,6 +638,39 @@ definePanel('archive', {
   title: () => t('tripArchive'), back: 'trip', tab: 'trip',
   render(body) { body.innerHTML = archiveHtml(); body.onclick = archClicks; body.oninput = null; body.onfocusin = null; },
   update(body) { body.innerHTML = archiveHtml(); }
+});
+/* ---------- (1.1.34) «Улюблені місця» ----------
+   Кнопка-сердечко в одному рядку з «Архів рейсів» і «Зберегти рейс», праворуч (на малому екрані S10 третій рядок не вміщався). Місця додаються сердечком на картці знайденого місця (ui_search.js).
+   Тут — список: торкнулись рядка — місце стає фінішем рейсу; праворуч «Старт» і «Через»; кошик (з поверненням). Усе лежить у телефоні. */
+function favsHtml() {
+  const l = favs.list();
+  if (!l.length) return `<div class="arch-empty fav-empty">${ICON.heart}<div>${t('favEmpty')}</div></div>`;
+  const dist = f => pos.lat != null ? fmtDist(hav(pos, f)) : '';
+  return `<div class="muted arch-hint">${t('favHint')}</div><div class="list fav-list">` + l.map(f => `<div class="item fav-row" data-fid="${f.id}">
+      <button class="fav-main" data-fgo="${f.id}"><span class="fav-ic">${ICON.heart}</span><span class="grow"><span class="t">${esc(f.label)}</span><span class="muted">${esc([f.sub, dist(f)].filter(Boolean).join(' · '))}</span></span></button>
+      <button class="btn sm" data-fa="${f.id}">${t('favFrom')}</button><button class="btn sm" data-fv="${f.id}">${t('favVia')}</button>
+      <button class="btn sm arch-del" data-fdel="${f.id}" aria-label="${t('favDelAria')}">${ICON.trash}</button></div>`).join('') + '</div>';
+}
+function favsUse(f, k) {
+  const place = favs.toPlace(f);
+  if (plan.trip) { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); previewAlts(null); mapM.previewPoints(null); hud(); }   // точки змінились — старий маршрут не підходить
+  plan[k] = place; places.remember(place);
+  toast(t(k === 'b' ? 'favSet' : k === 'a' ? 'favSetA' : 'favSetV', f.label), 'green', 3500);
+  openPanel('trip');
+}
+function favsClicks(e) {
+  const b = e.target.closest('button'); if (!b) return;
+  const d = b.dataset, f = favs.find(d.fgo || d.fa || d.fv || d.fdel); if (!f) return;
+  if (d.fgo) favsUse(f, 'b');
+  else if (d.fa) favsUse(f, 'a');
+  else if (d.fv) favsUse(f, 'v');
+  else if (d.fdel) { const gone = favs.remove(f.id); favsRedraw(); toast(t('favRemoved'), '', 7000, () => { favs.restore(gone); favsRedraw(); toast(t('favRestored'), 'green', 3000); }); }
+}
+function favsRedraw() { if (currentPanel() === 'favs') { const b = $('panelBody'), st = b.scrollTop; b.innerHTML = favsHtml(); b.scrollTop = st; } tripToolsSync(); }
+definePanel('favs', {
+  title: () => t('favTitle'), back: 'trip', tab: 'trip',
+  render(body) { body.innerHTML = favsHtml(); body.onclick = favsClicks; body.oninput = null; body.onfocusin = null; },
+  update(body) { body.innerHTML = favsHtml(); }
 });
 // Поле точки рейсу: значок (старт / через / фініш), текст — або кнопка «на карті»: поставити точку пальцем
 function fieldHtml(k, ph) {
@@ -1212,6 +1247,7 @@ function tripClicks(e) {
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
   else if (d.act === 'saveTrip') saveTripTap();
   else if (d.act === 'archive') openPanel('archive');
+  else if (d.act === 'favs') openPanel('favs');
   else if (d.act === 'reroute') { rerouteNow(); closePanel(); }
   else if (d.act === 'offline' && g.route) runOffline(g.route);
   else if (d.act === 'stop') endTrip(true);
@@ -1709,6 +1745,12 @@ export function initUI() {
     if (ev.by !== 'gyro' || (ev.jump < 60 && ev.waited < 10)) return;
     const now = Date.now(); if (now - cpToastT < 20000) return; cpToastT = now;
     toast(t(ev.jump >= 60 ? 'turnPassJump' : 'turnPassWait', ev.jump >= 60 ? fmtDist(ev.jump) : fmtMS(ev.waited)) + (ev.next ? ' ' + t('turnMatchNext', fmtDist(ev.next.dist)) : ''), 'green', 6000);
+  });
+  // (1.1.34) без GPS: дотик до контрольного повороту на карті — позначка переходить на нього (скасувати — дотиком до сповіщення)
+  bus.on('cpTap', d => {
+    const r = jumpToCp(d); if (!r) return;
+    P.vibrate(40); setFollow(true);
+    toast(t(r.after ? 'cpJumpAfter' : 'cpJumpBefore', cpWhat(r.cp)), 'green', 8000, () => { if (undoTurn()) toast(t('turnUndone'), '', 4000); });
   });
   $('bTurn').onclick = () => {
     const c = passTurn(); if (!c) return;

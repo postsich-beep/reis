@@ -1,5 +1,6 @@
 // Запуск застосунку.
 import { bus, log, S, VERSION } from './core.js';
+import * as favs from './favs.js';
 import * as core from './core.js';
 import * as P from './platform.js';
 import * as nav from './nav.js';
@@ -57,5 +58,5 @@ async function boot() {
   setTimeout(() => b.classList.add('gone'), 500); setTimeout(() => b.remove(), 1200);
   if ('serviceWorker' in navigator && !P.isNative && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
 }
-window.__app = { bus, S, P, core, obd, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, journey, uiJourney, pipWin, lab, ui: { ptsState } };   // для діагностики й автотестів
+window.__app = { bus, S, P, core, favs, obd, roads, rough, showers, nav, guide, poi, feed, track, sim, map: mapM, route, weather, offline, addr, stopsdb, vplaces, reports, limits, sfx, sensors, calib, uiCalib, journey, uiJourney, pipWin, lab, ui: { ptsState } };   // для діагностики й автотестів
 boot().catch(e => log('err', 'запуск: ' + (e && e.stack || e)));

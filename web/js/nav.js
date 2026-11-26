@@ -121,6 +121,7 @@ export function setRoute(idx, mans = null) {
     if (keepDr && loc && loc.off < 400) { pos.rd = loc.d; pos.onRoute = true; pos.off = 0; if (kf.on) kf.d = loc.d; }
     else matchRoute(pos, pos.spd);
   }
+  if (idx && pos.mode === 'dr' && !pos.onRoute) rejoinRoute();    // (1.1.34) рейс задали (чи перебудували), коли GPS уже не було
   if (idx && pos.mode === 'approx' && !simOn) tryLock();
 }
 
@@ -135,7 +136,8 @@ function estimateRd() {
     const lg = JSON.parse(localStorage.getItem('reis.lastGood') || 'null');
     if (lg && lg.lat != null && Date.now() - lg.t < 30 * 60000) {
       const l = route.locate(lg, null), age = (Date.now() - lg.t) / 1000;
-      if (l && l.off < 300) a = { d: Math.min(route.total, l.d + (vCruise > 0.5 ? vCruise * age * 0.85 : 0)), sig: 150 + 0.25 * vCruise * age, src: 'last' };
+      // (1.1.34) до 1,5 км від рейсу (АЗС, стоянка): похибка — скільки було вбік; раніше далі 300 м остання точка не бралась
+      if (l && l.off < REJOIN_MAX) a = { d: Math.min(route.total, l.d + (vCruise > 0.5 ? vCruise * age * 0.85 : 0)), sig: 150 + l.off + 0.25 * vCruise * age, src: 'last' };
     }
   } catch (_) {}
   if (net && Date.now() - net.rt < 120000) {
@@ -160,6 +162,22 @@ function placeOnRoute(d, accBase, reason) {
   pos.accRef = pos.manRef = pos.drDist; pos.accBase = accBase; pos.acc = Math.round(accBase); netInnov = []; holdSince = 0;
   kfInit(pos.rd, accBase);
   bus.emit('pos', pos);
+}
+// (1.1.34) Повернення на рейс. Рейс іде, GPS зник, а остання точка лежала збоку від лінії рейсу більше ніж на 45–120 м
+// (АЗС, стоянка, з'їзд, або глушіння вже кидало точки вбік). Раніше позначка йшла «вільним» розрахунком за гіроскопом
+// і на рейс уже не поверталась: «перестав вести, збився, хоча їхали по маршруту» (Діма, 26.11). Рейс задано — водій
+// їде ним, тож ставимо позначку на найближче місце рейсу (похибка — скільки було вбік) і ведемо далі по рейсу.
+// Далі від рейсу, ніж REJOIN_MAX, — це справді інша дорога: лишаємо вільний розрахунок, але щоп'ять секунд пробуємо знову,
+// і щойно розрахована точка в межах своєї похибки дійде до рейсу — повертаємо на рейс.
+const REJOIN_MAX = 1500;
+let rejoinT = 0;
+function rejoinRoute(lim = REJOIN_MAX) {
+  if (!route || pos.onRoute || pos.lat == null || pos.mode !== 'dr' || simOn) return false;
+  const l = route.locate(pos, pos.rd); if (!l || l.off > lim) return false;
+  log('info', `GPS немає, позначка була за ${Math.round(l.off)} м від рейсу — ставимо на рейс і ведемо по ньому`);
+  placeOnRoute(l.d, clamp(l.off + 120, 120, REJOIN_MAX), pos.reason || 'timeout');
+  bus.emit('rejoin', { off: Math.round(l.off) });
+  return true;
 }
 // Старт фільтра: швидкість — від водія, з останнього чесного GPS, з Wi-Fi або планова.
 function kfInit(d, sig) {
@@ -449,6 +467,7 @@ function enterDR(reason) {
   log('warn', 'GPS: розрахунок без сигналу, причина=' + reason);
   bus.emit('gpsLost', { reason });
   bus.emit('pos', pos);
+  if (reason !== 'manual') rejoinRoute();                 // (1.1.34) остання точка була збоку від рейсу — одразу на рейс
 }
 
 function exitDR(f) {
@@ -607,6 +626,8 @@ function tick() {
     bus.emit('pos', pos);
     return;
   }
+  // (1.1.34) вільний розрахунок під час рейсу: щоп'ять секунд пробуємо повернутись на рейс (у межах похибки розрахунку)
+  if (route && !pos.onRoute && !simOn && now - rejoinT > 5000) { rejoinT = now; if (rejoinRoute(clamp(pos.acc || 150, 150, REJOIN_MAX))) return; }
   const v = curSpeed(), step = v * (dt + carry); carry = 0;
   if (step > 0) {
     const h = (yawNow != null && yawRef != null && hdgRef != null) ? ((hdgRef + yawNow - yawRef) % 360 + 360) % 360 : (compass != null ? compass : pos.hdg);
@@ -626,7 +647,7 @@ function cpView() {
 function gateEvents(now) {
   for (const ev of trk.takeEvents()) {
     const nx = trk.cps[trk.cpi] || null;
-    log('info', `контрольний поворот ${ev.cp.ang}° (${ev.cp.cls === 'red' ? 'різкий' : 'дуга'}) пройдено: ${CP_BY[ev.by] || ev.by}` + (ev.jump ? `, позначку підтягнуто на ${ev.jump} м` : '') + (ev.waited ? `, чекала ${ev.waited} с` : '') + (ev.tempo != null ? `, темп ×${ev.tempo.toFixed(2)}` : ''));
+    log('info', `контрольний поворот ${ev.cp.ang}° (${ev.cp.cls === 'red' ? 'різкий' : 'дуга'}) пройдено: ${CP_BY[ev.by] || ev.by}` + (ev.jump ? `, позначку підтягнуто на ${ev.jump} м` : '') + (ev.waited ? `, чекала ${ev.waited} с` : '') + (ev.tempo != null ? `, темп ×${ev.tempo.toFixed(2)}` : '') + (ev.hand ? ' — поворот різкий (відкинутий як «телефон у руках»), зараховано, коли телефон заспокоївся в тому ж нахилі' : ''));
     if (ev.by === 'gyro') gyroSeen = now;
     bus.emit('cpPass', { ...ev, next: nx ? { d: nx.d, cls: nx.cls, ang: nx.ang, sgn: nx.sgn, dist: Math.round(Math.max(0, nx.d0 - trk.est.d)) } : null, sig: Math.round(trk.est.sig) });
   }
@@ -638,6 +659,18 @@ export function passTurn() {
   const c = trk.passNext(Date.now() / 1000); if (!c) return null;
   syncFromTracker(); gateEvents(Date.now()); bus.emit('pos', pos);
   return c;
+}
+// (1.1.34) Дотик до контрольного повороту на карті без GPS: позначка переходить на нього (d — місце повороту на рейсі)
+export function jumpToCp(d) {
+  if (pos.mode !== 'dr' || !route || !pos.onRoute) return null;
+  if (drTracker() && trk.o.gate) {
+    const i = trk.cps.findIndex(c => Math.abs(c.d - d) < 1); if (i < 0) return null;
+    const r = trk.jumpTo(i, Date.now() / 1000); if (!r) return null;
+    syncFromTracker(); gateEvents(Date.now());
+    log('info', `водій торкнувся контрольного повороту ${r.cp.ang}° на карті — позначку поставлено ${r.after ? 'за ним (телефон уже відчув поворот)' : 'перед ним (чекаємо повороту)'}`);
+    bus.emit('pos', pos); return r;
+  }
+  placeOnRoute(d, 60, 'manual'); return { cp: { d, ang: 0, cls: 'yellow' }, after: false };
 }
 export function undoTurn() {
   if (!drTracker() || !trk.undoPass(Date.now() / 1000)) return false;

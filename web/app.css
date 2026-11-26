@@ -419,6 +419,15 @@ body[data-theme="night"]{
 .tt-b[data-act="saveTrip"] .tt-ic{background:var(--green)}
 .tt-b[data-act="saveTrip"]{color:var(--ink-2)}
 .tt-b[data-act="saveTrip"]:not(.can) .tt-ic{opacity:.5}
+/* (1.1.34) «Улюблені місця» — сердечко в тому ж рядку, праворуч від двох кнопок (третій рядок на S10 ховався під нижню плашку;
+   посередині — напис «Зберегти рейс» з'їжджав під галочку «Готово» на вузькому екрані); червоний квадрат, як і решта значків,
+   кожен свого кольору; кількість — на значку */
+.trip-tools{grid-template-columns:1fr 1fr auto}
+.tt-b.tt-fav{min-width:54px;padding:5px 12px}
+@media (max-width:340px){ .tt-b{font-size:13.5px;gap:6px;padding:5px 4px} .tt-b[data-act="archive"]{gap:8px} .tt-b.tt-fav{min-width:46px;padding:5px 8px} .tt-ic{width:28px;height:28px} }   /* дуже вузький екран: три кнопки в рядок */
+.tt-b.tt-fav .tt-ic{background:var(--red)}
+.tt-b.tt-fav .tt-ic svg{fill:#fff;stroke:#fff}
+.tt-b.tt-fav .tt-ic i{background:var(--ink);color:var(--panel)}
 .tt-b[data-act="saveTrip"].can{color:var(--ink);border-color:var(--amber)}
 .tt-b:disabled{opacity:.55}
 /* «Архів рейсів»: окремий екран — назва рейсу у два рядки, «Відкрити» й кошик праворуч */
@@ -1522,6 +1531,10 @@ body.trip-on #bSearch{display:grid}
 .src-b .btn.sm{flex:none;min-height:52px;padding:0 12px;gap:6px}
 .src-b .btn.sm svg{width:20px;height:20px}
 .src-b .btn.sm.on{background:var(--green);color:#fff}
+/* (1.1.34) сердечко «Улюблене» — у рядку назви, поруч із ✕ (нижній ряд кнопок на вузькому екрані й так тісний); в улюблених — червоне, заповнене */
+.src-fav{flex:none;width:44px;height:44px;margin:-4px 0 0;border-radius:50%;display:grid;place-items:center;color:var(--ink-2)}
+.src-fav svg{width:24px;height:24px}
+.src-fav.on{color:var(--red)} .src-fav.on svg{fill:var(--red)}
 body.src-on :is(#speed,#cam,#spdPop,#zoom,#attr){visibility:hidden}
 @media (orientation:landscape) and (max-height:520px){ #srCard{left:auto;width:calc(46% - 16px)} }
 @media (min-width:700px){ #srCard{left:0;right:0;margin-inline:auto;width:min(560px,calc(100% - 16px))} }
@@ -1605,3 +1618,13 @@ body.sr-map :is(#rail,#zoom,#speed,#cam,#spdPop,#attr,#tilt,#top,#nudge){visibil
 .obd-foot{flex:none;padding:8px 14px 0;border-top:1px solid rgba(127,127,127,.18)}
 .obd-back{width:100%;min-height:54px;gap:8px;font:700 17px var(--f-ui)} .obd-back svg{width:22px;height:22px}
 @media (min-width:700px){ #obdBox{left:50%;right:auto;width:min(560px,100%);transform:translateX(-50%);box-shadow:var(--shadow)} }
+
+/* (1.1.34) «Улюблені місця»: список у панелі */
+.fav-list .fav-row{display:flex;align-items:center;gap:6px;padding:6px 8px}
+.fav-main{flex:1;min-width:0;display:flex;align-items:center;gap:10px;background:none;border:0;color:var(--ink);text-align:left;padding:4px 0;font:inherit}
+.fav-main .grow{display:flex;flex-direction:column;min-width:0}
+.fav-main .t{font-weight:700;overflow:hidden;text-overflow:ellipsis}
+.fav-ic{flex:none;display:grid;place-items:center;width:34px;height:34px;border-radius:10px;background:var(--red);color:#fff}
+.fav-ic svg{width:20px;height:20px;fill:#fff;stroke:#fff}
+.fav-row .btn.sm{flex:none;min-height:40px;padding:0 10px}
+.fav-empty svg{width:48px;height:48px;color:var(--red)}

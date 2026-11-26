@@ -118,7 +118,49 @@ export function askShow(r, onAnswer) {
 }
 export function askHide() { clearTimeout(askT); if (askM) { askM.remove(); askM = null; } }
 // Приціл для позначки: поки він увімкнений, дотик до карти — це місце позначки (а не вибір точки маршруту)
-let tapHook = null;
+// (1.1.34) Дотик до сірого варіанта маршруту робить його вибраним — як у Google Maps. Раніше спрацьовував лише точний дотик
+// у саму лінію (7 px) — пальцем туди майже не влучити. Тепер шукаємо варіанти в колі ±22 px від пальця й беремо найближчий;
+// там, де варіант іде спільною дорогою з вибраним (лінії лежать одна на одній), лишаємо вибраний.
+const ALT_TOL = 22;
+function segDist(p, a, b) {
+  const dx = b.x - a.x, dy = b.y - a.y, L = dx * dx + dy * dy;
+  const k = L ? Math.max(0, Math.min(1, ((p.x - a.x) * dx + (p.y - a.y) * dy) / L)) : 0;
+  return Math.hypot(p.x - a.x - k * dx, p.y - a.y - k * dy);
+}
+function featDist(f, pt) {
+  const g = f.geometry; if (!g) return Infinity;
+  const lines = g.type === 'LineString' ? [g.coordinates] : g.type === 'MultiLineString' ? g.coordinates : [];
+  let best = Infinity;
+  for (const ln of lines) {
+    let prev = null;
+    for (const c of ln) { const q = map.project(c); if (prev) best = Math.min(best, segDist(pt, prev, q)); else best = Math.min(best, Math.hypot(pt.x - q.x, pt.y - q.y)); prev = q; }
+  }
+  return best;
+}
+// (1.1.34) Контрольний поворот на карті без GPS — дотик пальцем у радіусі 26 px від кружечка (сам кружечок 6–14 px)
+export function cpAt(point) {
+  if (!map || !map.getLayer || !map.getLayer('cps-dot') || !point || pos.mode !== 'dr') return null;
+  let fs = []; try { fs = map.queryRenderedFeatures([[point.x - 26, point.y - 26], [point.x + 26, point.y + 26]], { layers: ['cps-dot'] }); } catch (_) { return null; }
+  let best = null, bd = Infinity;
+  for (const f of fs) { const q = map.project(f.geometry.coordinates), d = Math.hypot(q.x - point.x, q.y - point.y); if (d < bd && d <= 26) { bd = d; best = f.properties.d; } }
+  return best;
+}
+export function altAt(point) {
+  if (!map || !map.getLayer || !map.getLayer('route-alts') || !point) return null;
+  const box = [[point.x - ALT_TOL, point.y - ALT_TOL], [point.x + ALT_TOL, point.y + ALT_TOL]];
+  const layers = ['route-alts', 'route-line', 'route-sel'].filter(id => map.getLayer(id));
+  let fs = []; try { fs = map.queryRenderedFeatures(box, { layers }); } catch (_) { return null; }
+  let k = null, altD = Infinity, mainD = Infinity;
+  for (const f of fs) {
+    const d = featDist(f, point);
+    if (f.layer && f.layer.id === 'route-alts') { if (d < altD) { altD = d; k = f.properties ? f.properties.k : null; } }
+    else mainD = Math.min(mainD, d);
+  }
+  if (k == null || altD > ALT_TOL) return null;
+  if (mainD <= altD + 3) return null;              // спільна дорога: палець однаково близько до обох — лишаємо вибраний
+  return k;
+}
+let tapHook = null, lpT = 0;                 // lpT — коли востаннє спрацювало довге натискання
 export function setTapHook(fn) { tapHook = fn || null; document.body.classList.toggle('aiming', !!tapHook); }
 export const aiming = () => !!tapHook;
 export function screenToGeo(x, y) { if (!map) return null; const p = map.unproject([x, y]); return { lat: p.lat, lon: p.lng }; }
@@ -159,6 +201,11 @@ export function initMap() {
   map.on('style.load', addLayers);
   map.on('click', e => {
     if (tapHook) { tapHook({ lat: e.lngLat.lat, lon: e.lngLat.lng }); return; }
+    // довге натискання щойно відкрило меню точки — відпущений палець не є ще й дотиком до повороту чи сірої лінії
+    if (Date.now() - lpT > 1200) {
+      { const d = cpAt(e.point); if (d != null) { bus.emit('cpTap', d); return; } }
+      { const k = altAt(e.point); if (k != null) { bus.emit('altTap', k); return; } }
+    }
     if (jv && jvTap) { const q = map.unproject([e.point.x + 1, e.point.y]), px = Math.abs(q.lng - e.lngLat.lng) * 111320 * Math.cos(e.lngLat.lat * Math.PI / 180); jvTap({ lat: e.lngLat.lat, lon: e.lngLat.lng, px }); }
   });
   map.on('styleimagemissing', e => {
@@ -408,7 +455,6 @@ function addLayers() {
   // інші варіанти маршруту — сірі під основним; дотик вибирає варіант
   map.addLayer({ id: 'route-alts-case', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#2b3240', 'line-width': w(7, 10, 16) } }, under);
   map.addLayer({ id: 'route-alts', type: 'line', source: 'route-alts', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: { 'line-color': '#a3adbd', 'line-width': w(4, 7, 12) } }, under);
-  map.on('click', 'route-alts', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('altTap', f.properties.k); });
   const casePaint = { 'line-color': '#0c2a6e', 'line-width': w(5, 9, 17) }, linePaint = { 'line-color': ['match', ['get', 'c'], 'b', ROUTE_COLORS.b, 'c', ROUTE_COLORS.c, ROUTE_COLORS.a], 'line-width': w(3, 6, 12) };
   map.addLayer({ id: 'route-case', type: 'line', source: 'route', layout: { 'line-join': 'round', 'line-cap': 'round' }, paint: casePaint }, under);
   map.addLayer({ id: 'route-near-case', type: 'line', source: 'route-near', layout: { 'line-join': 'round', 'line-cap': 'butt' }, paint: casePaint }, under);
@@ -524,7 +570,7 @@ function drawCps() {
     const d = pos.rd, ahead = routeCps().filter(c => c.d1 > d - 20 && c.d < d + 25000).slice(0, 12);
     const nx = pos.cp ? pos.cp.d : (ahead[0] && ahead[0].d);                   // наступний контрольний поворот — більший кружечок
     key = ahead.map(c => c.d).join(',') + '|' + nx;
-    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0 }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
+    if (key !== cpKey) feats = ahead.map(c => { const p = g.idx.at(c.d); return { type: 'Feature', properties: { c: c.cls, a: c.ang, n: c.d === nx ? 1 : 0, d: c.d }, geometry: { type: 'Point', coordinates: [p.lon, p.lat] } }; });
   }
   if (key === cpKey) return;
   cpKey = key; src.setData({ type: 'FeatureCollection', features: feats });
@@ -642,10 +688,8 @@ export function anchorPoint() {
     const tp = document.getElementById('top'), bt = document.getElementById('bottom');
     if (tp && !tp.hidden) top = Math.max(0, tp.getBoundingClientRect().bottom - cr.top);
     if (bt && !bt.hidden) bot = Math.min(H, bt.getBoundingClientRect().top - cr.top);
-    // (1.1.28) кнопки «без GPS» (Поворот, ±100) тепер стоять стовпчиком справа над повзунком, а не в нижній плашці: стрілку тримаємо
-    // вище за них — щоб дорога біля машини (за нею звіряють ±100) не ховалась під кнопками
-    const nd = document.getElementById('nudge'), nq = nd && !nd.hidden ? nd.getBoundingClientRect() : null;
-    if (nq && nq.height > 0 && nq.left < W / 2 + 120 && nq.top - cr.top - top >= 200) bot = Math.min(bot, nq.top - cr.top);   // на планшеті кнопки далеко збоку — не заважають
+    // (1.1.34) Без GPS стрілка стоїть на тій самій висоті, що й із GPS (Олексій: «в офлайні стрілка вища, ніж в онлайні»).
+    // До 1.1.34 її піднімали над стовпчиком кнопок ±100 / «Поворот», але ці кнопки — праворуч, а стрілка — посередині: не заважають.
     if (bot - top < 160) { top = 0; bot = H; }
   } else {                                       // альбомна: плашки по боках, середина екрана вільна
     const st = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--st')) || 0;
@@ -1053,7 +1097,7 @@ function setupLongPress() {
   cont.addEventListener('touchstart', ev => {
     cancel(); if (ev.touches.length !== 1) return;
     const t = ev.touches[0], t0 = Date.now(); s0 = { x: t.clientX, y: t.clientY };
-    const fire = () => { tm = null; const r = cont.getBoundingClientRect(), ll = map.unproject([s0.x - r.left, s0.y - r.top]); bus.emit('mapPick', { lat: ll.lat, lon: ll.lng }); };
+    const fire = () => { tm = null; lpT = Date.now(); const r = cont.getBoundingClientRect(), ll = map.unproject([s0.x - r.left, s0.y - r.top]); bus.emit('mapPick', { lat: ll.lat, lon: ll.lng }); };
     // таймер спізнився (телефон був зайнятий малюванням) — спершу даємо дійти рухам пальця, що стоять у черзі
     tm = setTimeout(() => { tm = Date.now() - t0 > 850 ? setTimeout(fire, 150) : (fire(), null); }, 650);
   }, { capture: true, passive: true });

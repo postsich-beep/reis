@@ -5,6 +5,7 @@
 // без рейсу «Їхати сюди», у рейсі «Заїхати по дорозі»; «Зберегти як Дім / Роботу». Просто подивитись, де це, — теж можна.
 import { bus, S, log, fmtDist, hav } from './core.js';
 import { $, ICON, esc, toast, closePanel, currentPanel } from './ui_base.js';
+import * as favs from './favs.js';
 import { t } from './i18n.js';
 import { g, setVia } from './guide.js';
 import { pos } from './nav.js';
@@ -156,7 +157,7 @@ function cardHtml(p) {
   const isH = k => { const v = hw(k); return v && Math.abs(v.lat - p.lat) < 1e-5 && Math.abs(v.lon - p.lon) < 1e-5; };
   const main = g.active ? `<button class="btn pri" data-src="via">${ICON.route}<span>${t('srVia')}</span></button>` : `<button class="btn pri" data-src="go">${ICON.go}<span>${t('srGo')}</span></button>`;
   return `<div class="src-t"><span class="src-pin">${ICON.pin}</span><div class="src-tx"><b>${esc(p.label)}</b><small>${esc([p.sub, d ? t('srFromMe', d) : ''].filter(Boolean).join(' · '))}</small></div>
-    <button class="src-x" data-src="x" aria-label="${t('close')}">${ICON.x}</button></div>
+    <button class="src-fav${favs.has(p) ? ' on' : ''}" data-src="fav" aria-pressed="${favs.has(p)}" aria-label="${t(favs.has(p) ? 'favDelAria' : 'favAddAria')}">${ICON.heart}</button><button class="src-x" data-src="x" aria-label="${t('close')}">${ICON.x}</button></div>
     <div class="src-b">${main}<button class="btn sm${isH('home') ? ' on' : ''}" data-src="home" aria-label="${t('srSaveHome')}">${ICON.home}<span>${t('srHome')}</span></button><button class="btn sm${isH('work') ? ' on' : ''}" data-src="work" aria-label="${t('srSaveWork')}">${ICON.work}<span>${t('srWork')}</span></button></div>`;
 }
 export function showCard(p) {
@@ -180,6 +181,7 @@ function onCardClick(e) {
   if (k === 'x') { closeCard(); return; }
   if (k === 'go') { closeCard(false); routeTo(p); return; }
   if (k === 'via') { closeCard(); setVia(p); toast(t('stopViaOk', p.label), 'green', 5000); return; }
+  if (k === 'fav') { const on = favs.toggle(p); toast(on ? t('favAdded', p.label) : t('favRemoved'), on ? 'green' : '', on ? 3000 : 4000, on ? undefined : () => { favs.add(p); $('srCard').innerHTML = cardHtml(p); }); $('srCard').innerHTML = cardHtml(p); return; }
   if (k === 'home' || k === 'work') { S[k] = { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' }; toast(t(k === 'home' ? 'srHomeSaved' : 'srWorkSaved', p.label), 'green', 4000); $('srCard').innerHTML = cardHtml(p); }
 }
 

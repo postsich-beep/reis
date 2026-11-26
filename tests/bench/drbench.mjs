@@ -121,14 +121,17 @@ export function run(name, o = {}) {
   let seed = o.seed || 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) - 0.5;
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return s * Math.SQRT2; };
   const gpsUntil = o.gpsSec != null ? o.gpsSec : 90, bias = (o.bias != null ? o.bias : 0.6) / 60;   // дрейф гіроскопа, °/с
-  const errs = [], log = [];
+  const errs = [], log = []; let tapDone = false, tapPre = false, tapLog = null;
   let yawOff = 0, wig = null, lastNet = -999, grab = null, grabNext = gpsUntil + 40 + 60 * Math.abs(rnd());
-  globalThis.__motionHint = o.grab === 'hint' ? () => ({ handled: !!grab, tilt: grab ? 30 : 1, peak: 20 }) : () => null;
+  // (1.1.34) підказка датчиків — ще й нахил телефона: у руці він інший (30°), а потім телефон стоїть у тримачі, як стояв (найгірший випадок: тримач повернули)
+  globalThis.__motionHint = o.grab === 'hint' ? () => ({ handled: !!grab, tilt: grab ? 30 : 1, peak: 20, up: grab ? [0, 4.9, 8.5] : [0, 0, 9.8] }) : () => null;
   const t0 = NOW;
   for (const s of tr.out) {
     NOW = t0 + s.t * 1000;
     const p = idx.at(s.d);
-    if (s.t <= gpsUntil) bus.emit('gps', { prov: 'gps', lat: p.lat, lon: p.lon, acc: 5, spd: s.v, brg: p.brg, t: NOW });
+    // (1.1.34) останні секунди перед втратою GPS точка лежить збоку від рейсу (АЗС, стоянка, глушіння вже кидає точки на 150–400 м)
+    const side = o.lastOff && s.t > gpsUntil - (o.lastSec || 15) ? core.destPoint(p, (p.brg + 90) % 360, o.lastOff) : null;
+    if (s.t <= gpsUntil) bus.emit('gps', { prov: 'gps', lat: side ? side.lat : p.lat, lon: side ? side.lon : p.lon, acc: side ? 25 : 5, spd: s.v, brg: p.brg, t: NOW });
     else if (o.net && s.t - lastNet >= (o.netEvery || 30)) {
       lastNet = s.t; const e = o.net;
       bus.emit('gps', { prov: 'network', lat: p.lat + gauss() * e * 0.55 / KY, lon: p.lon + gauss() * e * 0.55 / KX, acc: e, t: NOW });
@@ -142,6 +145,10 @@ export function run(name, o = {}) {
     const yaw = o.noGyro ? undefined : s.yaw + bias * s.t + gauss() * 0.7 + w + yawOff;
     bus.emit('sens', { var: s.v > 0.3 ? 0.08 + Math.abs(gauss()) * 0.02 : 0.0004 + Math.abs(gauss()) * 0.0001, yaw });
     if (o.place != null && s.t === gpsUntil + 10) nav.placeAtD(Math.max(0, s.d + o.place));     // стартова помилка (напр. з вишок)
+    // (1.1.34) водій торкається на карті контрольного повороту, біля якого фура зараз: перед ним (за 20 м) чи щойно за ним (+30 м)
+    if (o.tapCp != null && !tapDone) { const m = road.marks.filter(x => x.ang != null && Math.abs(x.ang) >= 35)[o.tapCp], at = o.tapAfter ? m.d1 + 30 : m.d0 - 20;
+      if (m && o.tapOff != null && !tapPre && s.d >= at - 5 * Math.max(s.v, 3)) { tapPre = true; nav.placeAtD(Math.max(0, s.d + o.tapOff)); }   // позначка помиляється на tapOff
+      if (m && s.d >= at) { tapDone = true; const rd0 = Math.round(nav.pos.rd); const mid = (m.d0 + m.d1) / 2, cp = nav.routeCps().slice().sort((a, b) => Math.abs(a.d - mid) - Math.abs(b.d - mid))[0]; const r = cp && nav.jumpToCp(cp.d); tapLog = { t: s.t, truth: Math.round(s.d), before: rd0, cp: cp && [Math.round(cp.d0), Math.round(cp.d1), cp.ang, cp.sgn], r: r && { after: r.after }, nowRd: Math.round(nav.pos.rd) }; } }
     nav.benchTick();
     const P = nav.pos;
     if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, sig: st ? st.sig : null, tr: st ? st.trust : null, g: st && st.gate ? `${st.cpi}:${st.gate.state || '-'}:${st.gate.prog}:${st.gate.ang}${st.gate.handled ? ':H' : ''}` : '' }); }
@@ -151,7 +158,7 @@ export function run(name, o = {}) {
   const cps = road.marks.filter(m => m.ang != null && Math.abs(m.ang) >= 35);
   const after = cps.map(m => { const e = errs.find(x => x.d >= m.d1 + 150); return e ? { name: m.name || (m.ang + '°'), e: Math.round(e.e) } : null; }).filter(Boolean);
   return { name, marks: road.marks.filter(m => m.ang != null).map(m => ({ d0: Math.round(m.d0), d1: Math.round(m.d1), ang: m.ang })), n: errs.length, mean: Math.round(ab.reduce((a, b) => a + b, 0) / (ab.length || 1)), p50: Math.round(q(0.5)), p95: Math.round(q(0.95)), max: Math.round(ab[ab.length - 1] || 0),
-    end: errs.length ? Math.round(errs[errs.length - 1].e) : null, after, km: Math.round(idx.total / 100) / 10, min: Math.round(tr.out[tr.out.length - 1].t / 6) / 10, errs };
+    end: errs.length ? Math.round(errs[errs.length - 1].e) : null, after, tap: tapLog && { ...tapLog, e: [5, 20, 60, 120].map(k => { const x = errs.find(z => z.t >= tapLog.t + k); return x ? Math.round(x.e) : null; }) }, km: Math.round(idx.total / 100) / 10, min: Math.round(tr.out[tr.out.length - 1].t / 6) / 10, errs };
 }
 export const SCEN = {
   'mix': {}, 'mix:зсув+600': { road: 'mix', place: 600 }, 'mix:зсув−500': { road: 'mix', place: -500 }, 'mix:затор': { road: 'mix', jam: { d0: 9000, d1: 13000, v: 4 } }, 'mix:стоп-поїхали': { road: 'mix', jam: { d0: 9000, d1: 12000, v: 7, go: true } },
@@ -160,6 +167,11 @@ export const SCEN = {
   // 1.1.12 — як на справжній дорозі: план удвічі повільніший за водія (Львів: 17 за планом, 42 насправді), GPS зник ще на стоянці,
   // телефон беруть у руки (ривком; повільно — з підказкою датчика нахилу і без неї)
   'city:план÷2': { road: 'city', planK: 0.5 }, 'city:зі стоянки': { road: 'city', gpsSec: 2, planK: 0.5 }, 'mix:план÷1.6': { road: 'mix', planK: 0.6 },
+  // (1.1.34) Діма, Черкащина: GPS зник, коли останні точки вже лягли збоку від рейсу, — позначка пішла «вільно» і на рейс не повернулась
+  'mix:точки збоку 200': { road: 'mix', lastOff: 200 }, 'hwy:АЗС збоку 350': { road: 'hwy', lastOff: 350, lastSec: 40 }, 'city:точки збоку 150': { road: 'city', lastOff: 150 },
+  // (1.1.34) позначка відстала на 500 м (чи випередила на 600), водій торкається повороту на карті — перед ним чи вже за ним
+  'mix:дотик перед поворотом': { road: 'mix', tapOff: -600, tapCp: 2 }, 'mix:дотик за поворотом': { road: 'mix', tapOff: 700, tapCp: 2, tapAfter: true },
+  'city:дотик перед поворотом': { road: 'city', tapOff: 300, tapCp: 4 }, 'hwy:дотик за з\'їздом': { road: 'hwy', tapOff: -900, tapCp: 1, tapAfter: true },
   'mix:телефон ривком': { road: 'mix', grab: 'fast' }, 'mix:телефон у руках': { road: 'mix', grab: 'hint' }, 'mix:крутили непомітно': { road: 'mix', grab: 'slow' },
 };
 // Кожен сценарій — в окремому процесі: стан навігатора не переходить із прогону в прогін (як свіжий телефон)

@@ -91,7 +91,7 @@ export class RouteTracker {
     this.yaw = []; this.bias = 0; this.handledUntil = 0; this.on = false; this.seed = 1234567;
     this.est = { d: 0, v: 0, sig: 0, w: 0 }; this.mode = null; this.stuck = { t: 0, d: 0 }; this.trust = 1;
     // замок: наступна контрольна точка, прив'язка курсу гіроскопа до курсу рейсу, події для екрана
-    this.cpi = 0; this.off = null; this.cc = 0; this.adj = 0; this.align = 'weak'; this.anchor = null; this.ev = []; this.undo = null;
+    this.cpi = 0; this.off = null; this.cc = 0; this.ca = 0; this.baseA = null; this.baseUp = null; this.adj = 0; this.align = 'weak'; this.anchor = null; this.ev = []; this.undo = null;
     this.g = { state: 'go', cp: null, prog: 0, since: 0, handled: false }; this.eng = null; this.netAhead = 0;
   }
   // темп частинки відносно плану: здебільшого «як завжди» (0,82–1,18), а частина — повільно (затор, ремонт, 10–80%)
@@ -162,22 +162,54 @@ export class RouteTracker {
       else if (mArc != null && mArc < 1.4 * used) this.mMed = clamp(0.7 * used + 0.3 * mArc, o.gTempoLo, o.gTempoHi);
     }
     this.legStop = 0;
-    this.ev.push({ type: 'pass', by, t, cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn }, jump: Math.round(info.jump || 0), waited: Math.round(info.waited || 0), tempo: this.mMed });
+    this.ev.push({ type: 'pass', by, t, cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn }, jump: Math.round(info.jump || 0), waited: Math.round(info.waited || 0), tempo: this.mMed, hand: !!info.hand });
+    { const yl = this.lastYaw(); this.baseA = yl && yl.a != null ? yl.a : null; this.baseUp = yl ? yl.u || null : null; }   // (1.1.34) цей поворот телефона вже враховано
     if (by === 'gyro' || by === 'button') (this.conf || (this.conf = new Set())).add(this.cps.indexOf(c));
     if (this.cps[this.cpi] === c) this.cpi++; else this.cpi = Math.max(this.cpi, this.cps.indexOf(c) + 1);
     this.anchor = { d: c.d1, t, sure: by === 'gyro' || by === 'button', sig: 20 }; this.eng = null; this.netAhead = 0;
   }
   takeEvents() { const e = this.ev; this.ev = []; return e; }
+  // (1.1.34) Повертає в історію гіроскопа поворот, відкинутий після моменту t0 як «телефон у руках» (y і c — без відкинутого,
+  // a — з ним): далі замок, пошук і відбір частинок бачать його так, наче його й не відкидали. Повертає, скільки градусів повернуто.
+  unhandle(t0) {
+    let add = 0, pa = null, pc = null;
+    for (const q of this.yaw) {
+      const a = q.a, c = q.c;
+      if (pa != null && a != null && q.t > t0) add += (a - pa) - (c - pc);
+      pa = a; pc = c;
+      if (add) { q.y += add; q.c += add; }
+    }
+    this.adj -= add; this.cc += add;
+    return add;
+  }
   // Кнопка «Поворот»: водій каже «я на наступному повороті» — позначка стає одразу за ним, курс гіроскопа прив'язуємо заново
-  passNext(t) {
-    const c = this.cps[this.cpi]; if (!c || !this.on) return null;
+  passNext(t, i = this.cpi) {
+    const c = this.cps[i]; if (!c || !this.on) return null;
     this.undo = { d: this.est.d, cpi: this.cpi, off: this.off, anchor: this.anchor, t };
     const from = this.est.d, jump = c.d1 + 8 - from, wait = this.g.state === 'wait', waited = wait ? t - this.g.since : 0;
     this.place(c.d1 + 8, 10, t, Math.min(Math.max(this.est.v, 3), this.sp.at(this.sp.cap, c.d1 + 8), 8));
     this.passCp('button', t, c, { jump, waited, from, tArr: wait ? this.g.since : null });
+    this.cpi = i + 1;                                          // (1.1.34) поворот, вибраний на карті, може бути й позаду
     const y = this.lastYaw(); if (y) { this.off = y.c - this.prof.at(this.est.d); this.align = 'ok'; }
     this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
     return c;
+  }
+  // (1.1.34) Водій торкнувся контрольного повороту на карті: «я тут». Це може бути не найближчий поворот — і далі попереду,
+  // і вже позаду. Гіроскоп за останні 25 с відчув саме такий поворот — фура вже повернула: ставимо одразу за ним, як кнопка
+  // «Поворот» (курс гіроскопа прив'язуємо заново). Не відчув — фура ще перед поворотом: ставимо за 15 м до нього, і замок
+  // чекає, поки телефон відчує поворот (курс не чіпаємо — інакше ми б прив'язали його до дороги після повороту).
+  jumpTo(i, t) {
+    const c = this.cps[i]; if (!c || !this.on) return null;
+    const y1 = this.lastYaw(), y0 = this.yaw.find(y => y.t >= t - 25) || null, dy = y1 && y0 && y1 !== y0 ? y1.c - y0.c : 0;
+    const turned = c.sgn ? Math.sign(dy) === c.sgn && Math.abs(dy) >= Math.max(25, 0.6 * Math.abs(c.ang)) : Math.abs(dy - c.ang) <= 40 && Math.abs(dy) >= 25;
+    if (turned) { const r = this.passNext(t, i); return r ? { cp: r, after: true } : null; }
+    this.undo = { d: this.est.d, cpi: this.cpi, off: this.off, anchor: this.anchor, t };
+    // як ↑100/↓100: уся хмара (з історією) зсувається; курс прив'язується до дороги перед поворотом — фура саме там
+    const d = Math.max(0, c.d0 - 15);
+    this.shift(d - this.est.d, 12);
+    this.anchor = { d: this.est.d, t, sure: true, sig: 12 }; this.netAhead = 0;
+    this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
+    return { cp: c, after: false };
   }
   undoPass(t) {
     const u = this.undo; if (!u || t - u.t > 30) return false;
@@ -207,8 +239,11 @@ export class RouteTracker {
       const bad = !!last && ((hint && hint.handled) || Math.abs(dRaw) > 40 * Math.max(1, dt));
       if (bad) { this.adj += dRaw; this.handledUntil = t + 1.5; }
       const y = raw - this.adj;
-      if (last) this.cc += (y - last.y) - this.bias * dt;
-      this.yaw.push({ t, y, raw, c: this.cc });
+      if (last) { this.cc += (y - last.y) - this.bias * dt; this.ca = (this.ca || 0) + dRaw - this.bias * dt; }
+      // (1.1.34) a — увесь поворот телефона, разом із секундами, відкинутими як «телефон у руках»; u — куди в осях телефона дивиться «вгору»
+      // (нахил телефона відносно землі; null — датчиків WebView немає). Потрібні, щоб зарахувати різкий поворот — див. gateStep.
+      const up = hint && Array.isArray(hint.up) ? hint.up : null, um = up ? Math.hypot(up[0], up[1], up[2]) : 0;
+      this.yaw.push({ t, y, raw, c: this.cc, a: this.ca || 0, u: um > 0 ? [up[0] / um, up[1] / um, up[2] / um] : null });
     } else {
       if (last && Math.abs(raw - last.y) > 40 * Math.max(1, t - last.t)) this.handledUntil = t + this.o.windows[this.o.windows.length - 1] + 1;   // фура так швидко не повертає — телефон узяли в руки
       this.yaw.push({ t, y: raw, raw, c: raw });
@@ -292,7 +327,11 @@ export class RouteTracker {
     // і rot показує, на скільки телефон уже повернув. Дрейф гіроскопа й давні вигини дороги сюди не потрапляють.
     const c6 = back(6);
     if (this.base == null || (c6 != null && c6 <= 2.5 && !this.eng)) this.base = y.c;
-    const rot = y.c - this.base;
+    let rot = y.c - this.base;
+    // (1.1.34) те саме для ПОВНОГО повороту телефона (y.a — разом із відкинутими секундами): база йде за спокійним курсом
+    // і запам'ятовує нахил телефона в ту мить
+    { const y6 = this.yawAt(t - 6), a6 = y6 && y.a != null && y6.a != null ? Math.abs(y.a - y6.a) : null;
+      if (this.baseA == null || (a6 != null && a6 <= 2.5 && !this.eng && !G.handled)) { this.baseA = y.a != null ? y.a : 0; this.baseUp = y.u || null; this.baseAT = t; } }
     // Позначка щойно проскочила поворот без підтвердження (GPS зник перед самим перехрестям, фура ще стояла на світлофорі),
     // а телефон повертає саме зараз і саме туди — фура ще на ньому: повертаємо позначку на цей поворот.
     { const pv = this.cps[this.cpi - 1], pi = this.cpi - 1;
@@ -300,6 +339,23 @@ export class RouteTracker {
         this.cpi = pi; this.off = y.c - pv.H0 - rot; this.place(this.headD(pv, pv.sgn * rot - 5), 6, t); e = this.est.d;
       } }
     let c = this.cps[this.cpi];
+    // (1.1.34) Різкий поворот. Секунди, коли телефон повертався швидше за 40 °/с чи з нахилом, відкинуто як «телефон у руках» —
+    // фура так не повертає. Але якщо позначка вже стоїть на цьому повороті й чекає («Чекаю повороту»), телефон повернувся саме в його
+    // бік щонайменше на 0,6 кута, після цього 3 с спокійний і його нахил відносно землі той самий,
+    // що й до повороту (лежить, як лежав, чи стоїть у тримачі, як стояв), — це поворот: фуру труснуло на ямі посеред повороту
+    // або водій перевіряє ведення, повернувши телефон рукою (Олексій, 26.11: «повернув телефон на 90°, а він так і не повернув»).
+    // Тоді відкинуті секунди повертаємо в історію гіроскопа — і далі працює звичайний замок, наче їх і не відкидали.
+    // Узяли телефон у руку (нахил інший) чи повернули й поклали назад (повороту в підсумку немає) — не зараховуємо.
+    if (c && c.sgn && !this.eng && !G.handled && y.a != null && this.baseA != null) {
+      const A = Math.abs(c.ang), grA = c.sgn * (y.a - this.baseA), needS = 3, yb = this.yawAt(t - needS), near = !!y.u && !!this.baseUp && G.state === 'wait' && G.cp === c && t - G.since >= 1;   // без датчиків нахилу не видно, чи телефон у руці, — тоді не зараховуємо (як і було)
+      const calmA = !!yb && yb.a != null && Math.abs(y.a - yb.a) <= 3 && t - this.handledUntil >= needS - 1.5;
+      const sameUp = !!y.u && !!this.baseUp && (y.u[0] * this.baseUp[0] + y.u[1] * this.baseUp[1] + y.u[2] * this.baseUp[2]) >= 0.966;   // нахил змінився менш як на 15°
+      if (near && calmA && sameUp && grA >= Math.max(gThr(c), 0.6 * A) && c.sgn * rot < gThr(c)) {
+        const add = this.unhandle(this.baseAT != null ? this.baseAT - 1 : t - 60);
+        if (Math.abs(add) >= 20) { rot = y.c - this.base; this.handAt = t; }
+        this.baseA = y.a; this.baseUp = y.u || null; this.baseAT = t;
+      }
+    }
     const prev = this.cps[this.cpi - 1], nearCp = (c && e > c.d0 - 60) || (prev && e < prev.d1 + 30);
     const r = (y.c - this.off) - H(e), c5 = back(5);
     // рівна дорога й спокійний курс: гіроскоп і рейс мають казати одне — що набігло (дрейф, нерівність карти), потроху списуємо
@@ -452,7 +508,8 @@ export class RouteTracker {
       if (B.done) {
         const c = B.done.c, en = this.eng || { from: this.est.d, waited: 0 }, y = this.lastYaw();
         if (B.done.skip) this.passCp('skip', t, B.done.skip);
-        this.passCp('gyro', t, c, { jump: en.from < c.d0 - 30 ? c.d0 - en.from : 0, waited: en.waited, from: en.from, tArr: en.tArr, dAt: en.dAt, tEng: en.t });
+        this.passCp('gyro', t, c, { jump: en.from < c.d0 - 30 ? c.d0 - en.from : 0, waited: en.waited, from: en.from, tArr: en.tArr, dAt: en.dAt, tEng: en.t, hand: this.handAt != null && t - this.handAt <= 10 });
+        this.handAt = null;
         if (y && B.done.calm) { this.off = y.c - c.H1; this.align = 'ok'; }                  // уже їдемо рівно новою дорогою — прив'язуємо курс точно
         if (y) this.base = y.c;                                                              // цей поворот уже враховано — наступний рахуємо з нуля
         this.g.state = 'go'; this.g.since = t; this.g.cp = this.cps[this.cpi] || null; this.g.prog = 0;
