@@ -64,6 +64,7 @@ export const ICON = {
   heart: I('<path d="M12 20.3S3.6 15 3.6 9.1A4.6 4.6 0 0 1 12 6.6a4.6 4.6 0 0 1 8.4 2.5C20.4 15 12 20.3 12 20.3Z"/>'),
   home: I('<path d="M4 11.5 12 4.5l8 7"/><path d="M6.5 10v10h11V10"/><path d="M10 20v-5.5h4V20"/>'),
   work: I('<rect x="3.5" y="7.5" width="17" height="12" rx="2"/><path d="M9 7.5v-2h6v2M3.5 12.5h17"/>'),
+  edit: I('<path d="M4.5 19.5h3.6L19 8.6 15.4 5 4.5 15.9v3.6Z"/><path d="m13.4 7 3.6 3.6"/>'),          // (1.1.36) олівець — «Змінити»
   clock: I('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 2"/>'),
   arrowL: I('<path d="M19 12H5M11 6l-6 6 6 6"/>', 'stroke-width="2.4"'),
   // трикутник «позначити подію» в нижній панелі: помаранчевий із білим знаком оклику
@@ -143,7 +144,7 @@ let dodgeRaf = 0;
 export function panelDodge() {
   dodgeRaf = 0;
   const ok = $('panelOk'), p = $('panel'); if (!ok || !p || p.hidden) return; const r = ok.getBoundingClientRect(); if (!r.width) return;
-  for (const row of document.querySelectorAll('#panelBody :is(.pl-row,.vp-row,.tp-row,.item,.rep-row,.pl-all,.btns,.row,.seg,.field,.tg,.vp-menu > div,.kv > div,.arch .item,summary)')) { const b = row.getBoundingClientRect(); row.classList.toggle('dodge', b.right > r.left - 4 && b.bottom > r.top + 1 && b.top < r.bottom - 1); }
+  for (const row of document.querySelectorAll('#panelBody :is(.pl-row,.vp-row,.tp-row,.item,.rep-row,.pl-all,.btns,.row,.seg,.field,.tg,.vp-menu > div,.kv > div,.arch .item,summary,.fv-cat,.fv-card:not(.fv-cat) > .fv-main,.fv-acts,.fv-wide)')) { const b = row.getBoundingClientRect(); row.classList.toggle('dodge', b.right > r.left - 4 && b.bottom > r.top + 1 && b.top < r.bottom - 1); }
 }
 export const panelDodgeSoon = () => { if (!dodgeRaf) dodgeRaf = requestAnimationFrame(panelDodge); };
 export function closePanel() {

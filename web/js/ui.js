@@ -651,38 +651,148 @@ definePanel('archive', {
   render(body) { body.innerHTML = archiveHtml(); body.onclick = archClicks; body.oninput = null; body.onfocusin = null; },
   update(body) { body.innerHTML = archiveHtml(); }
 });
-/* ---------- (1.1.34) «Улюблені місця» ----------
-   Кнопка-сердечко в одному рядку з «Архів рейсів» і «Зберегти рейс», праворуч (на малому екрані S10 третій рядок не вміщався). Місця додаються сердечком на картці знайденого місця (ui_search.js).
-   Тут — список: торкнулись рядка — місце стає фінішем рейсу; праворуч «Старт» і «Через»; кошик (з поверненням). Усе лежить у телефоні. */
-function favsHtml() {
-  const l = favs.list();
-  if (!l.length) return `<div class="arch-empty fav-empty">${ICON.heart}<div>${t('favEmpty')}</div></div>`;
-  const dist = f => pos.lat != null ? fmtDist(hav(pos, f)) : '';
-  return `<div class="muted arch-hint">${t('favHint')}</div><div class="list fav-list">` + l.map(f => `<div class="item fav-row" data-fid="${f.id}">
-      <button class="fav-main" data-fgo="${f.id}"><span class="fav-ic">${ICON.heart}</span><span class="grow"><span class="t">${esc(f.label)}</span><span class="muted">${esc([f.sub, dist(f)].filter(Boolean).join(' · '))}</span></span></button>
-      <button class="btn sm" data-fa="${f.id}">${t('favFrom')}</button><button class="btn sm" data-fv="${f.id}">${t('favVia')}</button>
-      <button class="btn sm arch-del" data-fdel="${f.id}" aria-label="${t('favDelAria')}">${ICON.trash}</button></div>`).join('') + '</div>';
+/* ---------- (1.1.34, 1.1.36) «Улюблені місця» ----------
+   Кнопка-сердечко в одному рядку з «Архів рейсів» і «Зберегти рейс», праворуч (на малому екрані S10 третій рядок не вміщався).
+   (1.1.36, Олексій: «щоб уже були значок Дім, Робота, улюблені місця і кнопки додати, прибрати, редагувати») Екран — три рядки зі значками:
+   «Дім», «Робота», «Улюблені місця»; у кожного праворуч «Додати» (місце шукаємо тим самим пошуком, що й «Вказати адресу», — або «Моє місце зараз»).
+   Збережене місце — картка: дотик — воно стає фінішем рейсу; під назвою кнопки «Старт», «Через», олівець (змінити) і кошик (прибрати, з поверненням).
+   «Змінити» в Дому й Роботи — одразу нова адреса; в улюбленого — своя назва («Склад», «База») і «Змінити адресу». Усе лежить у телефоні. */
+let favEd = null;        // відкритий редактор улюбленого: { id, name, touched, place, focus } — зміни застосовуються кнопкою «Зберегти»
+let favFlash = '';       // картка, яку щойно додали чи змінили ('home' | 'work' | id), — на мить підсвічується
+const hwOf = k => S[k] && S[k].lat != null ? S[k] : null;
+const favLine = (sub, p) => [sub, pos.lat != null ? fmtDist(hav(pos, p)) : ''].filter(Boolean).join(' · ');
+const favFlashSet = k => { favFlash = k; setTimeout(() => { if (favFlash === k) favFlash = ''; }, 1600); };
+// збережене місце: дотик — фініш рейсу; кнопки під назвою
+function favCard(key, ico, cls, title, sub, p) {
+  return `<div class="fv-card${favFlash === key ? ' flash' : ''}" data-fk="${key}">
+      <button class="fv-main" data-fgo="${key}"><span class="fv-ic ${cls}">${ico}</span><span class="fv-tx"><b>${esc(title)}</b><small>${esc(favLine(sub, p))}</small></span></button>
+      <div class="fv-acts"><button class="btn sm" data-fa="${key}">${t('favFrom')}</button><button class="btn sm" data-fv="${key}">${t('favVia')}</button>
+        <button class="btn sm fv-i" data-fed="${key}" aria-label="${t('favEdit')}" title="${t('favEdit')}">${ICON.edit}</button><button class="btn sm fv-i fv-del" data-fdel="${key}" aria-label="${t('favDel')}" title="${t('favDel')}">${ICON.trash}</button></div></div>`;
 }
-function favsUse(f, k) {
-  const place = favs.toPlace(f);
+// рядок-розділ: значок, назва, що там зараз — і «Додати»
+function favCat(key, ico, cls, title, sub) {
+  return `<div class="fv-card fv-cat" data-fk="${key}"><div class="fv-main"><span class="fv-ic ${cls}">${ico}</span><span class="fv-tx"><b>${esc(title)}</b><small>${esc(sub)}</small></span></div>
+      <button class="btn sm fv-add" data-fadd="${key}" aria-label="${t('add')}: ${esc(title)}">${ICON.plus}<span>${t('add')}</span></button></div>`;
+}
+// редактор улюбленого: своя назва й адреса
+function favEdCard(f) {
+  const pl = favEd.place || f, val = favEd.touched ? favEd.name : (f.name || pl.label);
+  return `<div class="fv-card fv-ed" data-fk="${f.id}">
+      <label class="fv-l" for="fvName">${t('favName')}</label>
+      <input id="fvName" class="fv-in" type="text" maxlength="60" autocomplete="off" enterkeyhint="done" value="${esc(val)}" placeholder="${esc(pl.label)}">
+      <div class="fv-l">${t('favAddr')}</div>
+      <div class="fv-addr${favEd.place ? ' new' : ''}" id="fvAddr">${esc([pl.label, pl.sub].filter(Boolean).join(', '))}</div>
+      <button class="btn sm fv-wide" data-fpick="${f.id}">${ICON.pin}<span>${t('favAddrChange')}</span></button>
+      <div class="fv-acts two"><button class="btn sm" data-fcancel="1">${t('vCancel')}</button><button class="btn sm pri" data-fsave="${f.id}">${t('saveShort')}</button></div></div>`;
+}
+function favsHtml() {
+  const l = favs.list(), any = l.length || hwOf('home') || hwOf('work');
+  const hw = k => { const v = hwOf(k), nm = t(k === 'home' ? 'srHome' : 'srWork'), ico = k === 'home' ? ICON.home : ICON.work;
+    return v ? favCard(k, ico, k, nm, [v.label, v.sub].filter(Boolean).join(', '), v) : favCat(k, ico, k, nm, t('favNoAddr')); };
+  return `<div class="fv">${any ? `<div class="muted arch-hint">${t('favHint')}</div>` : ''}${hw('home')}${hw('work')}
+      ${favCat('fav', ICON.heart, 'fav', t('favTitle'), l.length ? t('favCount', l.length) : t('favNone'))}
+      ${l.map(f => favEd && favEd.id === f.id ? favEdCard(f) : favCard(f.id, ICON.heart, 'fav sm', favs.title(f), favs.subOf(f), f)).join('')}</div>`;
+}
+const favPlace = key => { if (key === 'home' || key === 'work') { const v = hwOf(key); return v ? { lat: v.lat, lon: v.lon, label: v.label, sub: v.sub || '' } : null; } const f = favs.find(key); return f ? favs.toPlace(f) : null; };
+function favsUse(key, k) {
+  const place = favPlace(key); if (!place) return;
   if (plan.trip) { plan.trip = null; plan.routes = []; plan.sel = 0; pickHide(); previewRoute(null); previewAlts(null); mapM.previewPoints(null); hud(); }   // точки змінились — старий маршрут не підходить
   plan[k] = place; places.remember(place);
-  toast(t(k === 'b' ? 'favSet' : k === 'a' ? 'favSetA' : 'favSetV', f.label), 'green', 3500);
+  toast(t(k === 'b' ? 'favSet' : k === 'a' ? 'favSetA' : 'favSetV', place.label), 'green', 3500);
   openPanel('trip');
+}
+/* Вибір місця тим самим пошуком, що й «Вказати адресу» (ui_search.js): пошук закриває цей екран, тож після вибору чи «назад» відкриваємо його знову. */
+const favsBack = () => openPanel('favs', 'keep');      // 'keep' — редактор, відкритий до пошуку, лишається відкритим
+// «Моє місце зараз» як збережене місце: назва «Моє місце зараз» за годину вже неправда — називаємо за найближчим населеним пунктом,
+// а є мережа — за адресою (вулиця, місто)
+function herePlace(p, me) {
+  if (!me) return { lat: p.lat, lon: p.lon, label: p.label, sub: p.sub || '' };
+  const near = places.nearest(p.lat, p.lon);
+  return { lat: p.lat, lon: p.lon, label: near ? t('favNear', near) : t('favPoint'), sub: p.sub || '' };
+}
+function hereRefine(p, apply) {
+  reverse(p.lat, p.lon).then(r => { const lab = r ? [r.name, r.city !== r.name ? r.city : ''].filter(Boolean).join(', ') : ''; if (lab) { apply(lab); favsRedraw(); } }).catch(() => {});
+}
+function favPickHw(k) {
+  bus.emit('pickPlace', { ph: t(k === 'home' ? 'srFindHome' : 'srFindWork'), hint: t(k === 'home' ? 'srSetHome' : 'srSetWork'), back: favsBack, done: (p, me) => {
+    const v = herePlace(p, me); S[k] = v; favFlashSet(k);
+    if (me) hereRefine(v, lab => { const c = hwOf(k); if (c && c.lat === v.lat && c.lon === v.lon && c.label === v.label) S[k] = { ...c, label: lab }; });
+    toast(t(k === 'home' ? 'srHomeSaved' : 'srWorkSaved', me ? t('srMyPlace').toLowerCase() : v.label), 'green', 4000); favsBack();
+  } });
+}
+function favAddNew() {
+  bus.emit('pickPlace', { ph: t('favFindPh'), hint: t('favFindHint'), back: favsBack, done: (p, me) => {
+    const v = herePlace(p, me), had = favs.has(v), f = favs.add(v);
+    if (f) {
+      favFlashSet(f.id);
+      if (had) toast(t('favDup'), '', 4000);
+      else {
+        toast(t('favAdded', favs.title(f)), 'green', 3000);
+        if (me) {                                                // місце без адреси — одразу пропонуємо назвати («Склад», «Стоянка»): поле порожнє, у підказці — що є
+          favEd = { id: f.id, name: '', touched: true, place: null, focus: true };
+          hereRefine(v, lab => {
+            const c = favs.find(f.id); if (!c || c.label !== v.label) return;
+            favs.update(f.id, { place: { lat: c.lat, lon: c.lon, label: lab, sub: c.sub } });
+            if (favEd && favEd.id === f.id && !favEd.place) { const a = $('fvAddr'), i = $('fvName'); if (a) a.textContent = [lab, c.sub].filter(Boolean).join(', '); if (i) i.placeholder = lab; }   // редактор відкрито — лише адреса, набір не чіпаємо
+          });
+        }
+      }
+    }
+    favsBack();
+  } });
+}
+function favPickAddr(id) {
+  const keep = favEd && favEd.id === id ? favEd : { id, name: '', touched: false, place: null };
+  bus.emit('pickPlace', { ph: t('favAddrPh'), hint: t('favAddrHint'), back: () => { favEd = keep; favsBack(); }, done: (p, me) => { favEd = { ...keep, place: herePlace(p, me) }; favsBack(); } });
+}
+function favSave(id) {
+  if (!favEd || favEd.id !== id) return;
+  const r = favs.update(id, { name: favEd.touched ? favEd.name : undefined, place: favEd.place || undefined });
+  if (r === 'dup') { toast(t('favDup'), '', 4500); return; }
+  favEd = null; if (r) favFlashSet(id); favsRedraw(true); toast(t('favSaved'), 'green', 2500);
 }
 function favsClicks(e) {
   const b = e.target.closest('button'); if (!b) return;
-  const d = b.dataset, f = favs.find(d.fgo || d.fa || d.fv || d.fdel); if (!f) return;
-  if (d.fgo) favsUse(f, 'b');
-  else if (d.fa) favsUse(f, 'a');
-  else if (d.fv) favsUse(f, 'v');
-  else if (d.fdel) { const gone = favs.remove(f.id); favsRedraw(); toast(t('favRemoved'), '', 7000, () => { favs.restore(gone); favsRedraw(); toast(t('favRestored'), 'green', 3000); }); }
+  const d = b.dataset;
+  if (d.fadd) { if (d.fadd === 'fav') favAddNew(); else favPickHw(d.fadd); return; }
+  if (d.fcancel) { favEd = null; favsRedraw(true); return; }
+  if (d.fsave) { favSave(d.fsave); return; }
+  if (d.fpick) { favPickAddr(d.fpick); return; }
+  const key = d.fgo || d.fa || d.fv || d.fed || d.fdel; if (!key) return;
+  const hw = key === 'home' || key === 'work';
+  if (d.fgo) favsUse(key, 'b');
+  else if (d.fa) favsUse(key, 'a');
+  else if (d.fv) favsUse(key, 'v');
+  else if (d.fed) { if (hw) favPickHw(key); else { const f = favs.find(key); if (f) { favEd = { id: f.id, name: f.name || '', touched: false, place: null, focus: true }; favsRedraw(true); } } }
+  else if (d.fdel) {
+    if (hw) { const old = hwOf(key); if (!old) return; S[key] = null; favsRedraw(true); toast(t('favHwRemoved', t(key === 'home' ? 'srHome' : 'srWork')), '', 7000, () => { if (!hwOf(key)) S[key] = old; favFlashSet(key); favsRedraw(true); toast(t('favRestored'), 'green', 3000); }); }
+    else { const gone = favs.remove(key); if (!gone) return; if (favEd && favEd.id === key) favEd = null; favsRedraw(true); toast(t('favRemoved'), '', 7000, () => { favs.restore(gone); favFlashSet(gone.id); favsRedraw(true); toast(t('favRestored'), 'green', 3000); }); }
+  }
 }
-function favsRedraw() { if (currentPanel() === 'favs') { const b = $('panelBody'), st = b.scrollTop; b.innerHTML = favsHtml(); b.scrollTop = st; } tripToolsSync(); }
+// після малювання: нову чи змінену картку — на видноту; відкрили редактор — курсор у назву (увесь текст виділено: набираєте — замінюється)
+function favsAfter(body) {
+  requestAnimationFrame(() => {
+    const c = body.querySelector('.fv-card.flash, .fv-card.fv-ed'); if (c && c.scrollIntoView) c.scrollIntoView({ block: 'nearest' });
+    const i = $('fvName'); if (i && favEd && favEd.focus) { favEd.focus = false; try { i.focus(); i.select(); } catch (_) {} }
+    panelDodge();
+  });
+}
+// force — перемалювати навіть із відкритим редактором (зміни зробив сам водій); без нього редактор не чіпаємо, щоб не збити набір назви
+function favsRedraw(force) {
+  if (currentPanel() === 'favs' && (force || !favEd)) { const b = $('panelBody'), st = b.scrollTop; b.innerHTML = favsHtml(); b.scrollTop = st; favsAfter(b); }
+  tripToolsSync();
+}
 definePanel('favs', {
   title: () => t('favTitle'), back: 'trip', tab: 'trip',
-  render(body) { body.innerHTML = favsHtml(); body.onclick = favsClicks; body.oninput = null; body.onfocusin = null; },
-  update(body) { body.innerHTML = favsHtml(); }
+  render(body, arg) {
+    if (arg !== 'keep') favEd = null;                              // зайшли на екран заново — без редактора
+    body.innerHTML = favsHtml(); body.onclick = favsClicks; body.onfocusin = null;
+    body.oninput = e => { if (e.target.id === 'fvName' && favEd) { favEd.name = e.target.value; favEd.touched = true; } };
+    body.onkeydown = e => { if (e.key === 'Enter' && e.target.id === 'fvName' && favEd) { e.preventDefault(); e.target.blur(); favSave(favEd.id); } };
+    favsAfter(body);
+  },
+  update(body) { if (!favEd) body.innerHTML = favsHtml(); },
+  close() { favEd = null; }
 });
 // Поле точки рейсу: значок (старт / через / фініш), текст — або кнопка «на карті»: поставити точку пальцем
 function fieldHtml(k, ph) {

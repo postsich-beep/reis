@@ -15,7 +15,7 @@ import { geocode, normName, rankPlaces } from './route.js';
 import * as mapM from './map.js';
 import { routeTo, quickOpen } from './ui.js';
 
-const sr = { open: false, q: '', res: [], busy: false, err: '', ctx: null, setFor: null, seq: 0, card: null, city: null, rest: '' };
+const sr = { open: false, q: '', res: [], busy: false, err: '', ctx: null, setFor: null, pick: null, seq: 0, card: null, city: null, rest: '' };
 let timer = 0;
 // схоже на адресу (цифри, «вул», «просп»…) — тоді спершу адреси з сервера, а не населені пункти
 const ADDR = /\d|вул|просп|пров|пл\.|бульв|шосе|ул\.|улиц|street|майдан|узвіз|тупик|проїзд/i;
@@ -23,13 +23,16 @@ const near = (a, b) => Math.abs(a.lat - b.lat) < 0.01 && Math.abs(a.lon - b.lon)
 const hw = k => S[k] && S[k].lat != null ? S[k] : null;
 
 /* ---------- екран пошуку ---------- */
-export function openSearch(setFor = null) {
+// setFor: 'home' | 'work' — шукаємо адресу дому чи роботи (зберігаємо й лишаємось у пошуку).
+// (1.1.36) pick: { ph, hint, done(p, me), back() } — місце вибирає інший екран («Улюблені місця»: додати місце, змінити адресу, Дім, Робота):
+// торкнулись результату — пошук закривається й викликається done; «назад» — back. Карта під пошуком тут не потрібна (місто не «вгадуємо»).
+export function openSearch(setFor = null, pick = null) {
   if (currentPanel()) closePanel();
   quickOpen(false); closeCard(false);
-  sr.open = true; sr.setFor = setFor; sr.q = ''; sr.res = []; sr.err = ''; sr.ctx = null; cityMode(null);
+  sr.open = true; sr.setFor = setFor; sr.pick = pick; sr.q = ''; sr.res = []; sr.err = ''; sr.ctx = null; cityMode(null);
   const box = $('search'); box.hidden = false; document.body.classList.add('sr-on');
   box.innerHTML = `<div class="sr-head"><button class="sr-back" data-sr="back" aria-label="${t('srBack')}">${ICON.arrowL}</button>
-    <input id="srIn" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(t(setFor ? (setFor === 'home' ? 'srFindHome' : 'srFindWork') : 'srPh'))}">
+    <input id="srIn" type="search" inputmode="search" enterkeyhint="search" autocomplete="off" autocapitalize="off" spellcheck="false" placeholder="${esc(pick ? pick.ph : t(setFor ? (setFor === 'home' ? 'srFindHome' : 'srFindWork') : 'srPh'))}">
     <button class="sr-clr" data-sr="clr" aria-label="${t('clear')}" hidden>${ICON.x}</button></div><div class="sr-body" id="srBody"></div>`;
   const inp = $('srIn');
   inp.addEventListener('input', () => { sr.q = inp.value; $('search').querySelector('.sr-clr').hidden = !inp.value; if (!inp.value.trim()) sr.ctx = null; schedule(); });
@@ -39,7 +42,7 @@ export function openSearch(setFor = null) {
 }
 export function closeSearch() {
   if (!sr.open) return;
-  sr.open = false; sr.setFor = null; clearTimeout(timer); sr.seq++;
+  sr.open = false; sr.setFor = null; sr.pick = null; clearTimeout(timer); sr.seq++;
   const box = $('search'); box.hidden = true; box.innerHTML = ''; document.body.classList.remove('sr-on');
   cityMode(null); zbSync();
 }
@@ -86,7 +89,7 @@ async function run() {
   await places.load();
   if (my !== sr.seq) return;
   // (1.1.32) місто на початку — карта туди; решта тексту — вулиця в цьому місті
-  const cg = sr.setFor || sr.ctx ? null : cityOf(raw);
+  const cg = sr.setFor || sr.pick || sr.ctx ? null : cityOf(raw);
   cityMode(cg && cg.city); sr.rest = cg ? cg.rest : '';
   // «Вказати номер будинку» / вулиця у вгаданому місті: шукаємо в тому самому місті
   const ctx = sr.ctx || (cg && cg.rest ? { city: cg.city.label, lat: cg.city.lat, lon: cg.city.lon } : null);
@@ -118,8 +121,8 @@ function render() {
     const rec = places.recent();
     sr.res = rec;
     const tile = (k, ico) => { const v = hw(k); return `<button class="sr-hw" data-srk="${k}"><span class="sr-hw-i">${ico}</span><span class="sr-tx"><b>${t(k === 'home' ? 'srHome' : 'srWork')}</b><small>${esc(v ? v.label : t('srAdd'))}</small></span></button>`; };
-    body.innerHTML = (sr.setFor ? `<div class="sr-set">${t(sr.setFor === 'home' ? 'srSetHome' : 'srSetWork')}</div>` : `<div class="sr-hws">${tile('home', ICON.home)}${tile('work', ICON.work)}</div>`) +
-      (sr.setFor && pos.lat != null ? `<div class="sr-item"><button class="sr-row" data-srme="1"><span class="sr-ico me">${ICON.pin}</span><span class="sr-tx"><b>${t('srMyPlace')}</b><small>${t('srMyPlaceSub')}</small></span></button></div>` : '') +
+    body.innerHTML = (sr.pick ? `<div class="sr-set">${esc(sr.pick.hint)}</div>` : sr.setFor ? `<div class="sr-set">${t(sr.setFor === 'home' ? 'srSetHome' : 'srSetWork')}</div>` : `<div class="sr-hws">${tile('home', ICON.home)}${tile('work', ICON.work)}</div>`) +
+      ((sr.setFor || sr.pick) && pos.lat != null ? `<div class="sr-item"><button class="sr-row" data-srme="1"><span class="sr-ico me">${ICON.pin}</span><span class="sr-tx"><b>${t('srMyPlace')}</b><small>${t('srMyPlaceSub')}</small></span></button></div>` : '') +
       (rec.length ? `<div class="sr-sec">${t('srRecent')}</div>` + rec.map((r, i) => rowHtml(r, i, ICON.clock)).join('') : `<div class="sr-empty">${t('srHint')}</div>`);
     return;
   }
@@ -130,8 +133,15 @@ function render() {
     (!sr.busy && !sr.err && !sr.res.length && q.length < 2 ? `<div class="sr-empty">${t('srMore')}</div>` : '');
 }
 
+// «Назад» з пошуку: вибирали місце для іншого екрана — назад на нього; шукали адресу дому чи роботи — назад у звичайний пошук
+function backOut() {
+  if (sr.pick) { const pk = sr.pick; closeSearch(); if (pk.back) pk.back(); }
+  else if (sr.setFor) { closeSearch(); openSearch(); }
+  else closeSearch();
+}
 function choose(r) {
   const p = { lat: r.lat, lon: r.lon, label: r.label, sub: r.sub || '' };
+  if (sr.pick) { const pk = sr.pick; closeSearch(); pk.done(p, !!r.me); return; }      // місце вибирав інший екран
   if (sr.setFor) {                                            // шукали адресу дому чи роботи — зберігаємо й лишаємось у пошуку
     const k = sr.setFor; S[k] = p; toast(t(k === 'home' ? 'srHomeSaved' : 'srWorkSaved', p.label), 'green', 4000);
     closeSearch(); openSearch(); return;
@@ -142,10 +152,10 @@ function choose(r) {
 function onSearchClick(e) {
   const b = e.target.closest('button'); if (!b) return;
   const d = b.dataset;
-  if (d.sr === 'back') { if (sr.setFor) { closeSearch(); openSearch(); } else closeSearch(); return; }
+  if (d.sr === 'back') { backOut(); return; }
   if (d.sr === 'clr') { const i = $('srIn'); i.value = ''; sr.q = ''; sr.ctx = null; b.hidden = true; i.focus(); schedule(); return; }
   if (d.srk) { const v = hw(d.srk); if (v) choose(v); else { closeSearch(); openSearch(d.srk); } return; }
-  if (d.srme) { if (pos.lat != null) choose({ lat: pos.lat, lon: pos.lon, label: t('srMyPlace'), sub: [pos.lat.toFixed(5), pos.lon.toFixed(5)].join(', ') }); return; }
+  if (d.srme) { if (pos.lat != null) choose({ lat: pos.lat, lon: pos.lon, label: t('srMyPlace'), sub: [pos.lat.toFixed(5), pos.lon.toFixed(5)].join(', '), me: true }); return; }
   if (d.srs != null) { const r = sr.res[+d.srs]; if (!r) return; const i = $('srIn'); i.value = r.label + ', '; sr.q = i.value; $('search').querySelector('.sr-clr').hidden = false; i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (_) {} schedule(); return; }
   if (d.srh != null) { const r = sr.res[+d.srh]; if (!r) return; const i = $('srIn'); sr.ctx = { city: r.city || '', lat: r.lat, lon: r.lon }; i.value = r.label + ' '; sr.q = i.value; $('search').querySelector('.sr-clr').hidden = false; i.focus(); try { i.setSelectionRange(i.value.length, i.value.length); } catch (_) {} schedule(); return; }
   if (d.sri != null) { const r = sr.res[+d.sri]; if (r) choose(r); }
@@ -241,6 +251,7 @@ export function initSearch() {
   // (1.1.32) шукаємо на карті й затримали на ній палець — пошук ховаємо, лишається меню точки (поставити, прокласти маршрут)
   bus.on('mapPick', () => { if (sr.open && sr.city) closeSearch(); });
   $('srBar').addEventListener('click', () => openSearch());
+  bus.on('pickPlace', o => openSearch(null, o));                 // (1.1.36) інший екран просить вибрати місце
   $('bSearch').addEventListener('click', e => { e.stopPropagation(); openSearch(); });
   $('search').addEventListener('click', onSearchClick);
   $('srCard').addEventListener('click', onCardClick);
@@ -250,7 +261,7 @@ export function initSearch() {
   // системна «Назад»: спершу пошук, потім картка знайденого місця
   const prev = window.__reisBack;
   window.__reisBack = () => {
-    if (sr.open) { if (sr.setFor) { closeSearch(); openSearch(); } else closeSearch(); return true; }
+    if (sr.open) { backOut(); return true; }
     if (sr.card) { closeCard(); return true; }
     return prev ? prev() : false;
   };
