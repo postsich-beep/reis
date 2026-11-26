@@ -573,7 +573,7 @@ body.lab-on #toasts{display:none}   /* у Лабораторії плашки н
 .q-zoom button{flex:none;width:88px;height:52px;border-radius:16px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);font:700 30px/1 var(--f-num)}
 #quick .q-tile,#quick .q-zoom button,#quick .q-x{text-shadow:none}
 @media (orientation:landscape) and (max-height:520px){
-  #quick{left:auto;right:10px;width:calc(46% - 20px);top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
+  #quick{left:auto;right:10px;width:max(300px,calc(46% - 20px));top:calc(var(--st) + 6px);max-height:calc(100% - var(--st) - 12px)}
   .q-tile{min-height:64px;padding:5px 4px 4px;gap:1px}
   .q-grid{grid-template-columns:repeat(3,1fr);gap:6px} .q-l{font-size:13px} .q-s{font-size:12px}   /* (1.1.24) дев'ять плиток — три ряди по три, без гортання */
 }
@@ -1472,6 +1472,23 @@ body.rr-on :is(#speed,#cam,#spdPop,#zoom,#attr,#jrAsk){visibility:hidden}
 body.rail-tight #rail{display:grid;grid-template-columns:50px 50px;column-gap:10px;justify-items:center;align-items:start}
 body.rail-tight #bQuick{grid-column:2;grid-row:1} body.rail-tight #bMap{grid-column:2;grid-row:2} body.rail-tight #bSnd{grid-column:1;grid-row:1;margin-top:0}
 body.rail-tight #bSearch{grid-column:1;grid-row:2}
+/* (1.1.35, Діма) один стовпчик, доки можна: звичайним не вміщаються — кнопки трохи менші й щільніше (рахує layoutVars) */
+body.rail-compact #rail{min-width:50px;align-items:center}                 /* менші кнопки лишаються на тій самій осі */
+body.rail-compact #rail > .rb{width:var(--rbs,46px);height:var(--rbs,46px)}
+body.rail-compact #rail > .rb svg{transform:scale(var(--rbk,.92))}
+body.rail-compact :is(#bMap,#bSnd,#bSearch){margin-top:var(--rbg,7px)}
+/* планшет, покладений набік (плашка 760 px по центру, праворуч від неї вільно ≥ 66 px, але для «широкої» розкладки ще вузько):
+   кнопки — у правому верхньому куті екрана одним стовпчиком; верхнім плашкам і стовпчику над повзунком вони там не заважають */
+@media (min-width:892px) and (max-width:1103px) and (min-height:521px){
+  #rail{right:10px;top:calc(var(--st) + 10px)}
+}
+/* трохи ширший планшет (1010…1103 px): «Моє місце» й ±100 уже в правому куті, але «Поворот» ліворуч від ±100 ліг би на виступ повзунка
+   (плашка 760 px по центру закінчується за 172 px від краю лише з 1104 px) — тут він стає над ±100 */
+@media (min-width:1010px) and (max-width:1103px) and (min-height:521px){
+  .nudge.has-turn{grid-template-columns:88px;grid-template-rows:auto 40px 40px;justify-items:end}
+  .nudge.has-turn .turn-btn{grid-column:1;grid-row:1}
+  .nudge.has-turn #bFwd100{grid-column:1;grid-row:2}.nudge.has-turn #bBack100{grid-column:1;grid-row:3}
+}
 
 /* ---- 1.1.29: пошук адреси чи місця, як у Google Maps ----
    Без рейсу — рядок пошуку згори карти (над смужкою «що на дорозі»); у рейсі — лупа праворуч під кнопкою звуку. */
@@ -1581,15 +1598,14 @@ body.sr-map :is(#rail,#zoom,#speed,#cam,#spdPop,#attr,#tilt,#top,#nudge){visibil
 .tb-main.drive #remain span{font:800 23px/1.06 var(--f-num);letter-spacing:0;font-variant-numeric:tabular-nums}
 @media (max-width:340px){ .tb-main.drive #remain span{font-size:20px} .tb-main.drive b{font-size:14px} }
 @media (orientation:landscape) and (max-height:520px){ .tb-main.drive #remain span{font-size:20px} .tb-main.drive b{font-size:13.5px;margin-top:1px} .tb-main.drive b svg{width:12px;height:12px} }
-/* (1.1.33) Модуль OBD у швидких налаштуваннях — рядок на всю ширину під дев'ятьма плитками: сірий — немає зв'язку чи вимкнено, зелений — показання йдуть */
-.q-obd{display:flex;align-items:center;gap:12px;width:100%;min-height:58px;margin-top:8px;padding:6px 14px;border-radius:16px;background:rgba(var(--glass2-rgb),.72);color:var(--ink);text-align:left;text-shadow:none}
-.q-obd svg{flex:none;width:30px;height:30px}
-.q-obd-t{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px}
-.q-obd-t b{font:600 15px/1.15 var(--f-ui)} .q-obd-t small{font:400 12.5px/1.2 var(--f-ui);color:var(--ink-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.q-obd-dot{flex:none;width:14px;height:14px;border-radius:50%;background:#8a949e;box-shadow:0 0 0 3px rgba(138,148,158,.25)}
-.q-obd.on{background:#2f9e62;color:#fff} .q-obd.on .q-obd-t small{color:#fff;opacity:.9} .q-obd.on .q-obd-dot{background:#fff;box-shadow:0 0 0 3px rgba(255,255,255,.35)}
-.q-obd:active{transform:scale(.98)}
-@media (orientation:landscape) and (max-height:520px){ .q-obd{min-height:50px;margin-top:6px} }
+/* (1.1.35) Модуль OBD у швидких налаштуваннях — просто значок «OBD» у заголовку, ліворуч від хрестика: сірий — пристрій не підключено
+   чи вимкнено, зелений — підключено й увімкнено. Дотик — вікно модуля. (До 1.1.35 був окремий рядок на всю ширину під плитками.) */
+.q-obd{flex:none;height:46px;padding:0 2px;margin-right:-2px;display:grid;place-items:center;text-shadow:none}
+.q-obd span{display:grid;place-items:center;height:30px;min-width:46px;padding:0 6px;border-radius:9px;border:1.5px solid currentColor;color:var(--ink-2);font:800 13px/1 var(--f-ui);letter-spacing:.05em}
+.q-obd.on span{background:#2f9e62;border-color:#2f9e62;color:#fff}
+.q-obd:active span{transform:scale(.94)}
+@media (max-width:340px){ #quick .q-head b{font-size:15px} }
+@media (orientation:landscape) and (max-height:520px){ #quick .q-head b{font-size:15px} }
 /* вікно «Модуль OBD»: на весь екран; угорі назва й перемикач, унизу «Назад» */
 #obdBox{position:fixed;inset:0;z-index:40;display:flex;flex-direction:column;padding:calc(var(--st) + 6px) 0 calc(var(--sb) + 10px);background:var(--panel);color:var(--ink)}
 #obdBox[hidden]{display:none}
@@ -1599,6 +1615,11 @@ body.sr-map :is(#rail,#zoom,#speed,#cam,#spdPop,#attr,#tilt,#top,#nudge){visibil
 .obd-sw{flex:none;display:inline-flex;align-items:center;gap:8px;height:44px;padding:0 4px 0 12px;border-radius:22px;background:rgba(127,127,127,.16);color:var(--ink);font:700 14px var(--f-ui)}
 .obd-sw i{position:relative;width:50px;height:30px;border-radius:15px;background:#8a949e;transition:background .15s}
 .obd-sw i::after{content:"";position:absolute;left:3px;top:3px;width:24px;height:24px;border-radius:50%;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.35);transition:left .15s}
+/* (1.1.35) пристрою немає — перемикач неактивний (блідий): умикати нічого */
+.obd-sw.dis{opacity:.45}
+.obd-st.wait .obd-dot{background:var(--amber)}
+@keyframes obdNudge{0%,100%{box-shadow:0 0 0 0 transparent}30%{box-shadow:0 0 0 3px var(--amber)}}
+.obd-st.nudge{animation:obdNudge .7s ease-out}
 .obd-sw.on{background:color-mix(in srgb,#2f9e62 18%,transparent)} .obd-sw.on i{background:#2f9e62} .obd-sw.on i::after{left:23px}
 .obd-body{flex:1;min-height:0;overflow-y:auto;overscroll-behavior:contain;padding:12px 14px 16px}
 .obd-st{display:flex;align-items:flex-start;gap:12px;padding:12px 14px;border-radius:16px;background:rgba(127,127,127,.12)}

@@ -1,5 +1,6 @@
 // (1.1.33) Вікно «Модуль OBD»: угорі — назва, стан зв'язку й перемикач «увімк./вимк.» (зелений), посередині — показання машини
-// за групами (без зв'язку — сірі «—» і напис «Немає зв'язку з OBD»), унизу — «Назад». Відкривається з плитки у швидких налаштуваннях.
+// за групами (без показань — сірі «—»), унизу — «Назад». Відкривається значком «OBD» у заголовку швидких налаштувань.
+// (1.1.35) Пристрій зчитування не підключено — перемикач неактивний і написано «Підключіть пристрій зчитування».
 import { bus, S } from './core.js';
 import { $, ICON, esc } from './ui_base.js';
 import { t } from './i18n.js';
@@ -8,19 +9,18 @@ import * as obd from './obd.js';
 export const OBD_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3.5 7.5h17l-2.2 9H5.7z"/><path d="M7.6 10.6h.8M11.6 10.6h.8M15.6 10.6h.8M9.6 13.4h.8M13.6 13.4h.8"/></svg>';
 let open = false;
 
-// стан для плитки у швидких налаштуваннях: { on — зелена, txt — під назвою }
+// стан для значка у швидких налаштуваннях: { on — зелений (пристрій підключено й модуль увімкнено), txt — підпис для читача екрана }
 export function tileState() {
-  if (obd.st.demo) return { on: false, txt: t('obdTileDemo') };
-  if (!obd.isOn()) return { on: false, txt: t('obdTileOff') };
-  if (obd.linkOk()) return { on: true, txt: t('obdTileOk', obd.freshCount()) };
-  return { on: false, txt: t(obd.st.link === 'search' ? 'obdTileSearch' : 'obdTileNo') };
+  if (obd.isOn()) return { on: true, txt: t('obdTileOk') };
+  return { on: false, txt: t(obd.st.conn ? 'obdTileOff' : 'obdTileNo') };
 }
 
 function statusHtml() {
-  const ok = obd.linkOk(), on = obd.isOn(), L = obd.st.link;
-  const head = obd.st.demo ? t('obdDemoHead') : ok ? t('obdOk', esc(obd.st.dev || t('obdDev'))) : !on ? t('obdOffHead') : L === 'search' ? t('obdSearch') : t('obdNoLink');
-  const why = obd.st.demo ? t('obdDemoText') : ok ? '' : !on ? t('obdOffText') : L === 'nosup' ? t('obdNoSup') : L === 'search' ? t('obdSearchText') : t('obdNoLinkText');
-  return `<div class="obd-st ${ok ? 'ok' : obd.st.demo ? 'demo' : 'no'}"><i class="obd-dot"></i><div><b>${head}</b>${why ? `<small>${why}</small>` : ''}</div></div>`;
+  const ok = obd.linkOk(), on = obd.isOn(), conn = obd.st.conn, dev = esc(obd.st.dev || t('obdDev'));
+  // пристрою немає — «підключіть пристрій зчитування»; є, але вимкнено — «увімкніть перемикач»; увімкнено без показань — «увімкніть запалювання»
+  const head = obd.st.demo ? t('obdDemoHead') : !conn ? t('obdNoDev') : !on ? t('obdOffHead', dev) : t('obdOk', dev);
+  const why = obd.st.demo ? t('obdDemoText') : !conn ? t('obdNoDevText') + (obd.supported() ? '' : ' ' + t('obdNoSup')) : !on ? t('obdOffText') : ok ? '' : t('obdNoData');
+  return `<div class="obd-st ${ok ? 'ok' : obd.st.demo ? 'demo' : on ? 'wait' : 'no'}"><i class="obd-dot"></i><div><b>${head}</b>${why ? `<small>${why}</small>` : ''}</div></div>`;
 }
 function rowsHtml() {
   const now = Date.now(), live = obd.linkOk() || obd.st.demo;
@@ -30,9 +30,9 @@ function rowsHtml() {
   }).join('') + `</div>`).join('');
 }
 function html() {
-  const on = obd.isOn();
+  const on = obd.isOn(), conn = obd.st.conn;
   return `<div class="obd-head"><span class="obd-ic">${OBD_ICON}</span><h2>${t('obdTitle')}</h2>
-      <button class="obd-sw${on ? ' on' : ''}" data-obd="sw" role="switch" aria-checked="${on}" aria-label="${t('obdSwitch')}"><span>${t(on ? 'obdSwOn' : 'obdSwOff')}</span><i></i></button></div>
+      <button class="obd-sw${on ? ' on' : ''}${conn ? '' : ' dis'}" data-obd="sw" role="switch" aria-checked="${on}" aria-disabled="${!conn}" aria-label="${t(conn ? 'obdSwitch' : 'obdSwitchNo')}"><span>${t(on ? 'obdSwOn' : 'obdSwOff')}</span><i></i></button></div>
     <div class="obd-body" id="obdBody">${statusHtml()}
       ${!obd.linkOk() && !obd.st.demo ? `<button class="obd-demo" data-obd="demo">${t('obdDemoBtn')}</button>` : obd.st.demo ? `<button class="obd-demo" data-obd="demo0">${t('obdDemoOff')}</button>` : ''}
       <div class="obd-rows" id="obdRows">${rowsHtml()}</div>
@@ -47,7 +47,7 @@ function draw(full = true) {
   for (const r of box.querySelectorAll('.obd-r')) { const p = obd.PARAMS.find(x => x.k === r.dataset.k), v = live ? obd.fresh(p.k, now) : null, s = obd.fmt(p, v), b = r.querySelector('b'); if (b.textContent !== s) b.textContent = s; r.classList.toggle('na', v == null); }
 }
 let lastKey = '';
-const stateKey = () => [obd.isOn(), obd.st.link, obd.linkOk(), obd.st.demo, obd.st.dev].join('|');
+const stateKey = () => [obd.st.conn, obd.isOn(), obd.st.link, obd.linkOk(), obd.st.demo, obd.st.dev].join('|');
 export function openObd() {
   const box = $('obdBox'); if (!box) return;
   open = true; box.hidden = false; document.body.classList.add('obd-on'); lastKey = stateKey(); draw(true);
@@ -63,7 +63,11 @@ function onClick(e) {
   const b = e.target.closest('[data-obd]'); if (!b) return;
   const k = b.dataset.obd;
   if (k === 'back') { closeObd(); return; }
-  if (k === 'sw') { obd.setOn(!obd.isOn()); return; }
+  if (k === 'sw') {
+    // без пристрою перемикач не діє: підказуємо, що зробити (рядок стану блимає)
+    if (!obd.setOn(!obd.isOn())) { const s = $('obdBox').querySelector('.obd-st'); if (s) { s.classList.remove('nudge'); void s.offsetWidth; s.classList.add('nudge'); } }
+    return;
+  }
   if (k === 'demo') { obd.demo(true); return; }
   if (k === 'demo0') { obd.demo(false); return; }
 }

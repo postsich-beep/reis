@@ -12,9 +12,11 @@ const N = window.ReisNative || null;
 // чи вміє оболонка підключати модуль (Bluetooth): з'явиться в наступній версії застосунку разом із самим модулем
 export const supported = () => !!(N && typeof N.obdStart === 'function');
 
-// link: 'off' — вимкнено; 'nosup' — увімкнено, але ця версія застосунку ще не вміє підключати модуль; 'search' — шукаю модуль;
-// 'ok' — показання йдуть; 'lost' — модуль був, але показань немає понад 5 с; 'err' — помилка підключення
-export const st = { link: 'off', dev: '', msg: '', last: 0, frames: 0, vals: {}, demo: false };
+// (1.1.35, Олексій) Логіка: модуль «апріорі вимкнений», доки пристрій зчитування не підключено, — перемикач неактивний. Пристрій
+// підключився (про це каже оболонка) — модуль умикається сам, і тоді перемикачем його можна вимкнути чи ввімкнути знову.
+// conn — пристрій зчитування підключено (оболонка бачить модуль); link: 'none' — пристрою немає; 'conn' — підключено, показань ще
+// немає; 'ok' — показання йдуть; 'lost' — пристрій є, але показань немає понад 5 с
+export const st = { conn: false, link: 'none', dev: '', msg: '', last: 0, frames: 0, vals: {}, demo: false };
 const STALE = 5000;
 
 /* ---------- розшифровка J1939 ---------- */
@@ -107,17 +109,18 @@ export function fmt(p, v) {
 /* ---------- увімкнути / вимкнути ---------- */
 let emitT = 0, emitQ = false, watchT = 0;
 function emit() { if (emitT) { emitQ = true; return; } bus.emit('obd', st); emitT = setTimeout(() => { emitT = 0; if (emitQ) { emitQ = false; emit(); } }, 250); }
+// Перемикач: діє лише коли пристрій підключено. Вимкнули — показання не беремо й не показуємо (пристрій лишається підключеним).
 export function setOn(on) {
+  if (!st.conn) return false;
   S.obd = !!on; st.demo = false;
-  if (!on) { st.link = 'off'; st.dev = ''; st.msg = ''; if (supported()) { try { N.obdStop(); } catch (_) {} } }
-  else if (!supported()) st.link = 'nosup';
-  else { st.link = 'search'; st.msg = ''; try { N.obdStart(); } catch (e) { st.link = 'err'; st.msg = String(e && e.message || e); } }
-  log('info', 'модуль OBD: ' + (on ? 'увімкнено' : 'вимкнено') + ' (' + st.link + ')');
-  emit();
+  if (!on) { st.vals = {}; st.last = 0; st.link = 'conn'; }
+  log('info', 'модуль OBD: ' + (on ? 'увімкнено' : 'вимкнено'));
+  emit(); return true;
 }
-export const isOn = () => S.obd === true;
-// стан для плитки й вікна: 'ok' — зелена, решта — сіра
-export const linkOk = () => st.link === 'ok' && Date.now() - st.last < STALE;
+// увімкнено = пристрій підключено й водій його не вимкнув (за замовчуванням — увімкнено, щойно підключився)
+export const isOn = () => st.conn && S.obd !== false;
+// показання йдуть просто зараз
+export const linkOk = () => isOn() && st.link === 'ok' && Date.now() - st.last < STALE;
 
 // Приклад показань (як виглядатиме з модулем): чесно позначений «приклад», зникає з першим справжнім кадром чи з закриттям вікна
 const DEMO = [
@@ -148,15 +151,27 @@ export function demo(on) {
 export function init() {
   bus.on('native:obd', d => {
     if (!d) return;
+    if (!st.conn) { st.conn = true; st.link = 'conn'; }               // кадри йдуть — отже, пристрій підключено
+    if (!isOn()) { emit(); return; }                                   // вимкнено водієм — показань не беремо
     if (st.demo) { st.demo = false; st.vals = {}; }
     const now = Date.now();
     if (Array.isArray(d.f)) for (const [id, x] of d.f) feed(id, x, now); else feed(d.id, d.d, now);
     if (st.link !== 'ok' && st.last) st.link = 'ok';
     emit();
   });
-  bus.on('native:obdLink', d => { if (!d || !isOn()) return; st.link = d.state || st.link; st.dev = d.dev || st.dev; st.msg = d.msg || ''; emit(); });
-  // показань давно немає — «зв'язок втрачено» (вмикається знову сам, щойно кадри підуть)
+  // стан від оболонки: 'ok' / 'conn' — пристрій підключено; 'none' / 'off' / 'search' / 'err' — пристрою немає
+  bus.on('native:obdLink', d => {
+    if (!d) return;
+    const was = st.conn; st.conn = d.state === 'ok' || d.state === 'conn' || d.state === 'lost';
+    st.dev = d.dev || (st.conn ? st.dev : ''); st.msg = d.msg || '';
+    if (!st.conn) { st.link = 'none'; st.vals = {}; st.last = 0; }
+    else if (!was || st.link === 'none') st.link = 'conn';
+    if (st.conn !== was) log('info', 'пристрій зчитування OBD: ' + (st.conn ? 'підключено' + (st.dev ? ' (' + st.dev + ')' : '') : 'відключено'));
+    emit();
+  });
+  // показань давно немає — «показань немає» (повертається сам, щойно кадри підуть)
   clearInterval(watchT);
   watchT = setInterval(() => { if (st.link === 'ok' && Date.now() - st.last > STALE) { st.link = 'lost'; emit(); } }, 1000);
-  if (isOn()) setOn(true);
+  // оболонка, що вміє підключати модуль, шукає його сама від запуску; ця (№8) — ще не вміє, пристрій «не підключено»
+  if (supported()) { try { N.obdStart(); } catch (e) { st.msg = String(e && e.message || e); } }
 }

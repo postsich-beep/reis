@@ -684,7 +684,10 @@ export function anchorPoint() {
   const c = map.getContainer(), W = c.clientWidth, H = c.clientHeight, cr = c.getBoundingClientRect(), now = Date.now();
   if (cam.anc && cam.anc.W === W && cam.anc.H === H && now - cam.ancT < 1000) return cam.anc;
   let top = 0, bot = H;
-  if (W <= H) {
+  // (1.1.35, Діма: «коли відкрито два вікна, трикутник поїхав угору від „Рейсу“») Вікно на пів планшета — майже квадратне й невисоке:
+  // рахуємо в ньому, як на покладеному набік екрані (стрілка одразу над плашкою, як він звик на весь екран), а не як на високому телефоні.
+  const split = W >= 460 && H <= 660;
+  if (W <= H && !split) {
     const tp = document.getElementById('top'), bt = document.getElementById('bottom');
     if (tp && !tp.hidden) top = Math.max(0, tp.getBoundingClientRect().bottom - cr.top);
     if (bt && !bt.hidden) bot = Math.min(H, bt.getBoundingClientRect().top - cr.top);
