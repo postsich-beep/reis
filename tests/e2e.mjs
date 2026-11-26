@@ -5010,37 +5010,125 @@ if (run('42')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'S10'].in
     const hit = document.elementFromPoint(R(b).left + R(b).width / 2, R(b).top + R(b).height / 2);
     return { txt: b.getAttribute('aria-label'), row: Math.abs(R(b).top - R(a).top) <= 1 && Math.abs(R(b).top - R(sv).top) <= 1, mid: R(b).left > R(sv).right && R(sv).left > R(a).right, eq: Math.abs(R(a).width - R(sv).width) <= 2, w: R(b).width, h: R(b).height, seen: !!hit && (hit === b || b.contains(hit)), ic: getComputedStyle(b.querySelector('.tt-ic')).backgroundColor, badge: !!b.querySelector('.tt-ic i'), fitA: a.scrollWidth <= a.clientWidth + 1, fitS: sv.scrollWidth <= sv.clientWidth + 1 }; });
   ok(`[${T}] сердечко «${fb.txt}» — у рядку з «Архів рейсів» і «Зберегти рейс», праворуч від них, зручне для пальця (${Math.round(fb.w)}×${Math.round(fb.h)} px); сусідні кнопки однакові й написи в них цілі; поки порожньо — без числа`, fb.txt === 'Улюблені місця' && fb.row && fb.mid && fb.eq && fb.w >= 46 && fb.h >= 46 && fb.ic === 'rgb(229, 72, 77)' && !fb.badge && fb.fitA && fb.fitS, JSON.stringify(fb));
-  await app(page, () => document.querySelector('#tripTools [data-act="favs"]').scrollIntoView({ block: 'center' })); await sleep(150);
-  await page.click('#tripTools [data-act="favs"]'); await sleep(300);
-  const e0 = await app(page, () => ({ title: document.getElementById('panelTitle').textContent.trim(), back: !document.getElementById('panelBack').hidden, empty: (document.querySelector('.fav-empty') || { textContent: '' }).textContent.trim() }));
-  ok(`[${T}] «Улюблені місця» — окремий екран зі стрілкою «назад»; порожньо — «${e0.empty.slice(0, 50)}…»`, e0.title === 'Улюблені місця' && e0.back && /сердечко/.test(e0.empty), JSON.stringify(e0));
-  // в) додали два місця (як сердечком на картці) — список, найновіше згори, у кожного «Старт», «Через», кошик
-  await app(page, () => { const F = window.__app.favs; F.add({ lat: 49.59, lon: 34.55, label: 'Полтава, склад «Нова лінія»', sub: 'Полтавська обл.' }); F.add({ lat: 50.0, lon: 36.23, label: 'Харків, стоянка Окружна', sub: 'Харківська обл.' }); F.add({ lat: 50.00001, lon: 36.23001, label: 'дубль' }); });
-  await page.click('#panelBack'); await sleep(200); await page.click('#tripTools [data-act="favs"]'); await sleep(300);
-  const l0 = await app(page, () => ({ rows: [...document.querySelectorAll('.fav-row')].map(r => ({ t: r.querySelector('.t').textContent, btn: [...r.querySelectorAll('.btn')].map(b => b.textContent.trim() || b.getAttribute('aria-label')), w: Math.round(r.getBoundingClientRect().right - r.getBoundingClientRect().left), fit: r.scrollWidth <= r.clientWidth + 1 })), body: Math.round(document.getElementById('panelBody').clientWidth) }));
+  // (1.1.36, Олексій: «щоб уже були значок Дім, Робота, улюблені місця і кнопки додати, прибрати, редагувати»)
+  const openFavs = async () => { await app(page, () => document.querySelector('#tripTools [data-act="favs"]').scrollIntoView({ block: 'center' })); await sleep(150); await page.click('#tripTools [data-act="favs"]'); await sleep(300); };
+  const fv = () => app(page, () => { const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), t: Math.round(r.top), r: Math.round(r.right), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
+    const seen = b => { const r = b.getBoundingClientRect(); if (r.bottom > innerHeight || r.top < 0) return true; const h = document.elementFromPoint((r.left + r.right) / 2, (r.top + r.bottom) / 2); return !!h && (h === b || b.contains(h)); };
+    return { title: document.getElementById('panelTitle').textContent.trim(), back: !document.getElementById('panelBack').hidden, hint: (document.querySelector('#panelBody .arch-hint') || { textContent: '' }).textContent.trim(), toast: document.getElementById('toasts').textContent,
+      home: window.__app.S.home || null, work: window.__app.S.work || null, favs: window.__app.favs.list().map(f => ({ id: f.id, label: f.label, name: f.name || '', lat: f.lat })),
+      cards: [...document.querySelectorAll('#panelBody .fv-card')].map(c => ({ k: c.dataset.fk, cat: c.classList.contains('fv-cat'), ed: c.classList.contains('fv-ed'), flash: c.classList.contains('flash'), t: (c.querySelector('.fv-tx b') || { textContent: '' }).textContent, s: (c.querySelector('.fv-tx small') || { textContent: '' }).textContent,
+        ic: c.querySelector('.fv-ic') ? getComputedStyle(c.querySelector('.fv-ic')).backgroundColor : '', go: !!c.querySelector('button.fv-main'), btn: [...c.querySelectorAll('button:not(.fv-main)')].map(b => b.textContent.trim() || b.getAttribute('aria-label')),
+        r: R(c), fit: c.scrollWidth <= c.clientWidth + 1 && [...c.querySelectorAll('button:not(.fv-main)')].every(b => b.scrollWidth <= b.clientWidth + 1), seen: [...c.querySelectorAll('button')].every(seen), acts: [...c.querySelectorAll('button:not(.fv-main)')].map(R) })) }; });
+  const card = (st, k) => st.cards.find(c => c.k === k) || { btn: [], acts: [], r: {} };
+  const srState = () => app(page, () => ({ open: !document.getElementById('search').hidden, ph: (document.getElementById('srIn') || {}).placeholder || '', hint: (document.querySelector('#srBody .sr-set') || { textContent: '' }).textContent.trim(), me: !!document.querySelector('#srBody [data-srme]'), tiles: !!document.querySelector('#srBody .sr-hws') }));
+  const pickFirst = async q => { await page.fill('#srIn', q); await page.waitForSelector('#srBody .sr-row[data-sri]', { timeout: 6000 }); await sleep(250); await page.click('#srBody .sr-row[data-sri]'); await page.waitForSelector('#panelBody .fv-card', { timeout: 5000 }); await sleep(350); };
+  const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  // б) екран: три рядки зі значками — Дім, Робота, Улюблені місця; у кожного праворуч «Додати»
+  await openFavs();
+  const e0 = await fv(); await shot(page, '70-favs-empty-' + sc.n);
+  ok(`[${T}] «Улюблені місця» — окремий екран зі стрілкою «назад»: три рядки зі значками — ${e0.cards.map(c => '«' + c.t + '» (' + c.s + ') [' + c.btn.join() + ']').join('; ')}`,
+    e0.title === 'Улюблені місця' && e0.back && e0.cards.length === 3 && e0.cards.map(c => c.k).join() === 'home,work,fav' && e0.cards.every(c => c.cat && !c.go && c.btn.join() === 'Додати') && e0.cards.map(c => c.t).join() === 'Дім,Робота,Улюблені місця'
+    && e0.cards[0].s === 'адресу не вказано' && e0.cards[1].s === 'адресу не вказано' && /ще немає/.test(e0.cards[2].s) && !e0.hint, JSON.stringify(e0.cards));
+  ok(`[${T}] рядки однакові: висота ${e0.cards.map(c => c.r.h).join(', ')} px, «Додати» ${e0.cards.map(c => c.acts[0].w + '×' + c.acts[0].h).join(', ')} — на одній вертикалі (правий край ${e0.cards.map(c => c.acts[0].r).join(', ')}); значки різного кольору (синій, зелений, червоний); усе вміщається`,
+    new Set(e0.cards.map(c => c.r.h)).size === 1 && new Set(e0.cards.map(c => c.acts[0].w + '×' + c.acts[0].h)).size === 1 && new Set(e0.cards.map(c => c.acts[0].r)).size === 1 && e0.cards.every(c => c.acts[0].h >= 44 && c.fit && c.seen)
+    && e0.cards[0].ic === 'rgb(47, 107, 255)' && e0.cards[1].ic === 'rgb(47, 158, 98)' && e0.cards[2].ic === 'rgb(229, 72, 77)' && (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify({ c: e0.cards, rc: await readCheck(page, '#panel', '#panelBody') }));
+  // в) «Додати» в Дому — той самий пошук, що й «Вказати адресу»: знайшли, торкнулись — назад на екран, Дім збережено
+  await page.click('#panelBody [data-fadd="home"]'); await page.waitForSelector('#srIn'); await sleep(250);
+  const s0 = await srState();
+  ok(`[${T}] «Додати» в Дому — пошук «${s0.ph}»: «${s0.hint.slice(0, 44)}…», є «Моє місце зараз»; плиток «Дім / Робота» тут немає`, s0.open && s0.ph === 'Адреса дому' && /адресу дому/.test(s0.hint) && s0.me && !s0.tiles, JSON.stringify(s0));
+  await pickFirst('Харків');
+  const h1 = await fv(), hc = card(h1, 'home');
+  ok(`[${T}] вибрали «Харків» — знову екран «${h1.title}»; Дім: «${hc.s}», кнопки [${hc.btn.join(' | ')}]; сповіщення «${h1.toast.trim().slice(0, 24)}»; зʼявилась підказка`, h1.title === 'Улюблені місця' && !(await srState()).open && !hc.cat && hc.go && hc.t === 'Дім' && /^Харків/.test(hc.s) && hc.btn.join() === 'Старт,Через,Змінити,Прибрати'
+    && /Дім: Харків/.test(h1.toast) && h1.home && h1.home.label === 'Харків' && /фінішем рейсу/.test(h1.hint), JSON.stringify({ hc, home: h1.home, toast: h1.toast }));
+  ok(`[${T}] чотири кнопки в один ряд: «Старт» і «Через» однакові (${hc.acts[0].w} і ${hc.acts[1].w} px), олівець і кошик однакові (${hc.acts[2].w}×${hc.acts[2].h}, ${hc.acts[3].w}×${hc.acts[3].h}); написи цілі, нічого не закрито`,
+    hc.acts.length === 4 && new Set(hc.acts.map(a => a.t)).size === 1 && hc.acts.every(a => a.h >= 44) && Math.abs(hc.acts[0].w - hc.acts[1].w) <= 1 && hc.acts[2].w === hc.acts[3].w && hc.acts[2].w >= 44 && hc.acts[3].r <= hc.r.r - 8 && hc.fit && hc.seen, JSON.stringify(hc));
+  // г) «Додати» в Роботи — «Моє місце зараз»: не «Моє місце зараз» (за годину це вже неправда), а адреса цього місця
+  await clearToasts(); await page.click('#panelBody [data-fadd="work"]'); await page.waitForSelector('#srBody [data-srme]'); await sleep(200);
+  await page.click('#srBody [data-srme]'); await page.waitForSelector('#panelBody .fv-card', { timeout: 5000 }); await sleep(900);
+  const w1 = await fv(), wc = card(w1, 'work');
+  ok(`[${T}] Робота — «Моє місце зараз»: збережено як «${w1.work && w1.work.label}» (адреса цього місця, а не «Моє місце зараз»; координат під назвою немає)`, !wc.cat && wc.t === 'Робота' && w1.work && w1.work.label === 'Пісочин, Харків' && /^Пісочин, Харків( · |$)/.test(wc.s) && !/\d\d\.\d{4}/.test(wc.s) && Math.abs(w1.work.lat - coords[4][0]) < 1e-6, JSON.stringify({ wc, work: w1.work }));
+  // ґ) «Додати» в улюблених: «назад» — нічого не додано; знайшли місце — воно в списку; те саме вдруге не додається
+  await clearToasts(); await page.click('#panelBody [data-fadd="fav"]'); await page.waitForSelector('#srIn'); await sleep(250);
+  const s1 = await srState();
+  await page.click('#search [data-sr="back"]'); await sleep(300);
+  const b1 = await fv();
+  ok(`[${T}] «Додати» в улюблених — пошук «${s1.ph}» («${s1.hint.slice(0, 40)}…»); «назад» — знову «${b1.title}», нічого не додано`, s1.ph === 'Місце для улюблених' && /стане улюбленим/.test(s1.hint) && s1.me && b1.title === 'Улюблені місця' && b1.favs.length === 0 && !(await srState()).open, JSON.stringify({ s1, n: b1.favs.length }));
+  await page.click('#panelBody [data-fadd="fav"]'); await page.waitForSelector('#srIn'); await sleep(200);
+  const sb = await app(page, () => window.__reisBack()); await sleep(300);
+  ok(`[${T}] системна «Назад» з пошуку — теж назад на «Улюблені місця»`, sb === true && (await fv()).title === 'Улюблені місця' && !(await srState()).open);
+  await page.click('#panelBody [data-fadd="fav"]'); await page.waitForSelector('#srIn'); await sleep(200);
+  await pickFirst('Полтава');
+  const a1 = await fv(), fc1 = a1.cards[3] || { btn: [] };
+  ok(`[${T}] знайшли «Полтава» — місце в списку під розділом (підсвічене): «${fc1.t}» (${fc1.s}) [${fc1.btn.join(' | ')}]; у розділі «${card(a1, 'fav').s}»; сповіщення «${a1.toast.trim().slice(0, 30)}»`,
+    a1.cards.length === 4 && a1.favs.length === 1 && fc1.t === 'Полтава' && fc1.flash && fc1.go && fc1.btn.join() === 'Старт,Через,Змінити,Прибрати' && card(a1, 'fav').s === 'збережено: 1' && /«Полтава» — в улюблених/.test(a1.toast), JSON.stringify({ fc1, toast: a1.toast }));
+  await clearToasts(); await page.click('#panelBody [data-fadd="fav"]'); await page.waitForSelector('#srIn'); await sleep(200);
+  await pickFirst('Полтава');
+  const a2 = await fv();
+  ok(`[${T}] те саме місце вдруге не додається: «${a2.toast.trim().slice(0, 40)}»`, a2.favs.length === 1 && /вже є в улюблених/.test(a2.toast), a2.toast);
+  // д) друге місце (як сердечком на картці знайденого місця) — найновіше згори
+  await app(page, () => { const F = window.__app.favs; F.add({ lat: 50.0, lon: 36.23, label: 'Харків, стоянка Окружна', sub: 'Харківська обл.' }); F.add({ lat: 50.00001, lon: 36.23001, label: 'дубль' }); });
+  await page.click('#panelBack'); await sleep(200); await openFavs();
+  const l0 = await fv(), fl = l0.cards.slice(3);
   await shot(page, '70-favs-' + sc.n);
-  ok(`[${T}] список: ${l0.rows.map(r => '«' + r.t + '» [' + r.btn.join(' | ') + ']').join('; ')}; те саме місце двічі не додається; рядки не вилазять за край`, l0.rows.length === 2 && l0.rows[0].t === 'Харків, стоянка Окружна' && l0.rows.every(r => r.btn.join() === 'Старт,Через,Прибрати з улюблених' && r.fit), JSON.stringify(l0));
-  // г) дотик до рядка — місце стає фінішем рейсу (поле «Куди»), екран «Рейс»; «Старт» — у поле старту
-  await page.click('.fav-row [data-fgo]'); await sleep(300);
+  ok(`[${T}] список: Дім, Робота, розділ («${card(l0, 'fav').s}»), далі ${fl.map(c => '«' + c.t + '»').join(', ')} — найновіше згори; картки однакові, нічого не вилазить за край і не обрізано`, l0.cards.length === 5 && fl.map(c => c.t).join('|') === 'Харків, стоянка Окружна|Полтава' && card(l0, 'fav').s === 'збережено: 2'
+    && l0.cards.filter(c => !c.cat).every(c => c.btn.join() === 'Старт,Через,Змінити,Прибрати' && c.fit && c.seen && c.r.l === l0.cards[0].r.l && c.r.r === l0.cards[0].r.r) && (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify({ c: l0.cards, rc: await readCheck(page, '#panel', '#panelBody') }));
+  // е) олівець в улюбленого — своя назва й адреса; «Скасувати» нічого не змінює
+  const fid = l0.favs[0].id;
+  await page.click(`#panelBody [data-fed="${fid}"]`); await sleep(350);
+  const ed = () => app(page, () => { const c = document.querySelector('#panelBody .fv-ed'); if (!c) return null; const i = document.getElementById('fvName'); return { val: i.value, focus: document.activeElement === i, sel: i.selectionEnd - i.selectionStart, addr: document.getElementById('fvAddr').textContent, isNew: document.getElementById('fvAddr').classList.contains('new'), btn: [...c.querySelectorAll('button')].map(b => b.textContent.trim()), inH: Math.round(i.getBoundingClientRect().height), fs: parseFloat(getComputedStyle(i).fontSize) }; });
+  const e1 = await ed(); await shot(page, '70-favs-edit-' + sc.n);
+  ok(`[${T}] олівець — редактор у картці: назва «${e1 && e1.val}» (курсор у полі, текст виділено), адреса «${e1 && e1.addr}», кнопки [${e1 && e1.btn.join(' | ')}]`, !!e1 && e1.val === 'Харків, стоянка Окружна' && e1.focus && e1.sel === e1.val.length && e1.addr === 'Харків, стоянка Окружна, Харківська обл.' && !e1.isNew && e1.btn.join() === 'Змінити адресу,Скасувати,Зберегти' && e1.inH >= 44 && e1.fs >= 16
+    && (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify({ e1, rc: await readCheck(page, '#panel', '#panelBody') }));
+  await page.fill('#fvName', 'Не те'); await page.click('#panelBody [data-fcancel]'); await sleep(250);
+  const c1 = await fv();
+  ok(`[${T}] «Скасувати» — редактор закрито, назва лишилась «${c1.cards[3].t}»`, !(await ed()) && c1.cards[3].t === 'Харків, стоянка Окружна' && c1.favs[0].name === '', JSON.stringify(c1.favs));
+  await page.click(`#panelBody [data-fed="${fid}"]`); await sleep(300); await page.fill('#fvName', 'База'); await clearToasts(); await page.click('#panelBody [data-fsave]'); await sleep(300);
+  const n1 = await fv();
+  ok(`[${T}] назвали «База» і «Зберегти» — картка «${n1.cards[3].t}», під назвою адреса: «${n1.cards[3].s.slice(0, 44)}»; «${n1.toast.trim()}»`, !(await ed()) && n1.cards[3].t === 'База' && /^Харків, стоянка Окружна, Харківська обл\./.test(n1.cards[3].s) && n1.favs[0].name === 'База' && n1.favs[0].label === 'Харків, стоянка Окружна' && /Збережено/.test(n1.toast), JSON.stringify(n1.favs));
+  // є) «Змінити адресу»: місце, яке вже є в улюблених, не приймаємо; інше — нова адреса, своя назва лишається
+  await page.click(`#panelBody [data-fed="${fid}"]`); await sleep(300);
+  await page.click('#panelBody [data-fpick]'); await page.waitForSelector('#srIn'); await sleep(200);
+  const s2 = await srState();
+  await pickFirst('Полтава');
+  const e2 = await ed(); await clearToasts(); await page.click('#panelBody [data-fsave]'); await sleep(300);
+  const d2 = await fv();
+  ok(`[${T}] «Змінити адресу» — пошук «${s2.ph}»; вибрали «Полтава» — редактор знову відкрито, нова адреса «${e2 && e2.addr}» (жирним), назва «${e2 && e2.val}»; «Зберегти» — «${d2.toast.trim().slice(0, 34)}», бо таке вже є; нічого не змінилось`,
+    s2.ph === 'Нова адреса місця' && /нову адресу/.test(s2.hint) && !!e2 && /^Полтава/.test(e2.addr) && e2.isNew && e2.val === 'База' && /вже є в улюблених/.test(d2.toast) && !!(await ed()) && d2.favs[0].label === 'Харків, стоянка Окружна' && Math.abs(d2.favs[0].lat - 50.0) < 1e-6, JSON.stringify({ s2, e2, favs: d2.favs }));
+  await page.click('#panelBody [data-fpick]'); await page.waitForSelector('#srIn'); await sleep(200);
+  await pickFirst('Чугуїв');
+  const e3 = await ed(); await clearToasts(); await page.click('#panelBody [data-fsave]'); await sleep(300);
+  const d3 = await fv();
+  ok(`[${T}] вибрали «Чугуїв» і «Зберегти» — «${d3.cards[3].t}»: «${d3.cards[3].s.slice(0, 30)}…» (своя назва лишилась, адреса нова)`, !!e3 && /^Чугуїв/.test(e3.addr) && !(await ed()) && d3.cards[3].t === 'База' && /^Чугуїв/.test(d3.cards[3].s) && d3.favs[0].label === 'Чугуїв' && d3.favs[0].name === 'База' && Math.abs(d3.favs[0].lat - 50.0) > 0.01, JSON.stringify(d3.favs));
+  // ж) олівець у Дому — одразу нова адреса
+  await clearToasts(); await page.click('#panelBody [data-fed="home"]'); await page.waitForSelector('#srIn'); await sleep(200);
+  const s3 = await srState(); await pickFirst('Полтава');
+  const h2 = await fv();
+  ok(`[${T}] олівець у Дому — одразу пошук «${s3.ph}»; вибрали — Дім: «${card(h2, 'home').s.slice(0, 28)}»`, s3.ph === 'Адреса дому' && h2.home.label === 'Полтава' && /^Полтава/.test(card(h2, 'home').s) && /Дім: Полтава/.test(h2.toast), JSON.stringify(h2.home));
+  // з) дотик до картки — місце стає фінішем рейсу (поле «Куди»), екран «Рейс»; «Старт» — у поле старту (зі своєю назвою)
+  await page.click('#panelBody [data-fgo="home"]'); await sleep(300);
   const u0 = await app(page, () => ({ title: document.getElementById('panelTitle').textContent.trim(), b: document.getElementById('in_b').value, toast: document.getElementById('toasts').textContent }));
-  ok(`[${T}] дотик до «Харків, стоянка Окружна» — екран «${u0.title}», у полі «Куди»: «${u0.b}»`, u0.title === 'Рейс' && u0.b === 'Харків, стоянка Окружна' && /Фініш: Харків/.test(u0.toast), JSON.stringify(u0));
-  await app(page, () => document.querySelector('#tripTools [data-act="favs"]').scrollIntoView({ block: 'center' })); await sleep(100);
-  await page.click('#tripTools [data-act="favs"]'); await sleep(250);
-  const n1 = await app(page, () => (document.querySelector('#tripTools [data-act="favs"] .tt-ic i') || { textContent: '' }).textContent);
-  await page.click('.fav-row:nth-child(2) [data-fa]'); await sleep(300);
+  ok(`[${T}] дотик до «Дім» — екран «${u0.title}», у полі «Куди»: «${u0.b}»`, u0.title === 'Рейс' && u0.b === 'Полтава' && /Фініш: Полтава/.test(u0.toast), JSON.stringify(u0));
+  await openFavs();
+  await page.click(`#panelBody [data-fa="${fid}"]`); await sleep(300);
   const u1 = await app(page, () => ({ a: document.getElementById('in_a').value, b: document.getElementById('in_b').value, two: [...document.querySelectorAll('#startTwo button')].map(b => b.classList.contains('on')) }));
-  ok(`[${T}] «Старт» у другого — у полі старту «${u1.a}», фініш лишився «${u1.b}»`, u1.a === 'Полтава, склад «Нова лінія»' && u1.b === 'Харків, стоянка Окружна' && u1.two[0] === false, JSON.stringify(u1));
-  // ґ) кошик — прибрано, «Торкніться — повернути» повертає
+  ok(`[${T}] «Старт» в улюбленого «База» — у полі старту «${u1.a}», фініш лишився «${u1.b}»`, u1.a === 'База' && u1.b === 'Полтава' && u1.two[0] === false, JSON.stringify(u1));
+  // и) кошик: улюблене — прибрано, дотик до сповіщення повертає на те саме місце; Дім — знову рядок «Додати», теж із поверненням
   await app(page, () => document.querySelector('#tripTools [data-act="favs"]').scrollIntoView({ block: 'center' })); await sleep(100);
   const cnt = await app(page, () => (document.querySelector('#tripTools [data-act="favs"] .tt-ic i') || { textContent: '' }).textContent);
   ok(`[${T}] на значку сердечка — кількість улюблених (${cnt})`, cnt === '2', cnt);
-  await page.click('#tripTools [data-act="favs"]'); await sleep(250);
-  await page.click('.fav-row [data-fdel]'); await sleep(300);
-  const d0 = await app(page, () => ({ n: document.querySelectorAll('.fav-row').length, toast: document.getElementById('toasts').textContent, store: window.__app.favs.count() }));
+  await openFavs(); await clearToasts();
+  await page.click(`#panelBody [data-fdel="${fid}"]`); await sleep(300);
+  const d0 = await fv();
   await page.click('#toasts .toast:has-text("повернути")'); await sleep(300);
-  const d1 = await app(page, () => ({ n: document.querySelectorAll('.fav-row').length, store: window.__app.favs.count(), first: (document.querySelector('.fav-row .t') || {}).textContent }));
-  ok(`[${T}] кошик — місце прибрано («${d0.toast.slice(0, 40)}»); дотик до сповіщення — повернулось на своє місце`, d0.n === 1 && d0.store === 1 && /повернути/.test(d0.toast) && d1.n === 2 && d1.store === 2 && d1.first === 'Харків, стоянка Окружна', JSON.stringify({ d0, d1 }));
+  const d1 = await fv();
+  ok(`[${T}] кошик — місце прибрано («${d0.toast.trim().slice(0, 40)}»); дотик до сповіщення — повернулось на своє місце`, d0.cards.length === 4 && d0.favs.length === 1 && /повернути/.test(d0.toast) && d1.cards.length === 5 && d1.favs.length === 2 && d1.cards[3].t === 'База', JSON.stringify({ d0: d0.favs, d1: d1.favs }));
+  await clearToasts(); await page.click('#panelBody [data-fdel="home"]'); await sleep(300);
+  const r0 = await fv(), rc0 = card(r0, 'home');
+  await page.click('#toasts .toast:has-text("повернути")'); await sleep(300);
+  const r1 = await fv();
+  ok(`[${T}] кошик у Дому — «${r0.toast.trim().slice(0, 42)}»: знову рядок «Дім · ${rc0.s}» з «Додати»; дотик до сповіщення — адреса повернулась («${card(r1, 'home').s.slice(0, 20)}»)`, !r0.home && rc0.cat && rc0.s === 'адресу не вказано' && rc0.btn.join() === 'Додати' && /Дім: адресу прибрано/.test(r0.toast) && r1.home && r1.home.label === 'Полтава' && !card(r1, 'home').cat, JSON.stringify({ r0: r0.home, r1: r1.home }));
   ok(`[${T}] читається й нічого не обрізано`, (await readCheck(page, '#panel', '#panelBody')).length === 0, JSON.stringify(await readCheck(page, '#panel', '#panelBody')));
+  await app(page, () => { window.__app.S.home = null; window.__app.S.work = null; });
   await page.click('#panelBack'); await sleep(200);
   // д) рейс із варіантами: дотик пальцем поруч із сірою лінією (не точно в неї) — варіант стає вибраним, як у Google
   await app(page, () => { window.__app.favs.list().forEach(f => window.__app.favs.remove(f.id)); });
@@ -5140,6 +5228,73 @@ if (run('43')) for (const sc of [
   ok(`[${T}] прохід 43 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 43 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+
+/* ============ прохід 44 (1.1.36): без GPS — усі контрольні повороти на карті, пройдені лишаються, на кожному чекаємо ============
+   Олексій (знімок без GPS, перехрестя вже позаду): «був перехрестя і не було точки. І навіть коли перехрестя пройдено, точка має лишатись,
+   щоб я міг на неї повернутись. Кожен поворот на маршруті… гострий — червоний, 100 % треба 90 градусів, і розрахунок має повернути, якщо ні —
+   стояти й чекати повороту. Або жовтий затяжний, але теж треба чекати в обов'язковому порядку».
+   Було: на карті лише до 12 поворотів ПОПЕРЕДУ — пройдений зникав, і торкнутись його (повернутись) було неможливо. */
+if (run('44')) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const n = coords.length, idx0 = turnIdx[1] - 6;                                    // за 300 м до перехрестя «90° ліворуч»
+  const trip = { id: 't-cps', a: { lat: coords[0][0], lon: coords[0][1], label: 'Харків' }, b: { lat: coords[n - 1][0], lon: coords[n - 1][1], label: 'Полтава' },
+    route: { coords, mans: [{ type: 1, ins: 'Рушайте', street: '', streets: [], i0: 0, i1: n - 1, len: 26800, time: 1700 }, { type: 4, ins: 'Прибуття', street: '', streets: [], i0: n - 1, i1: n - 1, len: 0, time: 0 }], dist: 26800, time: 1700, aD: null, viaD: null } };
+  await emitN('loc', { prov: 'gps', lat: coords[idx0][0], lon: coords[idx0][1], acc: 5, spd: 0, t: Date.now() });
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
+  await app(page, () => { window.__cp = []; window.__app.bus.on('cpPass', e => window.__cp.push(e)); });
+  let Y = 0;                                                                          // накопичений поворот телефона (за годинниковою — плюс)
+  const feed = async (sec, perSec = 0) => { for (let k = 0; k < sec; k++) { Y += perSec; await emitN('sens', { var: 0.05, yaw: Y }); await sleep(1000); } };
+  await feed(7);
+  await page.waitForFunction(() => window.__app.nav.pos.mode === 'dr', null, { timeout: 8000 });
+  await feed(3);
+  const C = await app(page, () => window.__app.nav.routeCps().map(c => ({ d: c.d, d0: c.d0, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn })));
+  const dots = () => app(page, () => { const s = window.__app.map.map.getSource('cps'), d = s.serialize ? s.serialize().data : s._data; return (d && d.features || []).map(f => f.properties); });
+  const st = () => app(page, () => { const P = window.__app.nav.pos; return { rd: P.rd, mode: P.mode, cp: P.cp ? { d: P.cp.d, state: P.cp.state, cls: P.cp.cls } : null, toast: [...document.querySelectorAll('#toasts .toast')].map(x => x.textContent).join(' | '), btn: document.getElementById('bTurn').textContent.trim() }; });
+  const clearToasts = () => app(page, () => { document.getElementById('toasts').innerHTML = ''; });
+  const red = C[0], yel = C.find(c => c.cls === 'yellow' && c.sgn), red2 = C[1];
+  // а) без GPS на карті — УСІ повороти рейсу (не лише найближчі), наступний виділено, пройдених ще немає
+  const d0 = await dots();
+  ok(`без GPS на карті всі контрольні повороти рейсу — ${d0.length} з ${C.length} (${C.map(c => (c.cls === 'red' ? 'червоний' : 'жовтий') + ' ' + c.ang + '°').join(', ')}); наступний один, пройдених немає`,
+    C.length >= 4 && d0.length === C.length && d0.filter(f => f.n === 1).length === 1 && d0.find(f => f.n === 1).d === red.d && d0.every(f => f.p === 0) && red.cls === 'red' && Math.abs(Math.abs(red.ang) - 90) <= 10 && !!yel, JSON.stringify({ d0, C }));
+  // б) червоний (перехрестя 90°): позначка доїхала й СТОЇТЬ — чекає, поки телефон поверне; далі не їде
+  await app(page, d => window.__app.nav.jumpToCp(d), red.d); await feed(9);
+  const r0 = await st(); await feed(8); const r1 = await st();
+  ok(`червоний поворот ${red.ang}°: телефон не повертав — позначка стоїть перед ним і чекає (${Math.round(r0.rd)} → ${Math.round(r1.rd)} м, поворот на ${red.d0}–${red.d1}; стан «${r1.cp && r1.cp.state}», кнопка «${r1.btn.slice(0, 22)}»)`,
+    r1.mode === 'dr' && r1.cp && r1.cp.d === red.d && r1.cp.state === 'wait' && r1.rd < red.d + 5 && Math.abs(r1.rd - r0.rd) <= 8 && r1.rd >= red.d0 - 40, JSON.stringify({ r0, r1, red }));
+  await shot(page, '72-cps-wait-red');
+  // …телефон повернув на 90° — поворот пройдено; точка НЕ зникає: стає білою з обідком (пройдена), наступний — наступний
+  await clearToasts(); await feed(5, Math.sign(red.ang) * 18); await feed(3);
+  const r2 = await st(), d1 = await dots(), ev1 = await app(page, () => window.__cp.slice(-1)[0] || null);
+  ok(`телефон повернув на 90° — поворот пройдено (${ev1 && ev1.by}), позначка за ним (${Math.round(r2.rd)} м); його точка лишилась на карті як пройдена, наступний — ${red2.ang}° на ${red2.d} м`,
+    ev1 && ev1.by === 'gyro' && r2.rd >= red.d - 5 && d1.length === C.length && (d1.find(f => f.d === red.d) || {}).p === 1 && d1.filter(f => f.p === 1).length === 1 && (d1.find(f => f.n === 1) || {}).d === red2.d, JSON.stringify({ r2, ev1, d1 }));
+  // в) жовтий (затяжний / пологий): те саме — стоїть і чекає «в обов'язковому порядку», повернув — пройдено
+  await app(page, d => window.__app.nav.jumpToCp(d), yel.d); await feed(9);
+  const y0 = await st(); await feed(8); const y1 = await st(), d2 = await dots();
+  ok(`жовтий поворот ${yel.ang}°: телефон не повертав — позначка так само стоїть і чекає (${Math.round(y0.rd)} → ${Math.round(y1.rd)} м, поворот на ${yel.d0}–${yel.d1}; стан «${y1.cp && y1.cp.state}»)`,
+    y1.cp && y1.cp.d === yel.d && y1.cp.cls === 'yellow' && y1.cp.state === 'wait' && y1.rd < yel.d + 5 && Math.abs(y1.rd - y0.rd) <= 8, JSON.stringify({ y0, y1, yel }));
+  ok(`усі повороти до нього — на карті як пройдені (${d2.filter(f => f.p === 1).length}), сам він — наступний, решта попереду`, d2.length === C.length && d2.filter(f => f.p === 1).length === C.filter(c => c.d < yel.d).length && d2.filter(f => f.p === 1).every(f => f.d < yel.d) && (d2.find(f => f.n === 1) || {}).d === yel.d, JSON.stringify(d2));
+  await feed(5, Math.sign(yel.ang) * Math.abs(yel.ang) / 5); await feed(3);
+  const y2 = await st(), ev2 = await app(page, () => window.__cp.slice(-1)[0] || null);
+  ok(`телефон повернув на ${Math.abs(yel.ang)}° — жовтий пройдено (${ev2 && ev2.by}), позначка за ним (${Math.round(y2.rd)} м)`, ev2 && ev2.by === 'gyro' && ev2.cp.d === yel.d && y2.rd >= yel.d - 5, JSON.stringify({ y2, ev2 }));
+  // г) дотик до ПРОЙДЕНОЇ точки на карті — позначка повертається на той поворот і знову чекає
+  const back = red2;                                                                 // другий (90° праворуч) — давно позаду
+  await app(page, d => { const m = window.__app.map, idx = window.__app.guide.g.idx, p = idx.at(d); m.setFollow(false); m.view.lastTouch = Date.now() + 600000; m.map.jumpTo({ center: [p.lon, p.lat], zoom: 15 }); }, back.d); await feed(2);
+  const t0 = await app(page, d => { const m = window.__app.map.map, idx = window.__app.guide.g.idx, p = idx.at(d), q = m.project([p.lon, p.lat]), fs = m.queryRenderedFeatures([[q.x - 4, q.y - 4], [q.x + 4, q.y + 4]], { layers: ['cps-dot'] }); return { x: q.x, y: q.y, hit: fs.map(f => f.properties.d + ':' + f.properties.p), fill: m.getPaintProperty('cps-dot', 'circle-color') }; }, back.d);
+  await shot(page, '72-cps-passed');
+  await clearToasts(); await page.mouse.click(t0.x + 6, t0.y - 6); await feed(2);
+  const b1 = await st(); await feed(8); const b2 = await st(), d3 = await dots();
+  ok(`пройдена точка (${back.ang}°, на ${back.d} м) є на карті (біла з обідком) — дотик до неї: позначка повернулась (${Math.round(y2.rd)} → ${Math.round(b1.rd)} м): «${b1.toast.slice(0, 50)}…»`,
+    t0.hit.includes(back.d + ':1') && Math.abs(b1.rd - back.d0) <= 45 && /Позначка — перед вибраним поворотом/.test(b1.toast), JSON.stringify({ t0, b1, back }));
+  ok(`…і знову чекає повороту (${Math.round(b1.rd)} → ${Math.round(b2.rd)} м, стан «${b2.cp && b2.cp.state}»); цей поворот знову «наступний», ті, що за ним, — знову попереду`,
+    b2.cp && b2.cp.d === back.d && b2.cp.state === 'wait' && b2.rd >= back.d0 - 40 && b2.rd <= back.d + 5 && b2.rd - b1.rd <= 20 && (d3.find(f => f.n === 1) || {}).d === back.d && d3.filter(f => f.p === 1).length === C.filter(c => c.d < back.d).length, JSON.stringify({ b2, d3 }));
+  // ґ) GPS повернувся — точок на карті немає (карта чиста), як і раніше
+  for (let k = 0; k < 4; k++) { const q = await app(page, () => { const i = window.__app.guide.g.idx, p = i.at(window.__app.nav.pos.rd + 20); return { lat: p.lat, lon: p.lon, brg: p.brg }; }); await emitN('loc', { prov: 'gps', lat: q.lat, lon: q.lon, acc: 5, spd: 10, brg: q.brg, t: Date.now() }); await feed(1); }
+  const g1 = await st(), d4 = await dots();
+  ok(`GPS повернувся — контрольних поворотів на карті немає (${d4.length})`, g1.mode === 'gps' && d4.length === 0, JSON.stringify({ mode: g1.mode, n: d4.length }));
+  ok('прохід 44 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 44 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);
