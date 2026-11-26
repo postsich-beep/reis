@@ -1,5 +1,6 @@
 // Головний екран і панелі «Рейс», «Події», «Чат».
 import { bus, log, S, hav, fmtDist, fmtDur, fmtClock, fmtMS, RouteIndex } from './core.js';
+import { OBD_ICON, openObd, tileState as obdTile } from './ui_obd.js';
 import * as P from './platform.js';
 import { pos, nudge, acceptPending, setManual, speedView, snapToRoute, setManualSpeed, manualSpeed, placeAtD, estimateNow, routeCps, passTurn, undoTurn } from './nav.js';
 import { chime, initSfx } from './sfx.js';
@@ -188,8 +189,10 @@ function quickHtml() {
     ${tile('awake', ICON.awake, t('qAwake'), S.keepAwake !== false ? t('qAwakeOn') : t('qAwakeOff'), S.keepAwake !== false)}
     ${tile('settings', ICON.gear, t('qSettings'), t('qAll'), false)}
     ${tile('cal', ICON.calTab, t('qCal'), t(calFresh() ? 'qCalOk' : calGet() ? 'qCalOld' : 'qCalNo'), false, calFresh() ? ' cal-ok' : '')}
-  </div>`;        // (1.1.26) рядка «− Масштаб +» тут більше немає: карту наближають двома пальцями
+  </div>${obdRowHtml()}`;        // (1.1.26) рядка «− Масштаб +» тут більше немає: карту наближають двома пальцями
 }
+// (1.1.33) модуль OBD — окремий рядок на всю ширину під плитками: зелений — показання йдуть, сірий — немає зв'язку чи вимкнено
+function obdRowHtml() { const s = obdTile(); return `<button class="q-obd${s.on ? ' on' : ''}" data-q="obd" aria-label="${t('obdTitle')}: ${esc(s.txt)}">${OBD_ICON}<span class="q-obd-t"><b>${t('obdTitle')}</b><small>${esc(s.txt)}</small></span><i class="q-obd-dot"></i></button>`; }
 function quickRender() { const box = $('quick'); if (!box.hidden) box.innerHTML = quickHtml(); }
 function quickIdle() { clearTimeout(quickTimer); quickTimer = setTimeout(() => quickOpen(false), Q_IDLE); }
 // open: false — закрити; інше — відкрити плитки
@@ -204,6 +207,7 @@ function quickClick(e) {
   const b = e.target.closest('[data-q]'); if (!b) return;
   const k = b.dataset.q;
   if (k === 'close') return quickOpen(false);
+  if (k === 'obd') { quickOpen(false); openObd(); return; }
   if (k === 'cal') { quickOpen(false); if (tsOpen()) tsHide(false); closePanel(); calibOpen(); return; }      // (1.1.24) калібрування телефона — звідси
   if (k === 'voice') { S.voice = !S.voice; if (!S.voice) P.stopSpeak(); toast(t(S.voice ? 'voiceOn' : 'voiceOff'), '', 1800); }
   else if (k === '3d') { S.view3d = !S.view3d; setFollow(true); }
@@ -1722,6 +1726,7 @@ export function initUI() {
     toast(t('turnMatchToast', m.now != null ? m.now : pos.acc) + (nx != null ? ' ' + t('turnMatchNext', fmtDist(nx)) : ''), 'green', 6000);
   });
   bus.on('truckFail', () => { say(t('voiceTruckFail')); toast(t('truckFailTitle') + '\n' + t('truckFailText'), 'red', 12000); });
+  bus.on('obd', quickRender);                          // (1.1.33) плитка «Модуль OBD» — зелена/сіра за станом зв'язку
   bus.on('rerouteWait', () => { say(t('voiceRerouteWait')); toast(t('rerouteWait'), 'yellow', 9000); });
   // (1.1.32) контрольна точка в дорозі
   bus.on('rerouteNet', () => say(t('voiceCpNet')));
