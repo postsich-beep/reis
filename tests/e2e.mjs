@@ -4899,6 +4899,64 @@ if (run('40')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny'].in
   ok(`[${T}] прохід 40 без помилок JS`, errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok(`[${sc.title}] прохід 40 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+/* ============ прохід 41 (1.1.33): модуль OBD — рядок у швидких налаштуваннях, вікно з перемикачем і показаннями, розшифровка J1939 ============ */
+if (run('41')) for (const sc of SCREENS.filter(x => ['xiaomi', 'tiny', 'land', 'tablet'].includes(x.n)).filter(x => !process.env.SCR || process.env.SCR.split(',').includes(x.n))) try {
+  const { page, ctx, errors } = await newPage(true, { viewport: { width: sc.w, height: sc.h }, dpr: sc.dpr });
+  const T = sc.title, full = sc.n === 'xiaomi';
+  const row = () => app(page, () => { const b = document.querySelector('#quick .q-obd'), g = document.querySelector('#quick .q-grid'); if (!b) return null; const r = b.getBoundingClientRect(), G = g.getBoundingClientRect(), Q = document.getElementById('quick').getBoundingClientRect();
+    return { on: b.classList.contains('on'), t: b.querySelector('.q-obd-t b').textContent + ' ' + b.querySelector('.q-obd-t small').textContent, l: Math.round(r.left - G.left), r: Math.round(G.right - r.right), below: r.top >= G.bottom - 0.5, inQ: r.bottom <= Q.bottom + 0.5 && r.top >= Q.top, h: Math.round(r.height), inView: r.bottom <= innerHeight && r.top >= 0, fit: [...b.querySelectorAll('b,small')].every(e => e.scrollWidth <= e.clientWidth + 1) }; });
+  const box = () => app(page, () => { const B = document.getElementById('obdBox'); if (B.hidden) return { open: false }; const R = e => { const r = e.getBoundingClientRect(); return { l: Math.round(r.left), r: Math.round(r.right), t: Math.round(r.top), b: Math.round(r.bottom), w: Math.round(r.width), h: Math.round(r.height) }; };
+    return { open: true, box: R(B), title: B.querySelector('h2').textContent, sw: R(B.querySelector('.obd-sw')), swOn: B.querySelector('.obd-sw').classList.contains('on'), swTxt: B.querySelector('.obd-sw').textContent.trim(), st: B.querySelector('.obd-st').textContent.replace(/\s+/g, ' ').trim(), stCls: B.querySelector('.obd-st').className,
+      rows: [...B.querySelectorAll('.obd-r')].map(r => ({ k: r.dataset.k, v: r.querySelector('b').textContent.replace(/[\u00a0\u202f]/g, ' '), na: r.classList.contains('na') })), legal: B.querySelector('.obd-legal').textContent, back: R(B.querySelector('.obd-back')), backTxt: B.querySelector('.obd-back').textContent.trim(), W: innerWidth, H: innerHeight,
+      groups: [...B.querySelectorAll('.obd-gh')].map(x => x.textContent) }; });
+  // а) швидкі налаштування: під дев'ятьма плитками — рядок «Модуль OBD» на всю ширину, сірий, «вимкнено»
+  await page.click('#bQuick'); await sleep(300);
+  const q0 = await row();
+  ok(`[${T}] швидкі налаштування: під плитками рядок «${q0 && q0.t}» на всю ширину (відступи ${q0 && q0.l}/${q0 && q0.r}), сірий; весь у панелі й на екрані`, !!q0 && !q0.on && /^Модуль OBD вимкнено$/.test(q0.t) && q0.l === 0 && q0.r === 0 && q0.below && q0.inQ && q0.inView && q0.h >= 48 && q0.fit, JSON.stringify(q0));
+  if (full || sc.n === 'land') await shot(page, '69-obd-quick-' + sc.n);
+  // б) дотик — вікно на весь екран: угорі назва й перемикач, унизу «Назад»; без зв'язку показання сірі «—»
+  await page.click('#quick .q-obd'); await sleep(300);
+  const b0 = await box();
+  ok(`[${T}] дотик — вікно «${b0.title}» на весь екран: угорі праворуч перемикач «${b0.swTxt}», унизу «${b0.backTxt}»`, b0.open && b0.box.t === 0 && b0.box.h === b0.H && b0.title === 'Модуль OBD' && !b0.swOn && b0.sw.r >= b0.box.r - 20 && b0.sw.t < 80 && b0.sw.h >= 44 && b0.backTxt === 'Назад' && b0.back.b >= b0.H - 40 && b0.back.h >= 50 && b0.back.w >= b0.box.w - 40 && await app(page, () => document.getElementById('quick').hidden), JSON.stringify({ box: b0.box, sw: b0.sw, back: b0.back }));
+  ok(`[${T}] вимкнено — «${b0.st}»; ${b0.rows.length} показань у групах ${b0.groups.join(' · ')} — усі сірі «—»`, /^Модуль вимкнено/.test(b0.st) && b0.rows.length === 24 && b0.rows.every(r => r.na && r.v === '—') && b0.groups.join() === 'Рух,Стійкість,Керування,Паливо,Стан машини', JSON.stringify(b0.rows.slice(0, 3)));
+  ok(`[${T}] пометка: модуль лише слухає, у машину нічого не надсилає, даних про водія не бере`, /Модуль лише слухає — у машину нічого не надсилає/.test(b0.legal) && /не надсилає в машину жодних команд/.test(b0.legal) && /даних про водія/.test(b0.legal) && /за згодою власника/.test(b0.legal), b0.legal.slice(0, 120));
+  ok(`[${T}] вікно OBD: усе читається й нічого не обрізано (з прокруткою списку)`, (await readCheck(page, '#obdBox', '#obdBody')).length === 0, JSON.stringify(await readCheck(page, '#obdBox', '#obdBody')));
+  if (full || sc.n === 'tiny') await shot(page, '69-obd-off-' + sc.n);
+  // в) увімкнули — ця версія оболонки ще не вміє підключати: «Немає зв'язку з OBD», чесно чому
+  await page.click('#obdBox [data-obd="sw"]'); await sleep(300);
+  const b1 = await box();
+  ok(`[${T}] перемикач — зелений «${b1.swTxt}»; зв'язку немає: «${b1.st.slice(0, 60)}…»`, b1.swOn && b1.swTxt === 'Увімк.' && /^Немає зв’язку з OBD/.test(b1.st) && /ще не вміє підключати модуль/.test(b1.st) && b1.rows.every(r => r.na), b1.st);
+  // г) модуль на зв'язку (як із оболонки): кадри J1939 — розшифровані показання, рядок зелений
+  const FR = [['18FEF100', '00 00 55 00 00 00 00 00'], ['0CF00400', 'F0 7D 82 30 2A 00 F0 7D'], ['18F00503', '89 00 00 8F 00 00 00 00'], ['18FEC1EE', 'A0 86 01 00 00 00 00 00'],
+    ['18F0090B', '32 7E 00 8F 7E 00 80 7D'], ['18F0010B', '10 32 00 00 00 00 00 00'], ['18FEFC17', 'FF A6 00 00 00 00 00 00'], ['18FEEE00', '7D 00 00 00 00 00 00 00'], ['18FEF700', '00 00 00 00 30 02 00 00'], ['18FEF500', '00 00 00 C0 24 00 00 00']];
+  await app(page, fr => { window.__reis('obdLink', { state: 'ok', dev: 'WiCAN Pro' }); window.__reis('obd', { f: fr }); }, FR); await sleep(500);
+  const b2 = await box(), V = k => (b2.rows.find(r => r.k === k) || {}).v;
+  ok(`[${T}] показання розшифровано: ${['speedW', 'rpm', 'gear', 'dist', 'steer', 'yaw', 'abs', 'brake', 'fuelLvl', 'cool', 'batt', 'amb'].map(k => V(k)).join(' · ')}`,
+    /^Підключено: WiCAN Pro/.test(b2.st) && /ok/.test(b2.stCls) && V('speedW') === '85 км/год' && V('rpm') === '1 350 об/хв' && V('gear') === '18' && V('dist') === '500,0 км' && V('steer') === '10°' && V('yaw') === '2,0 °/с' && V('abs') === 'втручається' && V('brake') === '20 %' && V('fuelLvl') === '66 %' && V('cool') === '85 °C' && V('batt') === '28,0 В' && V('amb') === '21 °C' && (b2.rows.find(r => r.k === 'speedT') || {}).na, JSON.stringify(b2.rows.map(r => r.k + ':' + r.v)));
+  if (full) await shot(page, '69-obd-live-' + sc.n);
+  const u = await app(page, () => { const O = window.__app.obd; return { p1: O.pgnOf(0x18F00900), p2: O.pgnOf(0x18EA0017), p3: O.pgnOf(0x0CFE6CEE), na: O.feed('18FEF100', 'FF FF FF FF FF FF FF FF') }; });
+  ok(`[${T}] розшифровка J1939: PGN із ідентифікатора (VDC2 ${u.p1.toString(16)}, запит ${u.p2.toString(16)}, TCO1 ${u.p3.toString(16)}); «немає значення» (FF) — не показуємо`, u.p1 === 0xF009 && u.p2 === 0xEA00 && u.p3 === 0xFE6C && u.na === 0, JSON.stringify(u));
+  await page.click('#obdBox [data-obd="back"]'); await sleep(200);
+  await page.click('#bQuick'); await sleep(250);
+  const q1 = await row();
+  ok(`[${T}] «Назад» — вікно закрито; у швидких налаштуваннях рядок зелений: «${q1 && q1.t}»`, !(await box()).open && q1 && q1.on && /підключено · показань: \d+/.test(q1.t), JSON.stringify(q1));
+  await page.click('#quick [data-q="close"]'); await sleep(150);
+  // ґ) показання перестали йти — за 5 с «немає зв'язку», рядок знову сірий
+  await sleep(6200);
+  await page.click('#bQuick'); await sleep(250);
+  const q2 = await row();
+  ok(`[${T}] показань немає понад 5 с — рядок сірий: «${q2 && q2.t}»`, q2 && !q2.on && /немає зв’язку/.test(q2.t), JSON.stringify(q2));
+  // д) приклад показань (як виглядатиме) — чесно позначено; закрили вікно — прикладу немає
+  await page.click('#quick .q-obd'); await sleep(250);
+  await page.click('#obdBox [data-obd="demo"]'); await sleep(300);
+  const b3 = await box();
+  ok(`[${T}] «Показати приклад» — «${b3.st.slice(0, 40)}…», показання заповнено`, /^Приклад показань \(не з вашої машини\)/.test(b3.st) && b3.rows.filter(r => !r.na).length >= 20, b3.st);
+  const back = await app(page, () => window.__reisBack());
+  ok(`[${T}] системна «Назад» закриває вікно; прикладу після закриття немає`, back === true && !(await box()).open && await app(page, () => !window.__app.obd.st.demo && window.__app.obd.freshCount() === 0));
+  await app(page, () => window.__app.obd.setOn(false));
+  ok(`[${T}] прохід 41 без помилок JS`, errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok(`[${sc.title}] прохід 41 дійшов до кінця`, false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);
