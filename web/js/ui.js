@@ -8,7 +8,7 @@ import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnaps
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
 import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
 import { hasKey } from './ai.js';
-import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads } from './route.js';
+import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages } from './route.js';
 import { view, setFollow, zoomBy, previewRoute, previewAlts, fitRoutes, freeView, showRoute, showPick, prefetchRoute, applyTheme, ROUTE_COLORS, flyTo } from './map.js';
 import * as mapM from './map.js';
 import { hz, load as loadHazards, routeCats, hazardsAlong, hazardText, kyivOnRoute, indexOf as indexOfRoute } from './roads.js';
@@ -648,7 +648,7 @@ async function softOffer(trip, strict) {
     if (plan.trip !== trip) return;
     const sv = await softVariant(trip, strict);
     if (!sv || plan.trip !== trip || g.active || plan.routes.some(x => x.soft === 'alt')) return;
-    plan.routes = [...plan.routes, sv].slice(0, 3);
+    plan.routes = [...plan.routes, sv].slice(0, 4);
     previewAlts(plan.routes.map((x, k) => [k, x.coords]).filter(([k]) => k !== plan.sel));
     refresh('trip'); if (!$('routePick').hidden) { pickShow(); }
     toast(t('softFound', sv.saves.km, sv.saves.min), 'yellow', 9000);
@@ -684,12 +684,12 @@ async function pickKind(veh, mode) {
 function altCardsHtml(force = false) {
   const rs = plan.routes || []; if (rs.length < 2 && !force) return '';
   const truck = plan.trip && plan.trip.costing !== 'auto';
-  const best = Math.min(...rs.map(r => r.time));
-  return `<div class="alts">` + rs.map((r, i) => {
+  const best = Math.min(...rs.map(r => r.time)), vil = rs.map(r => viaVillages(r, rs[0]));
+  return `<div class="alts n${Math.min(4, rs.length)}">` + rs.map((r, i) => {
     const red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
     const ky = kyivOnRoute(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000);
     const softCard = truck && ['alt', 'only', 'chosen'].includes(r.soft);
-    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', r.time === best && rs.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && rs.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : '', !i && r.time > best && vil.some(Boolean) ? `<i class="good">${t('altMain')}</i>` : ''].join('');
     return `<button class="alt${i === plan.sel ? ' on' : ''}${softCard ? ' soft' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
   }).join('') + `</div>`;
 }
@@ -717,7 +717,7 @@ function pickHtml() {
   const tr = plan.trip;
   return `<div class="rp-zoom">${rpMarksBtn()}<button data-rp="zin" aria-label="${t('qZoomIn')}">+</button><button data-rp="zout" aria-label="${t('qZoomOut')}">−</button><button data-rp="fit" aria-label="${t('rpFit')}">${ICON.route}</button></div>
     <div class="rp-head">${ptTag('a', 'rp-t')}<b>${esc(tr.a.label || '')}</b>${tr.v ? `${ptTag('v', 'rp-t')}<b>${esc(tr.v.label || '')}</b>` : ''}${ptTag('b', 'rp-t')}<b>${esc(tr.b.label || '')}</b>${plan.routes.length < 2 ? ` <span class="muted">· ${t('altOne')}</span>` : ''}</div>
-    ${vehMiniHtml()}${pickWarnHtml()}${altCardsHtml(true).replace('class="alts"', 'class="alts rp-cards"')}
+    ${vehMiniHtml()}${pickWarnHtml()}${altCardsHtml(true).replace('class="alts ', 'class="alts rp-cards ')}
     <div class="rp-btns"><button class="btn pri" data-rp="go">${ICON.go}${t('go')}</button><button class="btn" data-rp="save">${t('saveShort')}</button><button class="btn" data-rp="info">${t('details')}</button><button class="btn rp-x" data-rp="x" aria-label="${t('close')}">${ICON.x}</button></div>`;
 }
 // для фури проїзду не знайшлося — показуємо звичайний маршрут із червоним попередженням; старт/фініш перенесено на основну дорогу — тихо кажемо
@@ -756,10 +756,10 @@ function pickCancel() { plan.trip = null; plan.routes = []; plan.sel = 0; pickHi
 const rrOpen = () => $('routePick').dataset.mode === 'rr' && !$('routePick').hidden;
 let rrTick = 0, rrFitN = -1;
 function rrCardsHtml(c) {
-  const best = Math.min(...c.routes.map(x => x.r.time));
+  const best = Math.min(...c.routes.map(x => x.r.time)), vil = c.routes.map(x => viaVillages(x.r, (c.routes.find(o => o.kind === x.kind) || x).r));
   return `<div class="alts rp-cards rr-cards n${Math.min(4, c.routes.length)}">` + c.routes.map((x, i) => {
     const r = x.r, truck = r.costing === 'truck', red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
-    const flags = [r.truckFail ? `<i class="bad">${t('rrNoTruck')}</i>` : '', truck && ['alt', 'only', 'chosen', 'go'].includes(r.soft) ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', r.time === best && c.routes.length > 1 ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
+    const flags = [r.truckFail ? `<i class="bad">${t('rrNoTruck')}</i>` : '', truck && ['alt', 'only', 'chosen', 'go'].includes(r.soft) ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && c.routes.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : ''].join('');
     return `<button class="alt${i === c.sel ? ' on' : ''}" data-rrv="${i}" aria-pressed="${i === c.sel}"><em class="rr-kind ${x.kind}">${t('rrKind_' + x.kind)}</em><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
   }).join('') + `</div>`;
 }
@@ -1100,8 +1100,8 @@ async function doBuild() {
     const trip = newTrip(plan.a, plan.v, plan.b);
     trip.costing = vehKind() === 'strict' ? 'truck' : 'auto';
     if (vehKind() === 'free') trip.free = true;                    // фура дорогами загального користування — на розсуд водія
-    const r = await buildRoute(trip, { alternates: 1 });
-    plan.routes = [r, ...(r.alts || [])].slice(0, 2); plan.sel = 0;          // два варіанти, як у BlindDriver
+    const r = await buildRoute(trip, { alternates: 2 });
+    plan.routes = [r, ...(r.alts || [])].slice(0, 3); plan.sel = 0;          // (1.1.31) до трьох варіантів, як у Google; першим — рекомендований
     for (const x of plan.routes) delete x.alts;
     trip.route = r;
     plan.trip = trip; mapM.previewPoints(trip); previewRoute(trip.route.coords, trip.route); previewAlts(plan.routes.slice(1).map((x, k) => [k + 1, x.coords])); hud();
