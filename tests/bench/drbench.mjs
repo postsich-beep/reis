@@ -183,7 +183,7 @@ export function run(name, o = {}) {
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return s * Math.SQRT2; };
   const gpsUntil = o.gpsSec != null ? o.gpsSec : 90, bias = (o.bias != null ? o.bias : 0.6) / 60;   // дрейф гіроскопа, °/с
   const errs = [], log = []; let tapDone = false, tapPre = false, tapLog = null;
-  // (1.1.38) Водій на стенді. Позначка сама повороту не перестрибує: кнопка «Поворот» блимає «був?» — і водій за drv секунд
+  // (1.1.39) Водій на стенді. Позначка сама повороту не перестрибує: кнопка «Поворот» блимає «був?» — і водій за drv секунд
   // (типово 8; BENCH_DRIVER=off — не відповідає взагалі) торкається її, ЯКЩО фура справді вже за цим поворотом. Просять даремно
   // (фура ще перед поворотом) — водій не торкається. Більше водій нічого не робить: кнопку «сам» не тисне.
   const drvEnv = process.env.BENCH_DRIVER, drv = o.driver != null ? o.driver : drvEnv === 'off' ? null : drvEnv ? +drvEnv : 8;

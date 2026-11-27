@@ -270,7 +270,7 @@ let turnKey = '', waitHintFor = null, waitVoiced = false;
 function turnBtnSync(lost) {
   const b = $('bTurn'), c = lost ? pos.cp : null;
   if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); document.body.classList.remove('turn-on'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
-  // (1.1.38) ask — телефон відчув поворот, але не цей (чи вишки кажуть «ви далі»): позначка сама далі не йде, кнопка блимає — «був поворот?»
+  // (1.1.39) ask — телефон відчув поворот, але не цей (чи вишки кажуть «ви далі»): позначка сама далі не йде, кнопка блимає — «був поворот?»
   const label = c.ask && c.state !== 'turn' ? t('turnAsk') : c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
   const key = [c.sgn, c.cls, c.state, label, c.handled, c.ask].join('|');
   if (key !== turnKey) {
@@ -280,7 +280,7 @@ function turnBtnSync(lost) {
   }
   if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); document.body.classList.add('turn-on'); requestAnimationFrame(layoutVars); }
   // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
-  if (c.ask) waitHintFor = c.d;                               // (1.1.38) про цей поворот уже питаємо («був?») — другу підказку поруч не показуємо
+  if (c.ask) waitHintFor = c.d;                               // (1.1.39) про цей поворот уже питаємо («був?») — другу підказку поруч не показуємо
   if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
     waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
     if (!waitVoiced) { waitVoiced = true; say(t('voiceTurnWait')); }
@@ -1248,7 +1248,7 @@ function pickClick(e) {
   else if (k === 'x') pickCancel();
 }
 function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
-// (1.1.38) Той самий рейс у Google Maps (офіційна адреса «Maps URLs»: старт, фініш і точки «через» координатами) — щоб одним дотиком
+// (1.1.39) Той самий рейс у Google Maps (офіційна адреса «Maps URLs»: старт, фініш і точки «через» координатами) — щоб одним дотиком
 // звірити, чи тим самим шляхом веде Google. Самого маршруту Google нам не віддає (і правила Google не дозволяють малювати його
 // на чужій карті) — порівнюємо очима: дороги на картці (М-06, Н-02…), кілометри й час.
 export function gmapsDirUrl(tr) {
@@ -1377,7 +1377,7 @@ function tripClicks(e) {
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
-  else if (d.act === 'gmaps' && plan.trip) P.openUrl(gmapsDirUrl(plan.trip));        // (1.1.38) той самий рейс у Google Maps — звірити шлях
+  else if (d.act === 'gmaps' && plan.trip) P.openUrl(gmapsDirUrl(plan.trip));        // (1.1.39) той самий рейс у Google Maps — звірити шлях
   else if (d.act === 'saveTrip') saveTripTap();
   else if (d.act === 'archive') openPanel('archive');
   else if (d.act === 'favs') openPanel('favs');
@@ -1885,7 +1885,7 @@ export function initUI() {
     const now = Date.now(); if (now - cpToastT < 20000) return; cpToastT = now;
     toast(t(ev.jump >= 60 ? 'turnPassJump' : 'turnPassWait', ev.jump >= 60 ? fmtDist(ev.jump) : fmtMS(ev.waited)) + (ev.next ? ' ' + t('turnMatchNext', fmtDist(ev.next.dist)) : ''), 'green', 6000);
   });
-  // (1.1.38) телефон відчув поворот, але не той, на який чекає позначка (або вишки кажуть, що фура вже далі): позначка НЕ перестрибує —
+  // (1.1.39) телефон відчув поворот, але не той, на який чекає позначка (або вишки кажуть, що фура вже далі): позначка НЕ перестрибує —
   // кнопка «Поворот» блимає, а тут пояснюємо, що зробити. Раз на поворот; голосом — не частіше ніж раз на 3 хв.
   let askFor = null, askVoiceT = 0;
   bus.on('cpAsk', ev => {

@@ -241,7 +241,7 @@ async function newPage(native, opts = {}) {
     { type: 'node', id: 3, lat: coords[turnIdx[3] + 60][0], lon: coords[turnIdx[3] + 60][1], tags: { amenity: 'fuel', name: 'АЗС' } }] }));
   // Базові шари з 1.1.7 — лише АЗС і камери. Старі перевірки написані під «усе увімкнено», тож для них так і ставимо
   // (лише коли налаштувань ще немає — перезавантаження сторінки вибору водія не скидає). opts.baseLayers — справжній перший запуск.
-  // (1.1.38) Вид рейсу за замовчуванням тепер «як Google». Старі перевірки написані під «Фура: суворо» — для них водій «уже вибрав суворо»
+  // (1.1.39) Вид рейсу за замовчуванням тепер «як Google». Старі перевірки написані під «Фура: суворо» — для них водій «уже вибрав суворо»
   // (routeModeV 2 — вибір зроблено, застосунок його не чіпає). opts.googleDefault — як на телефоні, де вид рейсу ще не вибирали.
   if (!opts.baseLayers) await page.addInitScript(g => { try { if (!localStorage.getItem('reis.settings')) localStorage.setItem('reis.settings', JSON.stringify({ layersDefV: 1, mapStops: true,
     mapStopTypes: { food: true, fuel: true, park: true, motel: true, cam: true, shower: true }, mapVerified: true, mapEvents: true, mapHazards: true, ...(g ? {} : { routeMode: 'strict', routeModeV: 2 }) })); } catch (_) {} }, !!opts.googleDefault);
@@ -635,7 +635,7 @@ if (run('1')) try {
   await shot(page, '02d-kinds');
   await page.click('#panelBody .seg.veh [data-kind="free"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
   const rqF = routeReqs[routeReqs.length - 1], pickF = await app(page, () => ({ warn: (document.querySelector('#routePick .rp-warn') || { textContent: '' }).textContent.replace(/\s+/g, ' ').trim(), free: !!window.__app.S && window.__app.S.routeMode === 'free' && window.__app.S.vehicle === 'truck' }));
-  ok('«Фура: як Google» — той самий рейс дорогами загального користування: сервер обмежень для фур не рахує (costing auto) і (1.1.38) дороги вибирає, як для легковика, — обмежувач фури йому НЕ передаємо (він змушував обминати швидкі траси)', rqF.costing === 'auto' && rqF.costing_options && rqF.costing_options.auto && rqF.costing_options.auto.top_speed === undefined && rqF.costing_options.auto.use_highways === 1 && pickF.free, JSON.stringify({ costing: rqF.costing, opt: rqF.costing_options, S: pickF.free }));
+  ok('«Фура: як Google» — той самий рейс дорогами загального користування: сервер обмежень для фур не рахує (costing auto) і (1.1.39) дороги вибирає, як для легковика, — обмежувач фури йому НЕ передаємо (він змушував обминати швидкі траси)', rqF.costing === 'auto' && rqF.costing_options && rqF.costing_options.auto && rqF.costing_options.auto.top_speed === undefined && rqF.costing_options.auto.use_highways === 1 && pickF.free, JSON.stringify({ costing: rqF.costing, opt: rqF.costing_options, S: pickF.free }));
   ok(`…і на екрані вибору маршруту чесно сказано: «${pickF.warn.slice(0, 100)}…»`, /Рейс «як Google»/.test(pickF.warn) && /як у Google Maps/.test(pickF.warn) && /обмеження для фур .* не враховано/.test(pickF.warn) && /стежте за знаками самі/.test(pickF.warn), pickF.warn);
   await shot(page, '02d-kinds-free');
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('#panelBody .seg.veh');
@@ -654,7 +654,7 @@ if (run('1')) try {
   ok('у шторці натиснули «Суворо» — той самий рейс одразу перераховано для фури (costing truck), шторка лишилась, вибрано «Суворо»', routeReqs.length === nV + 1 && routeReqs[nV].costing === 'truck' && !!v1 && v1.btns[1].on && !v1.btns[2].on && await app(page, () => window.__app.S.vehicle === 'truck' && window.__app.S.routeMode === 'strict'), JSON.stringify({ n: routeReqs.length - nV, c: (routeReqs[nV] || {}).costing, v1 }));
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('#panelBody .seg.veh');
   await page.click('#panelBody .seg.veh [data-kind="strict"]'); await page.waitForSelector('#routePick [data-rp="go"]', { timeout: 10000 }); await sleep(300);
-  ok('знову фура «суворо»: профіль truck; обмежувач серверу теж не передаємо (1.1.38)', routeReqs[routeReqs.length - 1].costing === 'truck' && routeReqs[routeReqs.length - 1].costing_options.truck.top_speed === undefined && routeReqs[routeReqs.length - 1].costing_options.truck.height > 0);
+  ok('знову фура «суворо»: профіль truck; обмежувач серверу теж не передаємо (1.1.39)', routeReqs[routeReqs.length - 1].costing === 'truck' && routeReqs[routeReqs.length - 1].costing_options.truck.top_speed === undefined && routeReqs[routeReqs.length - 1].costing_options.truck.height > 0);
   await page.click('#routePick [data-rp="info"]'); await page.waitForSelector('[data-act="go"]');
   ok('після вибору підказки список не відкривається знову', await app(page, () => ['a', 'b'].every(k => document.getElementById('sg_' + k).hidden)));
   if (SHOTS) { await app(page, () => { const b = document.getElementById('panelBody'), h = [...b.querySelectorAll('.sec')].find(x => /фури/i.test(x.textContent)); if (h) b.scrollTop = h.offsetTop - 8; }); await sleep(200); await shot(page, '02b-truck');
@@ -1058,7 +1058,7 @@ if (run('2д')) try {
   const s4 = await sv();
   ok('швидкість: обмежувач вимкнено (легковик) — 120 км/год за GPS приймається', s4.kind === 'gps' && s4.kmh === 120, JSON.stringify(s4));
   await app(page, () => { window.__app.S.truck = { ...window.__app.S.truck, vmax: 90 }; });
-  // 5) маршрут: (1.1.38) обмежувач у Valhalla НЕ йде (top_speed змушував сервер обминати швидкі траси) — час для фури рахуємо самі
+  // 5) маршрут: (1.1.39) обмежувач у Valhalla НЕ йде (top_speed змушував сервер обминати швидкі траси) — час для фури рахуємо самі
   const tk = await app(page, async () => { const r = window.__app.route; return r.truckOptions ? r.truckOptions() : null; });
   const tt = await app(page, () => { const R = window.__app.route, mk = (len, kmh) => ({ len, time: len / (kmh / 3.6) }), r = { time: 0, mans: [mk(100000, 130), mk(100000, 89), mk(20000, 50), mk(5000, 30)] }; r.time = r.mans.reduce((a, m) => a + m.time, 0); const srv = r.time; R.truckTime(r, 90); return { srv: Math.round(srv), truck: r.time, v: r.mans.map(m => +(m.len / m.time * 3.6).toFixed(1)), again: R.truckTime(r, 90).time, lim: R.limiterKmh() }; });
   ok(`маршрут: обмежувач серверу не передаємо (top_speed ${tk && tk.top_speed}); час для фури рахуємо самі — на відрізках із середньою 130 / 89 / 50 / 30 км/год фура з обмежувачем ${tt.lim} їде ${tt.v.join(' / ')}; увесь шлях ${Math.round(tt.srv / 60)} хв для легковика → ${Math.round(tt.truck / 60)} хв для фури; двічі не перераховується`,
@@ -2282,7 +2282,7 @@ if (run('18')) try {
   await emitN('loc', { prov: 'gps', lat: coords[0][0], lon: coords[0][1], acc: 5, spd: 0, t: Date.now() });
   await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), trip);
   const cps = await app(page, () => window.__app.nav.routeCps().map(c => ({ d: c.d, cls: c.cls, ang: c.ang })));
-  ok('контрольні точки розставлено наперед: (1.1.38) усі повороти цього рейсу різкі (на перехресті) — і 90°, і 45° — бордові; затяжних дуг (жовтих) на ньому немає', cps.length === 4 && cps.every(c => c.cls === 'red') && cps.filter(c => Math.abs(c.ang) >= 40 && Math.abs(c.ang) <= 50).length === 2 && Math.abs(cps[0].d - 2000) < 60 && cps[0].ang < -80 && cps[1].ang > 80, JSON.stringify(cps));
+  ok('контрольні точки розставлено наперед: (1.1.39) усі повороти цього рейсу різкі (на перехресті) — і 90°, і 45° — бордові; затяжних дуг (жовтих) на ньому немає', cps.length === 4 && cps.every(c => c.cls === 'red') && cps.filter(c => Math.abs(c.ang) >= 40 && Math.abs(c.ang) <= 50).length === 2 && Math.abs(cps[0].d - 2000) < 60 && cps[0].ang < -80 && cps[1].ang > 80, JSON.stringify(cps));
   await app(page, () => { window.__app.sim.setSpeed(60); window.__app.sim.start(); });
   await sleep(5000);
   const cpN = () => app(page, () => { const s = window.__app.map.map.getSource('cps'); const d = s.serialize ? s.serialize().data : s._data; return (d && d.features || []).map(f => f.properties.c); });
@@ -4747,7 +4747,7 @@ if (run('37')) for (const sc of SCREENS.filter(x => ['xiaomi', 'S10', 'tiny', 'l
     await build(page);
     await page.click('#routePick .vehm [data-kind="free"]').catch(() => {}); await page.waitForFunction(n => window.__app && true, null).catch(() => {}); await sleep(1500);
     const qf = routeReqs.slice(n0).filter(q => q.costing === 'auto').pop() || {}, fa = (qf.costing_options || {}).auto || {};
-    ok(`«як Google» (costing auto): ті самі вподобання доріг; (1.1.38) обмежувач фури серверу не передаємо (top_speed ${fa.top_speed}) — дороги вибираються, як для легковика`, fa.use_highways === 1 && fa.exclude_unpaved === true && fa.use_tracks === 0 && fa.top_speed === undefined, JSON.stringify(qf.costing_options));
+    ok(`«як Google» (costing auto): ті самі вподобання доріг; (1.1.39) обмежувач фури серверу не передаємо (top_speed ${fa.top_speed}) — дороги вибираються, як для легковика`, fa.use_highways === 1 && fa.exclude_unpaved === true && fa.use_tracks === 0 && fa.top_speed === undefined, JSON.stringify(qf.costing_options));
     await page.click('#routePick .vehm [data-kind="car"]').catch(() => {}); await sleep(1500);
     const qc = routeReqs[routeReqs.length - 1] || {}, ca = (qc.costing_options || {}).auto || {};
     ok('легкова: ті самі вподобання доріг, без обмежувача фури', qc.costing === 'auto' && ca.use_highways === 1 && ca.exclude_unpaved === true && ca.top_speed === undefined, JSON.stringify(qc.costing_options));
@@ -5252,7 +5252,7 @@ if (run('43')) for (const sc of [
 if (run('44')) try {
   const { page, ctx, errors } = await newPage(true, { viewport: { width: 393, height: 800 } });
   const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
-  // (1.1.38) свій рейс: 2000 м → ліворуч 90° → 1500 м → праворуч 90° → 2500 м → затяжна дуга праворуч 45° на 900 м → 3000 м → праворуч 45° різко → 800 м.
+  // (1.1.39) свій рейс: 2000 м → ліворуч 90° → 1500 м → праворуч 90° → 2500 м → затяжна дуга праворуч 45° на 900 м → 3000 м → праворуч 45° різко → 800 м.
   // Різкий (бордовий) — поворот на перехресті, хоч 90°, хоч 45°; жовтий — лише затяжна дуга.
   const coords44 = (() => { let p = [49.9935, 36.2304], h = 270; const out = [p]; const go = (len, turn = 0) => { let done = 0; while (done < len - 0.01) { const st = Math.min(len - done, turn ? 25 : 50), dh = turn * st / len; p = dest(p, h + dh / 2, st); h += dh; done += st; out.push(p); } };
     go(2000); h -= 90; go(1500); h += 90; go(2500); go(900, 45); go(3000); h += 45; go(800); return out; })();
@@ -5288,7 +5288,7 @@ if (run('44')) try {
   ok(`телефон повернув на 90° — поворот пройдено (${ev1 && ev1.by}), позначка за ним (${Math.round(r2.rd)} м); його точка лишилась на карті як пройдена, наступний — ${red2.ang}° на ${red2.d} м`,
     ev1 && ev1.by === 'gyro' && r2.rd >= red.d - 5 && d1.length === C.length && (d1.find(f => f.d === red.d) || {}).p === 1 && d1.filter(f => f.p === 1).length === 1 && (d1.find(f => f.n === 1) || {}).d === red2.d, JSON.stringify({ r2, ev1, d1 }));
   // в) жовтий (затяжний / пологий): те саме — стоїть і чекає «в обов'язковому порядку», повернув — пройдено
-  await app(page, d => window.__app.nav.jumpToCp(d), yel.d); await feed(26);          // (1.1.38) на пологій дузі позначка заходить у неї, доки курс рейсу не відхилиться на 12°, і там чекає
+  await app(page, d => window.__app.nav.jumpToCp(d), yel.d); await feed(26);          // (1.1.39) на пологій дузі позначка заходить у неї, доки курс рейсу не відхилиться на 12°, і там чекає
   const y0 = await st(); await feed(8); const y1 = await st(), d2 = await dots();
   ok(`жовтий поворот ${yel.ang}°: телефон не повертав — позначка так само стоїть і чекає (${Math.round(y0.rd)} → ${Math.round(y1.rd)} м, поворот на ${yel.d0}–${yel.d1}; стан «${y1.cp && y1.cp.state}»)`,
     y1.cp && y1.cp.d === yel.d && y1.cp.cls === 'yellow' && y1.cp.state === 'wait' && y1.rd < yel.d + 5 && Math.abs(y1.rd - y0.rd) <= 8, JSON.stringify({ y0, y1, yel }));
@@ -5605,7 +5605,7 @@ if (run('46')) try {
   ok('прохід 46 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 46 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
-/* ============ прохід 47: (1.1.38) контрольні повороти на «справжній» геометрії; без підтвердження позначка поворот не
+/* ============ прохід 47: (1.1.39) контрольні повороти на «справжній» геометрії; без підтвердження позначка поворот не
    перестрибує; шлях без GPS — лінією рейсу, без прямих рисок ============
    Олексій, 27.11 (Львів, без GPS): «розберись з артефактами — сірі пунктири… поворот 90° — бордовий, затяжний — жовтий… поки поворот
    не пройшли, не перестрибуємо… або моргаюча, типу „поворот був"… без підтвердження перестрибнув поворот і пішов далі — такого
@@ -5707,7 +5707,7 @@ if (run('47')) try {
   ok('прохід 47 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 47 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
-/* ============ прохід 48: (1.1.38) рейс «як Google» ============
+/* ============ прохід 48: (1.1.39) рейс «як Google» ============
    Олексій і Діма, 27.11: «маршрути мають будуватись так само, як у Google Maps… з'ясуй, чому Google будує не так, як ти».
    Причина знайшлась у сервері маршрутів: обмежувач фури (top_speed 90) не лише рахував час, а й «штрафував» кожну дорогу, де їздять
    швидше за 90, на 5 % за кожен км/год — траса 110 ставала вдвічі «дорожчою», магістраль 130 — утричі, і шлях ішов в обхід трас.

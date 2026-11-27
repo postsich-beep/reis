@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 65, name: '1.1.38' };
+export const VERSION = { web: 65, name: '1.1.39' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -63,7 +63,7 @@ try {
   // 1.1.10: у нас фури не важчі за 20 т — збережені 40 т (старе значення за замовчуванням) стають 20 т
   settings.truck.weight = Math.min(+settings.truck.weight || TRUCK_MAX_T, TRUCK_MAX_T);
   if ((raw.truckV || 0) < 1 && raw.truck) { settings.truckV = 1; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
-  // 1.1.38: рейс будуємо «як Google» — це тепер вид рейсу за замовчуванням. У кого було вибрано «Фура: суворо» (воно стояло
+  // 1.1.39: рейс будуємо «як Google» — це тепер вид рейсу за замовчуванням. У кого було вибрано «Фура: суворо» (воно стояло
   // за замовчуванням), один раз перемикаємо; далі вибір водія не чіпаємо — «суворо» можна ввімкнути знову
   if ((raw.routeModeV || 0) < 2 && Object.keys(raw).length) { settings.routeMode = 'free'; settings.routeModeV = 2; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
   // 1.1.12: голос «Лада» прибрано (писклявий) — у кого він був вибраний, тепер говорить Тетяна
