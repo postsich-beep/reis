@@ -160,6 +160,8 @@ function begin(trip) {
 }
 /** Чи це стрибок, а не їзда: від попередньої точки далі JUMP_M і швидше JUMP_V. */
 export const jumpy = (last, p) => { if (!last) return false; const d = havP(last, p); return d > JR.JUMP_M && d / Math.max(1, p[2] - last[2]) > JR.JUMP_V; };
+// у «пробній поїздці» (симулятор) швидкість буває будь-яка — там стрибком це не вважаємо
+const teleport = (last, p) => !pos.sim && jumpy(last, p);
 const push = (c, p) => { c.pts.push(p); if (c.pts.length > JR.MAX_PTS) c.pts.splice(0, 2000); dirty = true; };
 /** Відрізок без GPS уздовж рейсу: привести його кінець до місця позначки rd (м уздовж лінії run.idx). Чиста логіка — c.pts і run.rds. */
 export function syncRun(c, R, rd, t, kmh) {
@@ -192,7 +194,7 @@ function onPos() {
   if (pos.mode !== 'gps' && onLine) {
     if (run && run.idx === g.idx) { if (syncRun(c, run, pos.rd, now(), kmh)) { if (c.pts.length > JR.MAX_PTS) { c.pts.splice(0, 2000); } dirty = true; changed(false); } return; }
     // початок відрізка без GPS на цій лінії рейсу: GPS щойно зник, рейс перебудували чи позначку поставили на рейс
-    const p = pointNow(), last = c.pts[c.pts.length - 1]; if (jumpy(last, p)) p[5] = 1;
+    const p = pointNow(), last = c.pts[c.pts.length - 1]; if (teleport(last, p)) p[5] = 1;
     run = { idx: g.idx, rds: [pos.rd] }; push(c, p); changed(false);
     return;
   }
@@ -203,7 +205,7 @@ function onPos() {
     run = null; dirty = true;
   }
   const p = pointNow(), last = c.pts[c.pts.length - 1];
-  if (jumpy(last, p)) p[5] = 1;                              // позначку переставили — пряму через карту не малюємо
+  if (teleport(last, p)) p[5] = 1;                           // позначку переставили — пряму через карту не малюємо
   if (!p[5] && !wantPoint(last, p)) return;
   push(c, p); changed(false);
 }
