@@ -5802,8 +5802,8 @@ if (run('49')) try {
   // а) звичайний випадок: карта є (OpenFreeMap), рейс планують із варіантами
   { const { page, ctx, errors } = await newPage(true, { googleDefault: true }); await setup(page);
     const n0 = routeReqs.length, r = await build(page), reqs = routeReqs.slice(n0), g = gateReqs[0] || {};
-    ok(`головні дороги беремо з карти: ${OFMG.tiles.length} квадратів z11 (${[...new Set(OFMG.tiles)].join(', ')}), не більше восьми; каталог квадратів — ${OFMG.tj} запит`,
-      OFMG.tj === 1 && OFMG.tiles.length >= 2 && OFMG.tiles.length <= 8 && OFMG.tiles.every(t => /^11\/116[01]\/69[5-7]$/.test(t)), JSON.stringify(OFMG));
+    ok(`головні дороги беремо з карти: ${OFMG.tiles.length} квадратів z11 (${[...new Set(OFMG.tiles)].join(', ')}), не більше восьми, кожен — один раз (читаємо їх, поки сервер рахує рейс); каталог квадратів — ${OFMG.tj} запит`,
+      OFMG.tj === 1 && OFMG.tiles.length >= 2 && OFMG.tiles.length <= 8 && new Set(OFMG.tiles).size === OFMG.tiles.length && OFMG.tiles.every(t => /^11\/116[01]\/69[5-7]$/.test(t)), JSON.stringify(OFMG));
     ok(`знайдено «ворота» на Стрийській — просимо в сервера ще один варіант крізь них: ${reqs.length} запити замість одного; точка (${g.lat}, ${g.lon}) за ${Math.round(hv([g.lat, g.lon], FX.gates[1].p))} м від справжнього перетину, тип «${g.type}», курс ${g.heading}° (дорога веде на північ, до міста), радіус ${g.radius} м — щоб на дорозі з розділювачем сервер узяв смугу за курсом, а не зустрічну`,
       reqs.length === 2 && gateReqs.length === 1 && g.type === 'through' && hv([g.lat, g.lon], FX.gates[1].p) < 60 && Math.abs(g.heading - 6) <= 12 && g.heading_tolerance === 45 && g.radius === 40 && reqs[1].costing === 'auto' && !reqs[1].alternates && reqs[1].costing_options.auto.top_speed === undefined, JSON.stringify({ gateReqs, n: reqs.length }));
     ok(`ворота на Зеленій (Н-09) окремого запиту не потребують — цією дорогою вже веде варіант сервера: «${r.info.slice(0, 110)}…»`, /уже є/.test(r.info) && /новий варіант/.test(r.info), r.info);

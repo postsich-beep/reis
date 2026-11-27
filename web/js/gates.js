@@ -91,9 +91,15 @@ const ty = (lat, z) => { const r = lat * D2R; return Math.floor((1 - Math.log(Ma
 const tileBox = (z, x, y) => { const n = 2 ** z, la = v => Math.atan(Math.sinh(Math.PI * (1 - 2 * v / n))) / D2R; return [la(y + 1), la(y), x / n * 360 - 180, (x + 1) / n * 360 - 180]; };   // [lat0, lat1, lon0, lon1]
 const mem = new Map();                                   // розібрані квадрати — до перезапуску (той самий рейс будують повторно)
 export const gateStat = { tiles: 0, net: 0, fails: 0, src: '', last: '' };
-async function tileRoads(src, z, x, y, signal) {
+const flying = new Map();                                // квадрати, що саме вантажаться: другий запит того самого квадрата чекає на перший
+function tileRoads(src, z, x, y, signal) {
   const key = src + '/' + z + '/' + x + '/' + y;
-  if (mem.has(key)) return mem.get(key);
+  if (mem.has(key)) return Promise.resolve(mem.get(key));
+  if (flying.has(key)) return flying.get(key);
+  const job = loadTile(key, src, z, x, y, signal).finally(() => flying.delete(key));
+  flying.set(key, job); return job;
+}
+async function loadTile(key, src, z, x, y, signal) {
   let u8 = null;
   if (src === 'pm') { const t = await pmTileData(z, x, y); u8 = t ? new Uint8Array(t) : null; }
   else { const tpl = await ofmTemplate(); const r = await fetch(tpl.replace('{z}', z).replace('{x}', x).replace('{y}', y), { signal }); if (!r.ok) throw new Error('HTTP ' + r.status); u8 = new Uint8Array(await r.arrayBuffer()); gateStat.net += u8.length; }
@@ -194,13 +200,19 @@ export function rankByClass(list, ix) {
 }
 
 /* ---------- головне: додати варіанти крізь ворота ---------- */
+const rhoOf = D => Math.max(GATE.RHO_MIN, Math.min(GATE.RHO_MAX, GATE.RHO_K * D));
+/** Заздалегідь, поки сервер рахує рейс, прочитати квадрати карти довкола старту й фінішу: тоді ворота не додають очікування. */
+export function warmGates(a, b) {
+  try { if (S.gates === false || !a || !b) return; const A = [a.lat, a.lon], B = [b.lat, b.lon], D = dist(A, B); if (D < GATE.MIN_TRIP_M) return;
+    roadsAround([B, A], rhoOf(D)).catch(() => {}); } catch (_) {}
+}
 /** a, b — { lat, lon }; base — уже знайдені варіанти; ask(G) → Promise<варіант> — запит до сервера через ворота G ({ lat, lon, brg }).
  *  → { list — усі варіанти в правильному порядку (або null, якщо даних карти немає), info — для журналу }. */
 export async function withGates(a, b, base, ask, { pause = null } = {}) {
   if (S.gates === false) return { list: null, info: 'вимкнено' };
   const A = [a.lat, a.lon], B = [b.lat, b.lon], D = dist(A, B);
   if (D < GATE.MIN_TRIP_M) return { list: null, info: 'короткий рейс' };
-  const rho = Math.max(GATE.RHO_MIN, Math.min(GATE.RHO_MAX, GATE.RHO_K * D));
+  const rho = rhoOf(D);
   // карта не відповіла за кілька секунд — не чекаємо: рейс важливіший (лишається порядок сервера)
   let R = null; try { R = await Promise.race([roadsAround([B, A], rho), new Promise(res => setTimeout(() => res(null), GATE.TILE_MS + 800))]); } catch (e) { gateStat.last = String(e && e.message || e); }
   if (!R || !R.roads.length) return { list: null, info: 'немає даних карти' + (gateStat.last ? ' (' + gateStat.last + ')' : '') };

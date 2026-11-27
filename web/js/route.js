@@ -1,7 +1,7 @@
 // Рейси: пошук адрес, маршрут для фури (Valhalla), регіони на шляху, збереження.
 import { bus, log, S, db, hav, decodePolyline6, RouteIndex, uid, sleep, TRUCK_MAX_T } from './core.js';
 import { getJson, http } from './platform.js';
-import { withGates } from './gates.js';
+import { withGates, warmGates } from './gates.js';
 
 const PHOTON = 'https://photon.komoot.io';
 const UA_BBOX = '22.0,44.0,40.5,52.7';
@@ -333,6 +333,7 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   const costing = trip.costing || 'truck';
   // Знак «фурам заборонено»: водій уже вибрав варіант через таку дорогу (trip.soft) або дозволив їх у налаштуваннях («Їхати»)
   const soft0 = costing !== 'truck' ? 0 : trip.soft ? HGV_SOFT.ask : S.hgvBan === 'go' ? HGV_SOFT.go : 0;
+  if (nAlt > 0 && pts.length === 2) warmGates(pts[0], pts[1]);         // «ворота»: карту читаємо, поки сервер рахує рейс
   let r;
   if (costing === 'truck') {
     try { r = await truckRoute(pts, heading, nAlt, soft0); r.costing = 'truck'; if (soft0) r.soft = trip.soft ? (trip.soft === 'only' ? 'only' : 'chosen') : 'go'; }
