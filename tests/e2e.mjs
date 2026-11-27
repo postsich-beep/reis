@@ -5780,8 +5780,13 @@ if (run('49')) try {
   const FXD = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'gates');
   const FX = JSON.parse(readFileSync(join(FXD, 'routes.json'), 'utf8')), cors = { 'access-control-allow-origin': '*' };
   const hv = (a, b) => { const x = (b[1] - a[1]) * D2R * Math.cos((a[0] + b[0]) / 2 * D2R), y = (b[0] - a[0]) * D2R; return Math.hypot(x, y) * R; };
-  const mkT = (k, secs, name) => { const c = FX.routes[k].coords, km = FX.routes[k].km, n = c.length; return { legs: [{ shape: enc6(c), maneuvers: [{ type: 1, instruction: 'Рушайте.', street_names: [name], length: km, time: secs, begin_shape_index: 0, end_shape_index: n - 1 }, { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: n - 1, end_shape_index: n - 1 }], summary: { length: km, time: secs } }], summary: { length: km, time: secs }, status: 0 }; };
-  const OFMG = { tj: 0, tiles: [], down: false }, gateReqs = [];
+  const mkTc = (c, km, secs, name) => { const n = c.length; return { legs: [{ shape: enc6(c), maneuvers: [{ type: 1, instruction: 'Рушайте.', street_names: [name], length: km, time: secs, begin_shape_index: 0, end_shape_index: n - 1 }, { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: n - 1, end_shape_index: n - 1 }], summary: { length: km, time: secs } }], summary: { length: km, time: secs }, status: 0 }; };
+  const mkT = (k, secs, name) => mkTc(FX.routes[k].coords, FX.routes[k].km, secs, name);
+  // шлях Стрийською «з петлею»: повз ворота, за 500 м розворот, назад повз ворота, ще розворот — так вийде, якщо сервер причепить точку до зустрічної смуги
+  const loopTrip = () => { const c = FX.routes.stry.coords; let k = 0, bd = 1e9; c.forEach((q, i) => { const d = hv(q, FX.gates[1].p); if (d < bd) { bd = d; k = i; } });
+    let j = k, i0 = k, sj = 0, si = 0; while (j < c.length - 1 && sj < 500) { sj += hv(c[j], c[j + 1]); j++; } while (i0 > 0 && si < 400) { si += hv(c[i0], c[i0 - 1]); i0--; }
+    return mkTc([...c.slice(0, j + 1), ...c.slice(i0, j).reverse(), ...c.slice(i0 + 1)], FX.routes.stry.km + 2 * (sj + si) / 1000, 2100, 'Стрийська вулиця'); };
+  const OFMG = { tj: 0, tiles: [], down: false, loop: false }, gateReqs = [];
   const setup = async (page) => {
     await page.route('https://tiles.openfreemap.org/planet', r => { if (OFMG.down) return r.abort(); OFMG.tj++; r.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify({ tiles: ['https://tiles.openfreemap.org/planet/G1/{z}/{x}/{y}.pbf'] }) }); });
     await page.route('https://tiles.openfreemap.org/planet/**', r => { if (OFMG.down) return r.abort(); const m = /planet\/([^/]+)\/(\d+)\/(\d+)\/(\d+)\.pbf/.exec(r.request().url()); if (!m) return r.abort();
@@ -5789,7 +5794,7 @@ if (run('49')) try {
       r.fulfill({ status: 200, contentType: 'application/x-protobuf', headers: cors, body: existsSync(f) ? readFileSync(f) : Buffer.alloc(0) }); });
   };
   // усі три варіанти сервера «34 хв», як на знімку; шлях Стрийською сервер вважає не швидшим (33 хв) — першим його робить клас доріг
-  ROUTE.fn = q => { const L = q.locations; if (L.length === 3) { gateReqs.push(L[1]); const viaStry = hv([L[1].lat, L[1].lon], FX.gates[1].p) < 150; return { body: { trip: viaStry ? mkT('stry', 1980, 'Стрийська вулиця') : mkT('mid', 2040, 'С141224') } }; }
+  ROUTE.fn = q => { const L = q.locations; if (L.length === 3) { gateReqs.push(L[1]); const viaStry = hv([L[1].lat, L[1].lon], FX.gates[1].p) < 150; return { body: { trip: viaStry ? (OFMG.loop ? loopTrip() : mkT('stry', 1980, 'Стрийська вулиця')) : mkT('mid', 2040, 'С141224') } }; }
     return { body: q.alternates ? { trip: mkT('n09', 2040, 'Н-09'), alternates: [{ trip: mkT('byp', 2040, 'М-06') }] } : { trip: mkT('n09', 2040, 'Н-09') } }; };
   const build = (page, opt = { alternates: 2 }) => app(page, async ([a, b, opt]) => { const Rt = window.__app.route, tr = Rt.newTrip({ lat: a[0], lon: a[1], label: 'Милятичі' }, null, { lat: b[0], lon: b[1], label: 'Рядова вулиця 26' }); tr.costing = 'auto'; tr.free = true;
     const t0 = Date.now(), r = await Rt.buildRoute(tr, opt), all = [r, ...(r.alts || [])];
@@ -5799,8 +5804,8 @@ if (run('49')) try {
     const n0 = routeReqs.length, r = await build(page), reqs = routeReqs.slice(n0), g = gateReqs[0] || {};
     ok(`головні дороги беремо з карти: ${OFMG.tiles.length} квадратів z11 (${[...new Set(OFMG.tiles)].join(', ')}), не більше восьми; каталог квадратів — ${OFMG.tj} запит`,
       OFMG.tj === 1 && OFMG.tiles.length >= 2 && OFMG.tiles.length <= 8 && OFMG.tiles.every(t => /^11\/116[01]\/69[5-7]$/.test(t)), JSON.stringify(OFMG));
-    ok(`знайдено «ворота» на Стрийській — просимо в сервера ще один варіант крізь них: ${reqs.length} запити замість одного; точка (${g.lat}, ${g.lon}) за ${Math.round(hv([g.lat, g.lon], FX.gates[1].p))} м від справжнього перетину, тип «${g.type}», курс ${g.heading}° (дорога веде на північ, до міста)`,
-      reqs.length === 2 && gateReqs.length === 1 && g.type === 'through' && hv([g.lat, g.lon], FX.gates[1].p) < 60 && Math.abs(g.heading - 6) <= 12 && g.heading_tolerance === 45 && reqs[1].costing === 'auto' && !reqs[1].alternates && reqs[1].costing_options.auto.top_speed === undefined, JSON.stringify({ gateReqs, n: reqs.length }));
+    ok(`знайдено «ворота» на Стрийській — просимо в сервера ще один варіант крізь них: ${reqs.length} запити замість одного; точка (${g.lat}, ${g.lon}) за ${Math.round(hv([g.lat, g.lon], FX.gates[1].p))} м від справжнього перетину, тип «${g.type}», курс ${g.heading}° (дорога веде на північ, до міста), радіус ${g.radius} м — щоб на дорозі з розділювачем сервер узяв смугу за курсом, а не зустрічну`,
+      reqs.length === 2 && gateReqs.length === 1 && g.type === 'through' && hv([g.lat, g.lon], FX.gates[1].p) < 60 && Math.abs(g.heading - 6) <= 12 && g.heading_tolerance === 45 && g.radius === 40 && reqs[1].costing === 'auto' && !reqs[1].alternates && reqs[1].costing_options.auto.top_speed === undefined, JSON.stringify({ gateReqs, n: reqs.length }));
     ok(`ворота на Зеленій (Н-09) окремого запиту не потребують — цією дорогою вже веде варіант сервера: «${r.info.slice(0, 110)}…»`, /уже є/.test(r.info) && /новий варіант/.test(r.info), r.info);
     ok(`перший варіант — Стрийською, як у Google: ${r.list.map(x => `«${x.street}» ${x.km} км, сервер ${x.srv} хв, за класом доріг ${x.est} хв (${Math.round(x.major * 100)} % головними)`).join(' → ')}`,
       r.list.length === 3 && r.list[0].street === 'Стрийська вулиця' && r.list[0].born === 'primary' && r.list[1].street === 'Н-09' && r.list[2].street === 'М-06' && r.list[0].est < r.list[1].est && r.list[1].est < r.list[2].est && r.list.every(x => x.cov > 0.9 && x.costing === 'auto'), JSON.stringify(r.list));
@@ -5815,6 +5820,10 @@ if (run('49')) try {
     // вимикач
     const n2 = routeReqs.length; await app(page, () => { window.__app.S.gates = false; }); const r3 = await build(page); await app(page, () => { window.__app.S.gates = true; });
     ok(`ворота вимкнено (S.gates = false) — як без них: один запит, першим «${r3.list[0].street}»`, routeReqs.length === n2 + 1 && r3.list.length === 2 && r3.list[0].street === 'Н-09' && !r3.info, JSON.stringify(r3.list.map(x => x.street)));
+    // сервер повернув крізь ворота шлях із петлею (розворот, повз ворота назад, ще розворот) — такий варіант не беремо
+    OFMG.loop = true; const n3 = routeReqs.length, r4 = await build(page); OFMG.loop = false;
+    ok(`шлях крізь ворота з петлею (двічі розворот біля воріт) відкинуто: лишились варіанти сервера «${r4.list.map(x => x.street).join('», «')}» — «${(/[^;:]*петля/.exec(r4.info) || [''])[0].trim()}»`,
+      routeReqs.length === n3 + 2 && r4.list.length === 2 && r4.list[0].street === 'Н-09' && r4.list.every(x => !x.born) && /петля/.test(r4.info), JSON.stringify({ info: r4.info, list: r4.list }));
     ok('прохід 49а без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
   // б) карти немає (мережа квадратів недоступна) — рейс будується, як і раніше, без затримки

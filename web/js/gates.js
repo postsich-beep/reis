@@ -24,7 +24,7 @@ const adiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
 export const RANK = { motorway: 5, trunk: 4, primary: 3, secondary: 2, tertiary: 1 };
 /** Швидкість для оцінки, км/год: чим вищий клас дороги, тим швидше (це й є «спершу хороші дороги»). */
 export const CLASS_KMH = { motorway: 100, trunk: 80, primary: 56, secondary: 46, tertiary: 36, minor: 22 };
-export const GATE = { MIN_TRIP_M: 4000, RHO_K: 0.3, RHO_MIN: 1500, RHO_MAX: 6000, SIDE: 110, SEP: 25, MAX_END: 2, MAX_REQ: 2, TOL_M: 20, NEAR_M: 90, TILE_MS: 4500, MAX_TILES: 8, TIE: 0.05 };
+export const GATE = { MIN_TRIP_M: 4000, RHO_K: 0.3, RHO_MIN: 1500, RHO_MAX: 6000, SIDE: 110, SEP: 25, MAX_END: 2, MAX_REQ: 2, TOL_M: 20, NEAR_M: 90, SNAP_M: 40, LOOP_M: 45, LOOP_GAP_M: 250, TILE_MS: 4500, MAX_TILES: 8, TIE: 0.05 };
 
 /* ---------- векторний квадрат → головні дороги ---------- */
 // Мінімальний читач MVT: лише шар доріг і лише потрібні властивості. Дві схеми: OpenMapTiles (OpenFreeMap) — шар transportation,
@@ -165,7 +165,15 @@ export function sameRoute(a, b) {
   return [0.2, 0.35, 0.5, 0.65, 0.8].every(f => dist(at(a, f), at(b, f)) <= 80);
 }
 /** Чи проходить варіант біля точки p (у межах m метрів). */
-export function passesNear(r, p, m = GATE.NEAR_M) { const c = r.coords; for (let i = 0; i < c.length; i += 2) if (dist(c[i], p) <= m) return true; return false; }
+const segDist = (p, a, b) => { const KX = kx(p[0]), bx = (b[1] - a[1]) * KX, by = (b[0] - a[0]) * KY, px = (p[1] - a[1]) * KX, py = (p[0] - a[0]) * KY, L2 = bx * bx + by * by, t = L2 ? Math.max(0, Math.min(1, (px * bx + py * by) / L2)) : 0; return Math.hypot(px - t * bx, py - t * by); };
+export function passesNear(r, p, m = GATE.NEAR_M) { const c = r.coords; for (let i = 1; i < c.length; i++) if (segDist(p, c[i - 1], c[i]) <= m) return true; return false; }
+/** Шлях проходить повз точку p більше ніж раз — петля. Так буває, коли сервер «причепив» ворота до зустрічної смуги дороги з
+ *  розділювачем: їде повз, розвертається, проїжджає ворота назад і розвертається ще раз. Такий варіант — не «хороша дорога». */
+export function loopsAt(r, p, m = GATE.LOOP_M, gap = GATE.LOOP_GAP_M) {
+  const c = r.coords; let s = 0, lastNear = -Infinity, n = 0;
+  for (let i = 1; i < c.length; i++) { const d = dist(c[i - 1], c[i]); if (segDist(p, c[i - 1], c[i]) <= m) { if (s - lastNear > gap) n++; lastNear = s + d; } s += d; }
+  return n > 1;
+}
 /** Порядок варіантів: найшвидший за оцінкою; серед майже однакових (у межах 5 %) — той, де більше головних доріг. */
 export function rankByClass(list, ix) {
   const E = list.map((r, i) => { const e = classTime(r, ix), srv = r.timeSrv != null ? r.timeSrv : r.time; r.gate = { ...(r.gate || {}), t: Math.round(e.t), major: +e.major.toFixed(3), cov: +e.cov.toFixed(2) }; return { r, i, e, s: Math.sqrt(e.t * srv) }; });
@@ -196,8 +204,10 @@ export async function withGates(a, b, base, ask, { pause = null } = {}) {
     asked++;
     try {
       if (pause) await pause();
-      const r = await ask({ lat: +g.p[0].toFixed(6), lon: +g.p[1].toFixed(6), brg: Math.round(g.inward) });
+      // rad: на дорозі з розділювачем точка з квадрата карти може лежати на зустрічній смузі — сервер сам вибере смугу за курсом
+      const r = await ask({ lat: +g.p[0].toFixed(6), lon: +g.p[1].toFixed(6), brg: Math.round(g.inward), rad: GATE.SNAP_M });
       if (!r || !r.coords || r.coords.length < 2) continue;
+      if (loopsAt(r, g.p)) { tried.push(g.cls + ' — петля'); continue; }                           // розворот біля воріт — не варіант
       const short = Math.min(...list.map(x => x.dist));
       if (r.dist > 1.6 * short + 500) { tried.push(g.cls + ' — гак'); continue; }                 // крізь ворота вийшов великий гак — не варіант
       if (list.some(x => sameRoute(x, r))) { tried.push(g.cls + ' — той самий шлях'); continue; }

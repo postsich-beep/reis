@@ -159,6 +159,7 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     if (i === 0 && heading != null) { l.heading = Math.round(heading); l.heading_tolerance = 60; }
     // точка на вибраному маршруті: з напрямком руху, щоб на трасі з розділювачем не «прилипла» до зустрічної смуги
     else if (p.brg != null) { l.heading = Math.round(p.brg); l.heading_tolerance = 45; }
+    if (p.rad) l.radius = p.rad;                            // «ворота»: дороги в цьому радіусі — на вибір сервера (потрібну смугу визначить курс)
     return l;
   });
   const body = {
