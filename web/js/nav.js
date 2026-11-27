@@ -649,14 +649,20 @@ function tick() {
 }
 
 // Замок на повороті: що сталося на контрольних точках за цей крок — на екран і в журнал
+const CP_ASK = { next: 'телефон відчув поворот, схожий на наступний', turn: 'телефон відчув поворот, якого тут на рейсі немає', net: 'вишки кажуть, що фура вже далі' };
 const CP_BY = { gyro: 'телефон відчув поворот', button: 'водій натиснув «Поворот»', skip: 'відчули вже наступний поворот', auto: 'без гіроскопа, за швидкістю', net: 'за вишками' };
 function cpView() {
   const G = trk && trk.on && trk.o.gate ? trk.g : null, c = G && G.cp;
-  return c ? { state: G.state, since: Math.round(G.since * 1000), dist: Math.round(Math.max(0, c.d0 - trk.est.d)), d: c.d, ang: c.ang, cls: c.cls, sgn: c.sgn, prog: G.prog, handled: !!G.handled, alive: !!G.alive } : null;
+  return c ? { state: G.state, since: Math.round(G.since * 1000), dist: Math.round(Math.max(0, c.d0 - trk.est.d)), d: c.d, ang: c.ang, cls: c.cls, sgn: c.sgn, prog: G.prog, handled: !!G.handled, alive: !!G.alive, ask: G.ask || null } : null;
 }
 function gateEvents(now) {
   for (const ev of trk.takeEvents()) {
     const nx = trk.cps[trk.cpi] || null;
+    if (ev.type === 'ask') {
+      // (1.1.38) схоже, поворот уже позаду, але підтвердження немає — позначку не чіпаємо, просимо водія (кнопка «Поворот» блимає)
+      log('info', `контрольний поворот ${ev.cp.ang}° не підтверджено: ${CP_ASK[ev.why] || ev.why}${ev.ang ? ' (' + ev.ang + '°)' : ''} — позначка чекає, прошу водія підтвердити`);
+      bus.emit('cpAsk', ev); continue;
+    }
     log('info', `контрольний поворот ${ev.cp.ang}° (${ev.cp.cls === 'red' ? 'різкий' : 'дуга'}) пройдено: ${CP_BY[ev.by] || ev.by}` + (ev.jump ? `, позначку підтягнуто на ${ev.jump} м` : '') + (ev.waited ? `, чекала ${ev.waited} с` : '') + (ev.tempo != null ? `, темп ×${ev.tempo.toFixed(2)}` : '') + (ev.hand ? ' — поворот різкий (відкинутий як «телефон у руках»), зараховано, коли телефон заспокоївся в тому ж нахилі' : ''));
     if (ev.by === 'gyro') gyroSeen = now;
     bus.emit('cpPass', { ...ev, next: nx ? { d: nx.d, cls: nx.cls, ang: nx.ang, sgn: nx.sgn, dist: Math.round(Math.max(0, nx.d0 - trk.est.d)) } : null, sig: Math.round(trk.est.sig) });

@@ -516,12 +516,13 @@ function addLayers() {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 12], 'circle-color': SHOWER_COLOR,
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
   map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('markTap', f.properties.id); });
-  // контрольні повороти рейсу (без GPS): червоні — перехрестя й різкі повороти, жовті — довгі дуги трас
+  // контрольні повороти рейсу (без GPS): бордові — різкі (перехрестя, кільце, розвилка), жовті — затяжні (1.1.38: було червоне #e5484d)
+  const CP_RED = '#a3162a';
   // (1.1.36) пройдені лишаються на карті: білі з кольоровим обідком (попереду — суцільні, наступний — більший); до будь-якого можна торкнутись
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'n'], 1], 5, 3.5], 13, ['case', ['==', ['get', 'n'], 1], 9, 6], 17, ['case', ['==', ['get', 'n'], 1], 14, 10]],
-    'circle-color': ['case', ['==', ['get', 'p'], 1], '#ffffff', ['match', ['get', 'c'], 'red', '#e5484d', '#f6bd16']],
-    'circle-stroke-color': ['case', ['==', ['get', 'p'], 1], ['match', ['get', 'c'], 'red', '#e5484d', '#e0a800'], '#ffffff'],
+    'circle-color': ['case', ['==', ['get', 'p'], 1], '#ffffff', ['match', ['get', 'c'], 'red', CP_RED, '#f6bd16']],
+    'circle-stroke-color': ['case', ['==', ['get', 'p'], 1], ['match', ['get', 'c'], 'red', CP_RED, '#e0a800'], '#ffffff'],
     'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 9, ['case', ['==', ['get', 'p'], 1], 1.8, 1.2], 14, ['case', ['==', ['get', 'p'], 1], 3.5, 2.5]], 'circle-opacity': 0.95 } });
   for (const id of ['stops-major', 'stops-all', 'cams-ico']) {
     map.on('click', id, e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('stopTap', { i: f.properties.i, lat: e.lngLat.lat, lon: e.lngLat.lng }); });
