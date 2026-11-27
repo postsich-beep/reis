@@ -320,8 +320,8 @@ async function autoReroute(freshOnly = false, force = false, hdg = null) {
     if (alive()) {
       if (kind === 'fresh') tr.chosen = chosenOf(pick);
       holdRejoin(0);
+      say(t(kind === 'chosen' ? 'voiceRejoin' : 'voiceAuto'));           // спершу про перебудову, далі — перша підказка нового шляху
       applyRoute(pick); autoAt = Date.now(); ok = true;
-      say(t(kind === 'chosen' ? 'voiceRejoin' : 'voiceAuto'), { urgent: true });
       if (pick.truckFail) bus.emit('truckFail', pick);
       bus.emit('autoRoute', { kind, force, km: Math.round(pick.dist / 1000) });
     }
