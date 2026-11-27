@@ -1245,7 +1245,8 @@ if (run('6')) try {
   // у дорозі GPS не мовчить: відліки йдуть і поки водій відкриває деталі рейсу (інакше на повільному стенді — «без GPS», і перебудову чесно відкладено)
   await fix(0); await page.click('#tabs button[data-panel="trip"]'); await fix(0); await page.click('#routePick [data-ts="details"]');
   for (let i = 0; i < 10; i++) { await fix(0); await sleep(400); if (await app(page, () => window.__app.nav.pos.mode === 'gps')) break; }
-  await page.click('[data-act="rerouteFresh"]'); await sleep(1500);
+  // …і поки він тягнеться до кнопки (дотик на стенді інколи чекає 2–5 с, доки панель «устоїться»): без відліків це вже «без GPS»
+  { const pump = setInterval(() => { fix(0).catch(() => {}); }, 900); try { await page.click('[data-act="rerouteFresh"]'); } finally { clearInterval(pump); } } await sleep(1500);
   const rq2 = routeReqs[routeReqs.length - 1];
   ok('«Новий шлях від мене» (кнопка в деталях рейсу) — будує одразу, без запитань: звичайний маршрут від поточного місця до Б', routeReqs.length === n3 + 1 && rq2.locations.length === 2 && !(await st()).vis, JSON.stringify({ reqs: routeReqs.slice(n3).map(q => q.locations.length), last: rq2.locations.map(l => l.type), mode: await app(page, () => window.__app.nav.pos.mode) }));
   // є) рейс завершили — пропозиція (якщо була) зникає

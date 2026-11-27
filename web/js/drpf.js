@@ -774,8 +774,27 @@ export class RouteTracker {
     if (o.gate && o.gStrict && this.cps[this.cpi] && !this.eng) {
       const c2 = this.cps[this.cpi + 1], c1 = this.cps[this.cpi];
       const fits = x => !!x && Math.sign(x.ang || x.amp) === Math.sign(dy) && Math.abs(Math.abs(x.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy));
-      // поворот, відчутий ДО того, як позначку поставили сюди (водій торкнувся повороту на карті, натиснув «Поворот», «Я тут»), нічого не каже
-      if (!this.anchor || t - ago > this.anchor.t + 2) this.suspect(t, fits(c2) && !fits(c1) && c2.d0 - c1.d1 <= 3000 ? 'next' : 'turn', dy);
+      // Не питаємо, коли відчутий поворот нічого не каже про той, на який чекаємо:
+      //  • його відчули ДО того, як позначку поставили сюди (водій торкнувся повороту на карті, натиснув «Поворот», «Я тут»);
+      //  • це поворот, який позначка щойно лишила позаду (GPS зник на самому перехресті — фура ще повертала, а позначка вже за ним).
+      const pv = this.cps[this.cpi - 1], justBehind = fits(pv) && e - pv.d1 <= 300 + this.vmax * ago;
+      //  • фура фізично ще не могла доїхати до свого повороту (до нього кілометри, а від останньої звірки минуло мало):
+      //    вигин дороги чи заїзд на АЗС не означає, що він уже позаду.
+      const near = c1.d0 - e <= Math.max(300, 2 * this.est.sig + 150), can = near || this.reachable(c1, t);
+      const kind = fits(c2) && !fits(c1) && c2.d0 - c1.d1 <= 3000 && (near || this.reachable(c2, t)) ? 'next' : can ? 'turn' : null;
+      const fresh = !this.anchor || t - ago > this.anchor.t + 2;
+      if (fits(c1) && near && !justBehind && fresh) {
+        // Телефон відчув САМЕ ТОЙ поворот, на який чекає позначка (той самий бік і кут), і позначка біля нього. Замок його не
+        // зарахував, бо кут набігав надто повільно (затор на дузі) чи з перервою, — але це і є підтвердження датчиком.
+        // Поворот скінчився секунд шість тому (стільки курс має бути спокійним, щоб його «відчути» цілим).
+        const nx = this.cps[this.cpi + 1], to = this.ahead(c1.d1 + 8, 6, nx ? Math.max(c1.d1 + 8, nx.d0 - 15) : this.idx.total);
+        this.place(to, clamp(20 + 0.25 * (to - c1.d1), 20, 150), t);
+        this.passCp('gyro', t, c1, { jump: Math.max(0, to - e), late: true });
+        const y = this.lastYaw(); if (y) { this.off = y.c - this.prof.at(this.est.d); this.align = 'ok'; }
+        this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
+        return { sup, seeded: 0, passed: true };
+      }
+      if (kind && !justBehind && fresh) this.suspect(t, kind, dy);
     }
     const cands = this.cps.filter((c, ci) => ci <= gateI && Math.sign(c.ang || c.amp) === Math.sign(dy) && Math.abs(Math.abs(c.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy)) && Math.abs(c.d - e) < W)
       .map(c => ({ c, p: Math.exp(-((c.d - e) ** 2) / (2 * (o.gate ? clamp(2 * this.est.sig + 150, 250, W / 2) : W / 2) ** 2)) }))
