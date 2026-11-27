@@ -15,9 +15,6 @@ import android.os.VibrationEffect
 import android.os.Vibrator
 import android.provider.MediaStore
 import android.provider.Settings
-import android.speech.RecognitionListener
-import android.speech.RecognizerIntent
-import android.speech.SpeechRecognizer
 import android.speech.tts.TextToSpeech
 import android.speech.tts.UtteranceProgressListener
 import android.view.WindowManager
@@ -48,7 +45,6 @@ class Bridge(private val act: MainActivity) {
     private var ttsFailed = false
     private var ttsQueued: (() -> Unit)? = null
     private var ttsLang = ""
-    private var sr: SpeechRecognizer? = null
     private var notifId = 100
     private var update: JSONObject? = null
 
@@ -228,56 +224,34 @@ class Bridge(private val act: MainActivity) {
     @JavascriptInterface
     fun voiceDelete(pack: String) = neural.delete(pack.filter { it.isLetterOrDigit() || it == '-' || it == '_' })
 
-    /* ---------- розпізнавання мови ---------- */
-    private fun sttError(code: String) = emit("stt", JSONObject().put("state", "error").put("code", code))
+    /* ---------- розпізнавання мови (з 1.1.38 — з вибором мікрофона, див. Stt.kt) ---------- */
+    private val stt = Stt(act.applicationContext) { t, o -> emit(t, o) }
 
     @JavascriptInterface
     fun listen(lang: String) {
-        main.post { act.withMic { startListen(lang) } }
-    }
-
-    private fun startListen(lang: String) {
-        if (!SpeechRecognizer.isRecognitionAvailable(act)) { sttError("unavailable"); return }
-        try {
-            sr?.destroy()
-            val r = SpeechRecognizer.createSpeechRecognizer(act)
-            sr = r
-            r.setRecognitionListener(object : RecognitionListener {
-                override fun onReadyForSpeech(params: Bundle?) { emit("stt", JSONObject().put("state", "ready")) }
-                override fun onBeginningOfSpeech() {}
-                override fun onRmsChanged(rmsdB: Float) {}
-                override fun onBufferReceived(buffer: ByteArray?) {}
-                override fun onEndOfSpeech() {}
-                override fun onEvent(eventType: Int, params: Bundle?) {}
-                override fun onPartialResults(partialResults: Bundle?) {
-                    val t = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
-                    emit("stt", JSONObject().put("state", "partial").put("text", t))
-                }
-                override fun onResults(results: Bundle?) {
-                    val t = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: ""
-                    emit("stt", JSONObject().put("state", "final").put("text", t))
-                }
-                override fun onError(error: Int) {
-                    sttError(when (error) {
-                        SpeechRecognizer.ERROR_NO_MATCH -> "nomatch"
-                        SpeechRecognizer.ERROR_SPEECH_TIMEOUT -> "timeout"
-                        SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS -> "denied"
-                        SpeechRecognizer.ERROR_NETWORK, SpeechRecognizer.ERROR_NETWORK_TIMEOUT -> "network"
-                        else -> "err$error"
-                    })
-                }
-            })
-            val i = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                .putExtra(RecognizerIntent.EXTRA_LANGUAGE, lang)
-                .putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                .putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-            r.startListening(i)
-        } catch (e: Exception) { sttError(e.javaClass.simpleName) }
+        main.post { act.withMic { stt.start(lang) } }
     }
 
     @JavascriptInterface
-    fun stopListen() { main.post { try { sr?.stopListening() } catch (_: Exception) {} } }
+    fun stopListen() { main.post { stt.stop() } }
+
+    /** "auto" · "headset" · "phone" — який мікрофон слухати, коли підключена гарнітура. */
+    @JavascriptInterface
+    fun setMic(mode: String) { stt.mode = if (mode == "headset" || mode == "phone") mode else "auto" }
+
+    /** Що підключено зараз і що вміє телефон (для «Налаштування → Мікрофон»). */
+    @JavascriptInterface
+    fun micInfo(): String = stt.info().toString()
+
+    /** Завантажити мову для розпізнавання без інтернету (Android 13+). */
+    @JavascriptInterface
+    fun micLangDownload(lang: String): Boolean {
+        var ok = false
+        val done = java.util.concurrent.CountDownLatch(1)
+        main.post { ok = stt.langDownload(lang); done.countDown() }
+        try { done.await(3, java.util.concurrent.TimeUnit.SECONDS) } catch (_: InterruptedException) {}
+        return ok
+    }
 
     /* ---------- мережа ---------- */
     private fun readLimited(c: HttpURLConnection, limit: Int): ByteArray {
@@ -551,7 +525,7 @@ class Bridge(private val act: MainActivity) {
     fun shutdown() {
         try { tts?.stop(); tts?.shutdown() } catch (_: Exception) {}
         try { neural.unload() } catch (_: Throwable) {}
-        try { sr?.destroy() } catch (_: Exception) {}
+        try { stt.destroy() } catch (_: Exception) {}
         io.shutdownNow()
     }
 }

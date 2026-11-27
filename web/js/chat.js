@@ -10,7 +10,8 @@ import { oblastName, tripTitle } from './route.js';
 import * as showers from './showers.js';
 import { t } from './i18n.js';
 
-export const chat = { msgs: [], busy: false, live: false, listening: false, partial: '', error: '' };
+export const chat = { msgs: [], busy: false, live: false, listening: false, partial: '', error: '', mic: null, lvl: 0, hint: '' };
+let lvlMax = -1, userStop = false;          // найгучніше за запис (−1 — оболонка рівня не дає); водій сам зупинив запис
 const cut = (s, n = 160) => { s = String(s).replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n) + '…' : s; };
 
 function context() {
@@ -71,14 +72,25 @@ export async function send(text, { spoken = false } = {}) {
 
 // Голосове повідомлення: натиснув мікрофон — сказав — відправилось.
 export async function voiceOnce() {
-  if (chat.listening || chat.busy) { stopListen(); return; }
+  if (chat.listening || chat.busy) { userStop = true; stopListen(); return; }
   if (!canListen()) { chat.error = 'nostt'; bus.emit('chat', chat); return; }
-  chat.listening = true; chat.partial = ''; chat.error = ''; bus.emit('chat', chat);
+  chat.listening = true; chat.partial = ''; chat.error = ''; chat.mic = null; chat.lvl = 0; chat.hint = ''; lvlMax = -1; userStop = false;
+  bus.emit('chat', chat);
   stopSpeak();
   let text = '';
-  try { text = await listen(p => { chat.partial = p; bus.emit('chat', chat); }); }
+  try {
+    text = await listen(p => { chat.partial = p; bus.emit('chat', chat); }, d => {
+      if (d.state === 'level') { chat.lvl = +d.v || 0; lvlMax = Math.max(lvlMax, chat.lvl); bus.emit('micLevel', chat.lvl); }   // смужка — без перемальовування чату
+      else if (d.state === 'mic') { chat.mic = d; bus.emit('chat', chat); }
+      else if (d.state === 'hint') { chat.hint = d.code || ''; bus.emit('chat', chat); }
+    });
+  }
   catch (e) { chat.error = 'stt:' + e.message; }
-  chat.listening = false; chat.partial = ''; bus.emit('chat', chat);
+  chat.listening = false; chat.partial = '';
+  // Раніше тиша тихо зникала — водій не знав, чи його чули. Тепер кажемо: мікрофон нічого не чув чи чув, але без слів.
+  // У живій розмові не кажемо: там дві тиші поспіль і так завершують розмову.
+  if (!text && !chat.error && !chat.live && !userStop) chat.error = lvlMax >= 0 && lvlMax < 0.15 ? 'nohear:mic' : 'nohear';
+  bus.emit('chat', chat);
   if (text) await send(text, { spoken: true });
   return text;
 }
@@ -99,4 +111,12 @@ export async function toggleLive() {
   chat.live = false; bus.emit('chat', chat);
 }
 export const clearChat = () => { chat.msgs = []; chat.error = ''; bus.emit('chat', chat); };
-export const errorText = e => e === 'nokey' ? t('chatNoKey') : e === 'badkey' ? t('chatBadKey') : e === 'nostt' ? t('chatNoStt') : e.startsWith('stt:') ? t('chatSttErr') : t('chatErr') + ' ' + e;
+export const errorText = e => e === 'nokey' ? t('chatNoKey') : e === 'badkey' ? t('chatBadKey') : e === 'nostt' ? t('chatNoStt')
+  : e === 'nohear:mic' ? t('chatNoHearMic') : e === 'nohear' ? t('chatNoHear') : e === 'stt:denied' ? t('chatMicDenied') : e.startsWith('stt:') ? t('chatSttErr') : t('chatErr') + ' ' + e;
+/** «мікрофон гарнітури USB», «мікрофон телефона»… */
+export const micName = (kind, name) => t('micK_' + (['usb', 'wired', 'phone', 'bt', 'tel'].includes(kind) ? kind : 'other')) + (name && kind !== 'phone' ? ' «' + name + '»' : '');
+/** Підпис під «Слухаю…»: хто й яким мікрофоном слухає. */
+export function micLine(m) {
+  if (!m || !m.kind) return m && m.how === 'system' ? t('micBySysUnknown') : '';
+  return t(m.how === 'system' ? 'micBySys' : 'micByOwn', micName(m.kind, m.name)) + (m.why === 'silent' ? ' — ' + t('micSilent') : m.why === 'mode' ? ' — ' + t('micByMode') : '');
+}

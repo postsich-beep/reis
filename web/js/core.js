@@ -1,6 +1,6 @@
 // Ядро: шина подій, журнал, налаштування, сховище, геометрія, форматування.
 import { UA_RINGS } from './ua_border.js';
-export const VERSION = { web: 65, name: '1.1.38' };
+export const VERSION = { web: 66, name: '1.1.39' };
 
 /* ---------- шина подій ---------- */
 const handlers = {};
@@ -39,7 +39,7 @@ const DEFAULTS = {
   vibrate: true, notify: true, keepAwake: true, channelsSeeded: false, weather: true, chDefVer: 0,
   mapMode: 'auto', offlineWifi: true, mapStops: true, mapStopTypes: { ...BASE_STOPS },
   truck: { height: 4.0, width: 2.55, length: 16.5, weight: 20, axle: 11.5, hazmat: false, vmax: 90 }, truckV: 1,
-  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', routeMode: 'free', routeModeV: 2, keepChosen: true, offMode: 'auto', accUse: 'auto', ttsRate: 1, ttsVoice: 'system', hgvBan: 'ask', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
+  stopKm: 30, aheadH: 3, nearKm: 100, vehicle: 'truck', routeMode: 'free', routeModeV: 2, keepChosen: true, offMode: 'auto', accUse: 'auto', ttsRate: 1, ttsVoice: 'system', mic: 'auto', hgvBan: 'ask', repShare: true, repTopic: '', glass: 'high', roughMapV: 2, routeCats: true, heatExempt: false, mapEvents: false, mapHazards: false, mapVerified: false, layersDefV: 1, passed: 'hide', rough: true, roughMap: false,
   apiKey: '', model: 'claude-sonnet-5-5',
   routeUrl: 'https://valhalla1.openstreetmap.de',
   styleUrl: 'https://tiles.openfreemap.org/styles/liberty',
@@ -63,7 +63,7 @@ try {
   // 1.1.10: у нас фури не важчі за 20 т — збережені 40 т (старе значення за замовчуванням) стають 20 т
   settings.truck.weight = Math.min(+settings.truck.weight || TRUCK_MAX_T, TRUCK_MAX_T);
   if ((raw.truckV || 0) < 1 && raw.truck) { settings.truckV = 1; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
-  // 1.1.38: рейс будуємо «як Google» — це тепер вид рейсу за замовчуванням. У кого було вибрано «Фура: суворо» (воно стояло
+  // 1.1.39: рейс будуємо «як Google» — це тепер вид рейсу за замовчуванням. У кого було вибрано «Фура: суворо» (воно стояло
   // за замовчуванням), один раз перемикаємо; далі вибір водія не чіпаємо — «суворо» можна ввімкнути знову
   if ((raw.routeModeV || 0) < 2 && Object.keys(raw).length) { settings.routeMode = 'free'; settings.routeModeV = 2; localStorage.setItem('reis.settings', JSON.stringify(settings)); }
   // 1.1.12: голос «Лада» прибрано (писклявий) — у кого він був вибраний, тепер говорить Тетяна

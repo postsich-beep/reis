@@ -516,7 +516,7 @@ function addLayers() {
     'circle-radius': ['interpolate', ['linear'], ['zoom'], 5, 4, 12, 8, 16, 12], 'circle-color': SHOWER_COLOR,
     'circle-stroke-color': '#ffffff', 'circle-stroke-width': ['interpolate', ['linear'], ['zoom'], 5, 1.5, 12, 3] } });
   map.on('click', 'marks-dot', e => { const f = e.features && e.features[0]; if (f && !tapHook) bus.emit('markTap', f.properties.id); });
-  // контрольні повороти рейсу (без GPS): бордові — різкі (перехрестя, кільце, розвилка), жовті — затяжні (1.1.38: було червоне #e5484d)
+  // контрольні повороти рейсу (без GPS): бордові — різкі (перехрестя, кільце, розвилка), жовті — затяжні (1.1.39: було червоне #e5484d)
   const CP_RED = '#a3162a';
   // (1.1.36) пройдені лишаються на карті: білі з кольоровим обідком (попереду — суцільні, наступний — більший); до будь-якого можна торкнутись
   map.addLayer({ id: 'cps-dot', type: 'circle', source: 'cps', minzoom: 9, paint: {

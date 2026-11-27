@@ -217,6 +217,9 @@ body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлай
 .msg.user{align-self:flex-end;background:var(--ink);color:var(--panel);border-bottom-right-radius:4px}
 .msg.assistant{align-self:flex-start;background:var(--panel-2);border-bottom-left-radius:4px}
 .msg.sys{align-self:center;background:none;color:var(--ink-2);font-size:13px;text-align:center}
+.miclvl{width:180px;max-width:70vw;height:6px;border-radius:3px;background:var(--line);overflow:hidden;margin:8px auto 0}
+.miclvl i{display:block;height:100%;width:0;background:var(--green);transition:width .08s linear}
+.miclbl{margin-top:5px;font-size:12px;color:var(--ink-2)}
 .chatbar{position:sticky;bottom:0;background:var(--panel);padding-top:8px;display:flex;flex-direction:column;gap:8px}
 .chatbar .row input{flex:1;min-width:0;height:52px;border-radius:14px;border:2px solid var(--line);background:var(--panel);padding:0 12px;outline:none}
 .chatbar .row input:focus{border-color:var(--amber)}
@@ -960,7 +963,7 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .pl-list{display:flex;flex-direction:column;gap:6px}
 
 /* 1.1.10: попередження на шторці вибору маршруту — для фури проїзду немає / точку перенесено на основну дорогу */
-/* (1.1.38) «Звірити з Google Maps» під кнопками готового рейсу */
+/* (1.1.39) «Звірити з Google Maps» під кнопками готового рейсу */
 .gm-cmp{display:flex;align-items:center;gap:10px;margin:10px 0 2px;flex-wrap:wrap}.gm-cmp .muted{flex:1 1 180px;min-width:0;font-size:13px;line-height:1.3}
 .rp-warn{margin:6px 0 2px;padding:8px 10px;border-radius:12px;font:500 14px/1.3 var(--f-ui);background:rgba(var(--glass2-rgb),.7);color:var(--ink)}
 .rp-warn.red{border:2px solid var(--red);background:rgba(var(--glass-rgb),.92)}
@@ -991,16 +994,16 @@ body.map-clean :is(.rpm,.vpm,.evm,.hzm){display:none!important}
 .nudge .turn-btn{width:68px;height:86px;border-radius:20px;flex-direction:column;border-width:3px;gap:4px;font:800 16px/1 var(--f-num);padding:0 2px}
 .nudge .turn-btn svg{width:30px;height:30px;flex:none}
 .nudge .turn-btn span{white-space:nowrap}
-/* (1.1.38) різкий поворот — бордовий (було червоне #e5484d), затяжний — жовтий */
+/* (1.1.39) різкий поворот — бордовий (було червоне #e5484d), затяжний — жовтий */
 .nudge .turn-btn.red{border-color:#a3162a}.nudge .turn-btn.yellow{border-color:#f6bd16}
 .nudge .turn-btn.st-wait{background:#f6bd16;color:#1b1b1b;border-color:#b98a00;text-shadow:none;animation:turnwait 1.6s ease-in-out infinite}
 .nudge .turn-btn.st-wait svg{filter:none}
-/* (1.1.38) чекаю на різкому повороті (перехрестя, 90°) — бордова; на затяжному — жовта, як і була */
+/* (1.1.39) чекаю на різкому повороті (перехрестя, 90°) — бордова; на затяжному — жовта, як і була */
 .nudge .turn-btn.red.st-wait{background:#a3162a;color:#fff;border-color:#6d0f1c}
 .nudge .turn-btn.st-turn{background:#2f9e62;color:#fff;border-color:#1f7a49;text-shadow:none}
 .nudge .turn-btn.st-turn svg{filter:none}
 .nudge .turn-btn.hand{border-style:dashed}
-/* (1.1.38) «був поворот?» — телефон відчув поворот, але не цей: позначка сама не перестрибує, кнопка блимає помаранчевим і чекає на водія */
+/* (1.1.39) «був поворот?» — телефон відчув поворот, але не цей: позначка сама не перестрибує, кнопка блимає помаранчевим і чекає на водія */
 .nudge .turn-btn.ask.st-go,.nudge .turn-btn.ask.st-wait{background:#f08c00;color:#1b1b1b;border-color:#a85d00;text-shadow:none;animation:turnask .9s ease-in-out infinite}
 .nudge .turn-btn.ask svg{filter:none}
 @keyframes turnask{0%,100%{transform:scale(1);box-shadow:0 0 0 0 rgba(240,140,0,.55)}50%{transform:scale(1.07);box-shadow:0 0 0 9px rgba(240,140,0,0)}}

@@ -7,7 +7,7 @@ import { chime, initSfx } from './sfx.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords, selectChoice, confirmChoice, cancelChoice } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
-import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
+import { chat, send, voiceOnce, toggleLive, clearChat, errorText, micLine } from './chat.js';
 import { hasKey } from './ai.js';
 import * as favs from './favs.js';
 import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages, viasOf, viaSlot, VIA_MAX } from './route.js';
@@ -270,7 +270,7 @@ let turnKey = '', waitHintFor = null, waitVoiced = false;
 function turnBtnSync(lost) {
   const b = $('bTurn'), c = lost ? pos.cp : null;
   if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); document.body.classList.remove('turn-on'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
-  // (1.1.38) ask — телефон відчув поворот, але не цей (чи вишки кажуть «ви далі»): позначка сама далі не йде, кнопка блимає — «був поворот?»
+  // (1.1.39) ask — телефон відчув поворот, але не цей (чи вишки кажуть «ви далі»): позначка сама далі не йде, кнопка блимає — «був поворот?»
   const label = c.ask && c.state !== 'turn' ? t('turnAsk') : c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
   const key = [c.sgn, c.cls, c.state, label, c.handled, c.ask].join('|');
   if (key !== turnKey) {
@@ -280,7 +280,7 @@ function turnBtnSync(lost) {
   }
   if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); document.body.classList.add('turn-on'); requestAnimationFrame(layoutVars); }
   // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
-  if (c.ask) waitHintFor = c.d;                               // (1.1.38) про цей поворот уже питаємо («був?») — другу підказку поруч не показуємо
+  if (c.ask) waitHintFor = c.d;                               // (1.1.39) про цей поворот уже питаємо («був?») — другу підказку поруч не показуємо
   if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
     waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
     if (!waitVoiced) { waitVoiced = true; say(t('voiceTurnWait')); }
@@ -1248,7 +1248,7 @@ function pickClick(e) {
   else if (k === 'x') pickCancel();
 }
 function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
-// (1.1.38) Той самий рейс у Google Maps (офіційна адреса «Maps URLs»: старт, фініш і точки «через» координатами) — щоб одним дотиком
+// (1.1.39) Той самий рейс у Google Maps (офіційна адреса «Maps URLs»: старт, фініш і точки «через» координатами) — щоб одним дотиком
 // звірити, чи тим самим шляхом веде Google. Самого маршруту Google нам не віддає (і правила Google не дозволяють малювати його
 // на чужій карті) — порівнюємо очима: дороги на картці (М-06, Н-02…), кілометри й час.
 export function gmapsDirUrl(tr) {
@@ -1377,7 +1377,7 @@ function tripClicks(e) {
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
-  else if (d.act === 'gmaps' && plan.trip) P.openUrl(gmapsDirUrl(plan.trip));        // (1.1.38) той самий рейс у Google Maps — звірити шлях
+  else if (d.act === 'gmaps' && plan.trip) P.openUrl(gmapsDirUrl(plan.trip));        // (1.1.39) той самий рейс у Google Maps — звірити шлях
   else if (d.act === 'saveTrip') saveTripTap();
   else if (d.act === 'archive') openPanel('archive');
   else if (d.act === 'favs') openPanel('favs');
@@ -1795,10 +1795,13 @@ definePanel('feed', {
 /* =====================  ПАНЕЛЬ «ЧАТ»  ===================== */
 function chatHtml() {
   const msgs = chat.msgs.map(m => `<div class="msg ${m.role}">${esc(m.content)}</div>`).join('');
-  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}</div>` : chat.busy ? `<div class="msg sys">${RL} ${t('thinking')}</div>` : '';
+  // під «Слухаю…» (оболонка №10+): смужка рівня звуку й який мікрофон насправді слухає — видно, чи доходить голос
+  const micBar = chat.listening && P.micCapable() ? `<div class="miclvl"><i id="micLvl" style="width:${Math.round((chat.lvl || 0) * 100)}%"></i></div>${chat.mic ? `<div class="miclbl">${esc(micLine(chat.mic))}</div>` : ''}` : '';
+  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}${micBar}</div>` : chat.busy ? `<div class="msg sys">${RL} ${t('thinking')}</div>` : '';
+  const hint = chat.hint ? `<div class="msg sys">${esc(t('micHintChat_' + chat.hint))}</div>` : '';
   const err = chat.error ? `<div class="msg sys" style="color:var(--red)">${esc(errorText(chat.error))}</div>` : '';
   const intro = !chat.msgs.length && !chat.error ? `<div class="msg sys">${hasKey() ? t('chatIntro') : t('chatNoKey')}</div>` : '';
-  return `<div class="chat"><div class="msgs">${intro}${msgs}${state}${err}</div>
+  return `<div class="chat"><div class="msgs">${intro}${msgs}${state}${hint}${err}</div>
     <div class="chatbar"><div class="row"><input id="chatIn" placeholder="${t('chatPh')}" autocomplete="off" enterkeyhint="send"><button class="btn pri" data-act="send" aria-label="${t('send')}">${ICON.send}</button></div>
     <div class="row"><button class="btn grow${chat.listening && !chat.live ? ' danger' : ''}" data-act="voice">${ICON.mic}${t('voiceMsg')}</button><button class="btn grow${chat.live ? ' danger' : ' dark'}" data-act="live">${chat.live ? t('liveStop') : t('liveStart')}</button></div>
     ${!hasKey() ? `<button class="btn sm wide" data-act="key">${t('enterKey')}</button>` : chat.msgs.length ? `<button class="btn sm wide" data-act="clear">${t('clearChat')}</button>` : ''}</div></div>`;
@@ -1833,6 +1836,7 @@ export function initUI() {
   bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
   bus.on('chat', () => refresh('chat'));
+  bus.on('micLevel', v => { const e = $('micLvl'); if (e) e.style.width = Math.round(v * 100) + '%'; });
   bus.on('vplaces', () => { refresh('places'); refresh('place'); });
   let plT = 0; bus.on('stopsdb', () => refresh('places')); bus.on('pos', () => { const n = Date.now(); if (n - plT > 10000) { plT = n; refresh('places'); } });
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });
@@ -1885,7 +1889,7 @@ export function initUI() {
     const now = Date.now(); if (now - cpToastT < 20000) return; cpToastT = now;
     toast(t(ev.jump >= 60 ? 'turnPassJump' : 'turnPassWait', ev.jump >= 60 ? fmtDist(ev.jump) : fmtMS(ev.waited)) + (ev.next ? ' ' + t('turnMatchNext', fmtDist(ev.next.dist)) : ''), 'green', 6000);
   });
-  // (1.1.38) телефон відчув поворот, але не той, на який чекає позначка (або вишки кажуть, що фура вже далі): позначка НЕ перестрибує —
+  // (1.1.39) телефон відчув поворот, але не той, на який чекає позначка (або вишки кажуть, що фура вже далі): позначка НЕ перестрибує —
   // кнопка «Поворот» блимає, а тут пояснюємо, що зробити. Раз на поворот; голосом — не частіше ніж раз на 3 хв.
   let askFor = null, askVoiceT = 0;
   bus.on('cpAsk', ev => {
