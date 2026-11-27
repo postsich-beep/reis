@@ -30,27 +30,66 @@ export function headingProfile(idx, step = 5) {
   return { step, n, H, total: idx.total, at(d) { const x = clamp(d / step, 0, n - 1), i = Math.floor(x), f = x - i; return i >= n - 1 ? H[n - 1] : H[i] + (H[i + 1] - H[i]) * f; } };
 }
 
-/* ---------- контрольні точки: де дорога повертає від 35° ---------- */
-export const CP_MIN = 35;
+/* ---------- контрольні точки: де дорога повертає від 35° ----------
+   (1.1.39) Переписано після рейсу Олексія Львовом (27.11). Лінія рейсу від сервера — це вузли карти: стоять густо (кожні 15–40 м)
+   і не ідеально рівно (±0,2–0,5 м убік). Раніше «поворот» шукали за миттєвою кривиною (на 20 м), і кожен такий вузол її давав:
+   ланцюжок вузлів зливав 90° перехрестя з усією вулицею за ним в один «довгий поворот траси» на пів кілометра й більше — жовта
+   точка стояла за 200 м від рогу, а наступний «поворот» починався на рівній вулиці за кілометри до справжнього вигину. Позначка
+   там стояла й чекала («Чекаю повороту»), а коли курс нарешті мінявся — стрибала.
+   Тепер:
+     1) різкі повороти (червоні): де курс за 50 м міняється на ≥ 40° — перехрестя, кільце, розвилка, крутий з'їзд;
+        кілька таких поспіль (до 60 м між ними) — одна складна точка (кільце, зигзаг);
+     2) затяжні (жовті): поза різкими, де курс за 120 м стабільно йде в один бік (від 0,0275 °/м, радіус до ~2 км) і набирає ≥ 35°;
+     3) межі кожної точки — там, де курс справді відходить від в'їзного й доходить до виїзного (а не де «ворухнувся» вузол),
+        тож позначка чекає біля самого повороту, а точка на карті стоїть на ньому. */
+export const CP_MIN = 35, CP_SHARP = 40;
 export function controlPoints(prof) {
-  const { step, n, H } = prof, curv = new Float32Array(n);
-  for (let k = 2; k < n - 2; k++) curv[k] = (H[k + 2] - H[k - 2]) / (4 * step);          // °/м
-  const segs = []; let cur = null;
-  for (let k = 0; k < n; k++) {
-    const on = Math.abs(curv[k]) > 0.025;                                                     // радіус менший ~2,3 км
-    if (on) { if (cur && (k - cur.k1) * step <= 60) cur.k1 = k; else { if (cur) segs.push(cur); cur = { k0: k, k1: k }; } }
-  }
-  if (cur) segs.push(cur);
-  const out = [];
-  for (const s of segs) {
-    const k0 = Math.max(0, s.k0 - 2), k1 = Math.min(n - 1, s.k1 + 2), h0 = H[k0];
+  const { step, n, H } = prof, at = k => H[k < 0 ? 0 : k > n - 1 ? n - 1 : k];
+  const W1 = Math.round(25 / step), W2 = Math.round(60 / step), GAP = Math.round(60 / step), PAD = Math.round(40 / step);
+  const med = (k0, k1) => { const a = []; for (let k = Math.max(0, k0); k <= Math.min(n - 1, k1); k++) a.push(H[k]); a.sort((x, y) => x - y); return a.length ? a[a.length >> 1] : 0; };
+  // Межі повороту в кандидаті [a, b]: курс на в'їзді h0 й виїзді h1 — медіани «полиць» перед ним і за ним (у межах [lo, hi]: сусідній
+  // поворот у полицю не потрапляє); далі звужуємо до місця, де курс справді відійшов від h0 і ще не дійшов до h1.
+  const trim = (a, b, sharp, lo = 0, hi = n - 1) => {
+    a = Math.max(lo, a); b = Math.min(hi, b);
+    const h0 = med(Math.max(lo, a - PAD), a), h1 = med(b, Math.min(hi, b + PAD)), net = h1 - h0, tau = Math.max(5, 0.12 * Math.abs(net));
+    let k0 = a, k1 = b;
+    while (k0 < b && !(Math.abs(H[k0] - h0) >= tau && Math.abs(at(k0 + 1) - h0) >= tau && Math.abs(at(k0 + 2) - h0) >= tau)) k0++;
+    while (k1 > k0 && !(Math.abs(H[k1] - h1) >= tau && Math.abs(at(k1 - 1) - h1) >= tau && Math.abs(at(k1 - 2) - h1) >= tau)) k1--;
+    k0 = Math.max(a, k0 - 2); k1 = Math.min(b, k1 + 2);
     let amp = 0; for (let k = k0; k <= k1; k++) amp = Math.max(amp, Math.abs(H[k] - h0));
-    const net = H[k1] - h0, len = (k1 - k0) * step;
-    if (Math.max(amp, Math.abs(net)) < CP_MIN) continue;
+    return { k0, k1, h0, h1, net, amp: Math.max(amp, Math.abs(net)), sharp };
+  };
+  // 1) різкі: «зерно» — де за 50 м курс міняється на ≥ 40°; від нього точка росте, поки поворот лишається крутим (≥ 20° за 50 м) —
+  //    так з'їзд радіусом 70–90 м (на межі «різкого») лишається ОДНІЄЮ точкою, а не ділиться навпіл, коли вузли лягли трохи нерівно
+  const S = k => at(k + W1) - at(k - W1), sharp = [];
+  { let cur = null;
+    for (let k = 0; k < n; k++) { if (Math.abs(S(k)) < CP_SHARP) continue; if (cur && k - cur.k1 <= GAP) cur.k1 = k; else { if (cur) sharp.push(cur); cur = { k0: k, k1: k }; } }
+    if (cur) sharp.push(cur); }
+  for (const r of sharp) { while (r.k0 > 0 && Math.abs(S(r.k0 - 1)) >= CP_SHARP / 2) r.k0--; while (r.k1 < n - 1 && Math.abs(S(r.k1 + 1)) >= CP_SHARP / 2) r.k1++; }
+  for (let i = sharp.length - 1; i > 0; i--) if (sharp[i].k0 - sharp[i - 1].k1 <= GAP) { sharp[i - 1].k1 = Math.max(sharp[i - 1].k1, sharp[i].k1); sharp.splice(i, 1); }
+  const found = sharp.map((r, i) => trim(r.k0 - W1 - 4, r.k1 + W1 + 4, true, i ? sharp[i - 1].k1 + W1 : 0, i + 1 < sharp.length ? sharp[i + 1].k0 - W1 : n - 1));
+  // 2) затяжні — лише між різкими: де курс за 120 м стабільно йде в один бік
+  const taken = new Uint8Array(n); for (const f of found) for (let k = Math.max(0, f.k0 - 2); k <= Math.min(n - 1, f.k1 + 2); k++) taken[k] = 1;
+  const T = k => at(k + W2) - at(k - W2), ARC = 0.0275 * 2 * W2 * step, arcs = [];
+  { let cur = null;
+    for (let k = 0; k < n; k++) {
+      if (taken[k]) { if (cur) arcs.push(cur); cur = null; continue; }
+      const v = T(k); if (Math.abs(v) < ARC) continue;
+      if (cur && k - cur.k1 <= GAP && Math.sign(v) === cur.s) cur.k1 = k; else { if (cur) arcs.push(cur); cur = { k0: k, k1: k, s: Math.sign(v) }; } }
+    if (cur) arcs.push(cur); }
+  for (const r of arcs) {
+    let lo = r.k0, hi = r.k1; while (lo > 0 && !taken[lo - 1]) lo--; while (hi < n - 1 && !taken[hi + 1]) hi++;     // вільний проміжок між різкими поворотами
+    const f = trim(r.k0 - W2, r.k1 + W2, false, lo, hi); if (f.k1 - f.k0 >= 2) found.push(f);
+  }
+  const out = [];
+  for (const f of found.sort((x, y) => x.k0 - y.k0)) {
+    if (Math.abs(f.net) < CP_MIN && f.amp < CP_MIN + 7) continue;                                     // розмах без підсумкового кута (зигзаг, кільце) — із запасом на нерівність вузлів
+    if (out.length && f.k0 * step <= out[out.length - 1].d1) continue;                                  // той самий поворот двічі не рахуємо
+    const net = f.net, amp = f.amp, len = (f.k1 - f.k0) * step;
     // sgn — у який бік повертає (0 — складна точка: кільце, зигзаг, де курс іде туди-сюди); H0/H1 — курс рейсу на в'їзді й виїзді
     const mono = amp <= Math.abs(net) + 15 && Math.abs(net) >= 25;
-    out.push({ d0: k0 * step, d1: k1 * step, d: Math.round((k0 + k1) / 2 * step), ang: Math.round(net), amp: Math.round(amp), len: Math.round(len),
-      cls: amp >= 60 && len <= 160 ? 'red' : 'yellow', sgn: mono ? Math.sign(net) : 0, H0: h0, H1: H[k1] });
+    out.push({ d0: f.k0 * step, d1: f.k1 * step, d: Math.round((f.k0 + f.k1) / 2 * step), ang: Math.round(net), amp: Math.round(amp), len: Math.round(len),
+      cls: f.sharp ? 'red' : 'yellow', sgn: mono ? Math.sign(net) : 0, H0: f.h0, H1: f.h1 });
   }
   return out;
 }
@@ -75,6 +114,12 @@ export const PF_DEFAULTS = {
   aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, accP: 4, accTol: 1.5, accTolK: 0.15, accTolMin: 0.4, accZ0: 1, accZ1: 1.5, accM: 0.15, accMed: 0.05, accMSig: 1.5, mLo: 0.82, mHi: 1.18, mWide: 1.7, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
   // «замок на повороті» (1.1.12): контрольну точку або відпрацьовано гіроскопом, або водій натиснув «Поворот» — інакше позначка чекає
   gate: true, gateLik: true, gMargin: 12, gTempoHi: 2.2, gTempoLo: 0.5, gSlowEnd: 0.02, gArc: false, gThrArc: 99,
+  // (1.1.39) СУВОРЕ ПРАВИЛО (Олексій, 27.11: «поки поворот не пройшли — не перестрибуємо; без підтвердження позначка далі не йде»).
+  // Контрольний поворот проходимо лише двома способами: телефон відчув цей поворот (гіроскоп) або водій торкнувся («Поворот», точка
+  // на карті, ±100). Усе, що раніше «само» пропускало поворот — телефон відчув уже наступний, вишки кажуть «ви далі», гіроскоп
+  // замовк, запасний пошук переставив позначку вперед, — тепер поворот НЕ проходить, а лише просить водія підтвердити (ask):
+  // кнопка «Поворот» блимає. Виняток один: у телефоні гіроскопа немає зовсім — тоді, як і раніше, за швидкістю.
+  gStrict: true,
 };
 // поріг «це поворот»: 35° (для пологих контрольних точок 35–47° — три чверті їхнього кута)
 const gThr = c => clamp(0.75 * Math.abs(c.ang), 26, CP_MIN);
@@ -144,7 +189,7 @@ export class RouteTracker {
     // Темп від точки до точки. Позначку довелося підтягнути вперед — водій їде швидше, ніж ми думали: у стільки ж разів і додаємо.
     // Позначка приїхала раніше й чекала (а фура при цьому їхала, не стояла на світлофорі) — трохи збавляємо, не більш як на 15% за раз:
     // приїхати до повороту зарано й почекати — не біда, а відстати й потім стрибати — гірше.
-    if ((by === 'gyro' || by === 'button') && a && a.sure && c.d0 - a.d >= 200) {
+    if (!info.late && (by === 'gyro' || by === 'button') && a && a.sure && c.d0 - a.d >= 200) {
       const used = this.mMed != null ? this.mMed : 1, from = info.from != null ? info.from : c.d0; let f = 1;
       let w = 0.8;
       if (from < c.d0 - 30) { f = clamp((c.d0 - a.d) / Math.max(from - a.d, 40), 1, 2.5); w = clamp((from - a.d) / 300, 0.25, 0.8); }   // коротка ділянка — обережніше
@@ -161,14 +206,33 @@ export class RouteTracker {
       if (mArc != null && mArc < 0.7 * used) { for (let i = 0; i < o.N; i++) if (this.rnd() < 0.85) this.m[i] = clamp(mArc * (1 + this.gauss() * 0.1), 0.08, 0.74); }
       else if (mArc != null && mArc < 1.4 * used) this.mMed = clamp(0.7 * used + 0.3 * mArc, o.gTempoLo, o.gTempoHi);
     }
-    this.legStop = 0;
-    this.ev.push({ type: 'pass', by, t, cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn }, jump: Math.round(info.jump || 0), waited: Math.round(info.waited || 0), tempo: this.mMed, hand: !!info.hand });
+    this.legStop = 0; this.ask = null;
+    this.ev.push({ type: 'pass', by, t, cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn }, jump: Math.round(info.jump || 0), waited: Math.round(info.waited || 0), tempo: this.mMed, hand: !!info.hand, late: !!info.late });
     { const yl = this.lastYaw(); this.baseA = yl && yl.a != null ? yl.a : null; this.baseUp = yl ? yl.u || null : null; }   // (1.1.34) цей поворот телефона вже враховано
     if (by === 'gyro' || by === 'button') (this.conf || (this.conf = new Set())).add(this.cps.indexOf(c));
     if (this.cps[this.cpi] === c) this.cpi++; else this.cpi = Math.max(this.cpi, this.cps.indexOf(c) + 1);
     this.anchor = { d: c.d1, t, sure: by === 'gyro' || by === 'button', sig: 20 }; this.eng = null; this.netAhead = 0;
   }
   takeEvents() { const e = this.ev; this.ev = []; return e; }
+  // куди фура доїхала б від d за dt секунд за планом рейсу й вивченим темпом (не далі за lim)
+  ahead(d, dt, lim = Infinity) {
+    const m = this.mMed != null ? this.mMed : 1; let x = d, left = Math.min(dt, 600);
+    while (left > 0 && x < lim) { const st = Math.min(left, 2); x += Math.max(this.sp.at(this.sp.plan, x) * m, 1) * st; left -= st; }
+    return Math.min(x, lim, this.idx.total);
+  }
+  // (1.1.39) Схоже, поворот уже пройдено, але підтвердження немає: why — 'next' (телефон відчув поворот, що пасує до НАСТУПНОЇ точки),
+  // 'turn' (відчув поворот, якого тут на рейсі немає), 'net' (вишки кажуть, що фура вже далі). Позначка лишається, де була, —
+  // кнопка «Поворот» блимає й чекає на водія.
+  suspect(t, why, ang = 0) {
+    const c = this.cps[this.cpi]; if (!c) return;
+    if (this.ask && this.ask.d === c.d && t - this.ask.t0 < 120) {
+      this.ask.t = t; if (Math.abs(ang) > Math.abs(this.ask.ang)) this.ask.ang = Math.round(ang);
+      if (why === 'next' && this.ask.why !== 'next') { this.ask.why = 'next'; this.ask.t0 = t; }   // тепер знаємо більше: це саме наступна точка
+      return;
+    }
+    this.ask = { t0: t, t, why, ang: Math.round(ang), d: c.d };
+    this.ev.push({ type: 'ask', why, t, ang: Math.round(ang), cp: { d: c.d, d1: c.d1, ang: c.ang, cls: c.cls, sgn: c.sgn } });
+  }
   // (1.1.34) Повертає в історію гіроскопа поворот, відкинутий після моменту t0 як «телефон у руках» (y і c — без відкинутого,
   // a — з ним): далі замок, пошук і відбір частинок бачать його так, наче його й не відкидали. Повертає, скільки градусів повернуто.
   unhandle(t0) {
@@ -186,13 +250,28 @@ export class RouteTracker {
   passNext(t, i = this.cpi) {
     const c = this.cps[i]; if (!c || !this.on) return null;
     this.undo = { d: this.est.d, cpi: this.cpi, off: this.off, anchor: this.anchor, t };
-    const from = this.est.d, jump = c.d1 + 8 - from, wait = this.g.state === 'wait', waited = wait ? t - this.g.since : 0;
-    this.place(c.d1 + 8, 10, t, Math.min(Math.max(this.est.v, 3), this.sp.at(this.sp.cap, c.d1 + 8), 8));
-    this.passCp('button', t, c, { jump, waited, from, tArr: wait ? this.g.since : null });
-    this.cpi = i + 1;                                          // (1.1.34) поворот, вибраний на карті, може бути й позаду
+    const from = this.est.d, wait = this.g.state === 'wait', waited = wait ? t - this.g.since : 0;
+    // (1.1.39) Кнопка блимала «був?»: водій підтверджує поворот заднім числом — фура пройшла його раніше і відтоді їхала далі.
+    //   'next' — телефон тоді відчув поворот НАСТУПНОЇ точки: одним натиском зараховано обидві (цю — водій, наступну — датчик);
+    //   'turn' — відчув поворот, якого на рейсі тут немає: це й був цей поворот;  'net' — коли саме, не знаємо.
+    // Позначку ставимо туди, куди фура доїхала б відтоді за планом рейсу (але не далі за наступний контрольний поворот).
+    const ak = i === this.cpi && this.ask && this.ask.d === c.d && t - this.ask.t < 90 ? this.ask : null;
+    const c2 = ak && ak.why === 'next' ? this.cps[i + 1] || null : null, last = c2 || c, nx = this.cps[i + (c2 ? 2 : 1)] || null;
+    let to = last.d1 + 8, sig = 10;
+    if (ak && ak.why !== 'net') {
+      const lim = nx ? Math.max(to, nx.d0 - 15) : this.idx.total;
+      to = this.ahead(to, Math.max(0, t - ak.t) + 5, lim);      // прохання з'являється секунд через п'ять після того, як телефон заспокоївся
+      sig = clamp(10 + 0.25 * (to - last.d1 - 8), 10, 250);
+    }
+    const jump = to - from;
+    this.place(to, sig, t, ak ? Math.min(Math.max(this.sp.at(this.sp.plan, to) * (this.mMed != null ? this.mMed : 1), 3), this.vmax) : Math.min(Math.max(this.est.v, 3), this.sp.at(this.sp.cap, c.d1 + 8), 8));
+    this.passCp('button', t, c, { jump: c2 ? c.d1 + 8 - from : jump, waited, from, tArr: wait ? this.g.since : null, late: !!ak });
+    if (c2) this.passCp('gyro', t, c2, { jump: to - c.d1 - 8, late: true });
+    this.cpi = i + (c2 ? 2 : 1);                               // (1.1.34) поворот, вибраний на карті, може бути й позаду
+    if (ak) this.anchor = { d: to, t, sure: false, sig };
     const y = this.lastYaw(); if (y) { this.off = y.c - this.prof.at(this.est.d); this.align = 'ok'; }
     this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
-    return c;
+    return Object.assign({}, last, { both: !!c2, late: !!ak, first: c });
   }
   // (1.1.34) Водій торкнувся контрольного повороту на карті: «я тут». Це може бути не найближчий поворот — і далі попереду,
   // і вже позаду. Гіроскоп за останні 25 с відчув саме такий поворот — фура вже повернула: ставимо одразу за ним, як кнопка
@@ -203,7 +282,7 @@ export class RouteTracker {
     const y1 = this.lastYaw(), y0 = this.yaw.find(y => y.t >= t - 25) || null, dy = y1 && y0 && y1 !== y0 ? y1.c - y0.c : 0;
     const turned = c.sgn ? Math.sign(dy) === c.sgn && Math.abs(dy) >= Math.max(25, 0.6 * Math.abs(c.ang)) : Math.abs(dy - c.ang) <= 40 && Math.abs(dy) >= 25;
     if (turned) { const r = this.passNext(t, i); return r ? { cp: r, after: true } : null; }
-    this.undo = { d: this.est.d, cpi: this.cpi, off: this.off, anchor: this.anchor, t };
+    this.undo = { d: this.est.d, cpi: this.cpi, off: this.off, anchor: this.anchor, t }; this.ask = null;
     // як ↑100/↓100: уся хмара (з історією) зсувається; курс прив'язується до дороги перед поворотом — фура саме там
     const d = Math.max(0, c.d0 - 15);
     this.shift(d - this.est.d, 12);
@@ -232,6 +311,7 @@ export class RouteTracker {
   // hint — від датчиків руху телефона (60 разів на секунду): { handled } — телефон цієї секунди крутили в руках
   // (нахил відносно землі змінився), тож його «поворот» — не поворот фури.
   addYaw(t, raw, still, hint = null) {
+    this.hasGyro = true;
     const last = this.yaw[this.yaw.length - 1];
     if (this.o.gate) {
       // Замок: секунду, коли телефон брали в руки, просто викидаємо (поворот за неї = 0), а не глушимо гіроскоп на хвилину
@@ -307,6 +387,15 @@ export class RouteTracker {
     const alive = !!y && t - y.t < 3.5;
     G.alive = alive; G.handled = alive && t <= this.handledUntil;
     if (moving === false) this.legStop = (this.legStop || 0) + dt;                             // скільки стояли на цій ділянці (світлофор)
+    if (!alive && o.gStrict && this.hasGyro) {
+      // (1.1.39) гіроскоп у телефоні є, але зараз мовчить (служба не встигла, датчик заснув) — підтвердити поворот нічим:
+      // позначка доїжджає до нього й чекає; за швидкістю повороти більше не проходимо
+      const c = this.cps[this.cpi] || null;
+      this.eng = null; G.cp = c; G.prog = 0; G.dist = c ? Math.max(0, c.d0 - e) : null; G.ask = null;
+      if (c) { hi = c.d0; for (let d = c.d0; d <= c.d1; d += 2) { hi = d; if (Math.abs(this.prof.at(d) - c.H0) >= o.gMargin) break; } }
+      const st = c && e >= hi - 4 ? 'wait' : 'go'; if (st !== G.state) { G.state = st; G.since = t; }
+      return { lo, hi, done, vt: c ? c.vt : undefined };
+    }
     if (!alive) {
       // гіроскопа немає — повороти проходимо за швидкістю, як звичайний розрахунок
       while (this.cpi < this.cps.length && this.cps[this.cpi].d1 < e - 5) this.passCp('auto', t);
@@ -318,7 +407,7 @@ export class RouteTracker {
     // запасний пошук переставив позначку за поворот (або назад) — замок іде за нею
     if (!this.eng) {
       let moved = false;
-      while (this.cpi < this.cps.length && this.cps[this.cpi].d1 < e - 60) { this.passCp('skip', t); moved = true; }
+      if (!o.gStrict) while (this.cpi < this.cps.length && this.cps[this.cpi].d1 < e - 60) { this.passCp('skip', t); moved = true; }
       while (this.cpi > 0 && e < this.cps[this.cpi - 1].d0 - 60) { this.cpi--; moved = true; }
       if (moved) { this.off = y.c - H(e); this.base = y.c; }
     }
@@ -368,7 +457,8 @@ export class RouteTracker {
     if (!this.eng && !G.handled) {
       const c2 = this.cps[this.cpi + 1];
       if (c2 && c2.sgn && c.sgn && c2.sgn !== c.sgn && c2.sgn * rot >= gThr(c2) && c2.d0 - c.d1 <= 3000 && this.reachable(c2, t)) {
-        this.off = y.c - c2.H0 - rot; this.passCp('skip', t, c); c = c2;
+        if (o.gStrict) this.suspect(t, 'next', rot);                                         // не перестрибуємо: просимо водія підтвердити
+        else { this.off = y.c - c2.H0 - rot; this.passCp('skip', t, c); c = c2; }
       }
     }
     const at = e >= c.d0 - 30, thr = gThr(c), calm4 = (() => { const v = back(4); return v != null && v <= 2.5; })();
@@ -392,13 +482,26 @@ export class RouteTracker {
       if (this.eng) {
         lo = this.headD(c, g - 5); hi = this.headD(c, g + o.gMargin); if (hi >= c.d1) hi = Infinity;
         const ended = (calm4 && t - this.eng.t >= 3) || t - this.eng.t > 90;
-        if (g >= A - 12 || (ended && g >= Math.max(thr, 0.6 * A))) { lo = c.d1; hi = Infinity; done = { c, calm: calm4 }; }
+        // (1.1.39) Затяжна дуга: позначка вже йде нею разом із курсом телефона (це й є підтвердження датчиком).
+        //   • Курс на кілька секунд завмер (перестроювання, пряма вставка, затор посеред дуги), а повернули ще мало — фура все одно
+        //     на дузі: тримаємо позначку там, де курс рейсу збігається з курсом телефона, і чекаємо далі. Раніше тут спрацьовувало
+        //     «поворот закінчився, кут замалий»: позначку кидало назад на в'їзд, і решти дуги вже не вистачало, щоб зарахувати її вдруге.
+        //   • Повернули вже понад 0,6 кута й курс завмер — раніше позначка одразу стрибала в кінець дуги (на трасі це 200–400 м уперед,
+        //     хоч фура ще посеред неї). Тепер шлагбаум відкрито (free): позначка доїжджає дугу сама, за швидкістю, без стрибка.
+        //   • Скидаємо, лише коли курс повернувся до в'їзного (то була не дуга).
+        const long = o.gStrict && c.len > 200, onArc = long && g >= 0.5 * thr;
+        if (long && ended && g >= Math.max(thr, 0.6 * A)) this.eng.free = true;
+        if (this.eng.free) hi = Infinity;
+        if (g >= A - 12 || (!long && ended && g >= Math.max(thr, 0.6 * A))) { lo = c.d1; hi = Infinity; done = { c, calm: calm4 }; }
+        else if (this.eng.free && e >= c.d1 - 5) done = { c, calm: calm4 };
+        else if (ended && onArc) { /* лишаємось на дузі: межі lo/hi — за курсом телефона */ }
         else if (ended) {
           // телефон повернув і заспокоївся, але це явно не цей поворот (кут замалий). Якщо кут пасує до наступної точки — це вона
           // (цю фура пройшла непомітно); якщо ні — хибна тривога (об'їзд ями, заїзд на АЗС): повертаємо позначку, де була.
           const Rs = c.sgn * g, c2 = this.cps[this.cpi + 1];
-          if (fit(c2, Rs) && c2.d0 - c.d1 <= 3000 && this.reachable(c2, t)) { lo = c2.d1; hi = Infinity; done = { c: c2, skip: c, calm: true }; }
-          else { if (this.eng.far) restore = Math.min(c.d0 - 5, this.eng.from + this.eng.v0 * (t - this.eng.t)); this.eng = null; this.off = y.c - c.H0; this.base = y.c; lo = -Infinity; hi = this.headD(c, o.gMargin); }
+          if (!o.gStrict && fit(c2, Rs) && c2.d0 - c.d1 <= 3000 && this.reachable(c2, t)) { lo = c2.d1; hi = Infinity; done = { c: c2, skip: c, calm: true }; }
+          else {
+            if (o.gStrict && fit(c2, Rs) && c2.d0 - c.d1 <= 3000) this.suspect(t, 'next', Rs); if (this.eng.far) restore = Math.min(c.d0 - 5, this.eng.from + this.eng.v0 * (t - this.eng.t)); this.eng = null; this.off = y.c - c.H0; this.base = y.c; lo = -Infinity; hi = this.headD(c, o.gMargin); }
         }
       } else hi = this.headD(c, Math.min(Math.max(0, g, gr) + o.gMargin, Math.max(thr, o.gMargin)));
       G.prog = Math.round(this.eng ? g : Math.max(g, gr));
@@ -412,6 +515,7 @@ export class RouteTracker {
       G.prog = Math.round(au);
     }
     G.cp = c; G.dist = Math.max(0, c.d0 - e);
+    G.ask = this.ask && this.ask.d === c.d && t - this.ask.t < 90 ? this.ask.why : null;      // «схоже, цей поворот уже позаду — підтвердіть»
     const st = this.eng ? 'turn' : (e >= hi - 4 ? 'wait' : 'go');
     if (st !== G.state) { G.state = st; G.since = t; }
     return { lo, hi, done, restore, vt: (done ? done.c : c).vt };
@@ -489,7 +593,11 @@ export class RouteTracker {
       if (B) {
         // шлагбаум: хто під'їхав до непідтвердженого повороту — чекає на в'їзді. Гіпотези, що вже за ним (запасні, «а раптом фура далі»),
         // не чіпаємо — їх відсіє чи підтвердить подальша звірка.
-        if (pd <= B.hi + 6 && nd > B.hi) { nd = B.hi - this.rnd() * 3; v = Math.min(v, 2.5); }
+        if (nd > B.hi && (o.gStrict || pd <= B.hi + 6)) {
+          // (1.1.39) суворо: за непідтверджений поворот не заходить ЖОДНА гіпотеза — і ті, що опинились далі (запасні, від вишок), стають на в'їзд
+          const to = B.hi - this.rnd() * 3, sh = to - nd; nd = to; v = Math.min(v, 2.5);
+          if (o.gStrict && sh < -40) { const Hn = o.hist; for (let h = 0; h < Hn; h++) this.hd[i * Hn + h] = Math.max(0, this.hd[i * Hn + h] + sh); }
+        }
         // телефон уже повернув — позначка в повороті, і їде так, як там їздять: різке перехрестя — повільно, дуга траси — з ходу
         if (nd < B.lo) {
           const to = Math.min(total, B.lo + this.rnd() * 4), sh = to - nd; nd = to;
@@ -527,6 +635,7 @@ export class RouteTracker {
     }
     const lost = this.lbar != null && this.lbar < Math.pow(o.lostL, o.alpha * used || 1);
     this.resampleIfNeeded(); this.injectNear(lost ? o.lostInject : o.inject); this.estimate();
+    if (B && o.gStrict && !B.done && this.est.d > B.hi) this.est.d = B.hi;                    // і сама позначка — не далі в'їзду
     if (B) {
       if (B.restore != null) this.place(B.restore, 25, t);
       if (B.done) {
@@ -582,7 +691,12 @@ export class RouteTracker {
     // позначка чекає на повороті, а вишки тричі поспіль кажуть «фура вже далеко за ним» — поворот пройдено непомітно
     if (this.o.gate && t != null) {
       const c = this.cps[this.cpi];
-      if (c && this.g.state === 'wait' && z - Math.max(acc, 500) > c.d1) { if (++this.netAhead >= 3) { this.passCp('net', t, c); const y = this.lastYaw(); if (y) this.off = y.c - c.H1; this.g.state = 'go'; this.g.since = t; } }
+      if (c && this.g.state === 'wait' && z - Math.max(acc, 500) > c.d1) {
+        if (++this.netAhead >= 3) {
+          if (this.o.gStrict) this.suspect(t, 'net');                                        // вишки — не підтвердження: просимо водія
+          else { this.passCp('net', t, c); const y = this.lastYaw(); if (y) this.off = y.c - c.H1; this.g.state = 'go'; this.g.since = t; }
+        }
+      }
       else this.netAhead = 0;
     }
   }
@@ -607,7 +721,7 @@ export class RouteTracker {
     const c = this.est.d + dd, Hn = this.o.hist;
     for (let i = 0; i < this.o.N; i++) { const nd = clamp(c + this.gauss() * sig, 0, this.idx.total), s = nd - this.d[i]; this.d[i] = nd; for (let h = 0; h < Hn; h++) this.hd[i * Hn + h] += s; }
     this.w.fill(1 / this.o.N); this.estimate();
-    if (this.o.gate) { this.regate(this.est.d); const y = this.lastYaw(); this.off = y ? y.c - this.prof.at(this.est.d) : null; this.anchor = { d: this.est.d, t: y ? y.t : 0, sure: false, sig }; }
+    if (this.o.gate) { this.ask = null; this.regate(this.est.d); const y = this.lastYaw(); this.off = y ? y.c - this.prof.at(this.est.d) : null; this.anchor = { d: this.est.d, t: y ? y.t : 0, sure: false, sig }; }
   }
   // оцінка: найщільніше місце хмари (не середнє: якщо гіпотез дві — не ставимо позначку посередині, де фури точно немає)
   estimate() {
@@ -654,7 +768,35 @@ export class RouteTracker {
     if (globalThis.__pfLog) globalThis.__pfLog({ t, dy: Math.round(dy), ago: Math.round(ago), sup: +sup.toFixed(3), j0, e: Math.round(this.est.d), cpi: this.cpi });
     if (sup >= o.supportMin) return { sup, seeded: 0 };
     const W = clamp(4 * this.est.sig + 2500, 3000, 15000), e = this.est.d;
-    const cands = this.cps.filter(c => Math.sign(c.ang || c.amp) === Math.sign(dy) && Math.abs(Math.abs(c.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy)) && Math.abs(c.d - e) < W)
+    // (1.1.39) суворо: уперед через непідтверджений поворот запасний пошук не переставляє — лише назад (позначка забігла)
+    //            або на той поворот, на який позначка й так чекає; відчутий поворот без пари на рейсі — прохання підтвердити
+    const gateI = o.gate && o.gStrict ? this.cpi : Infinity;
+    if (o.gate && o.gStrict && this.cps[this.cpi] && !this.eng) {
+      const c2 = this.cps[this.cpi + 1], c1 = this.cps[this.cpi];
+      const fits = x => !!x && Math.sign(x.ang || x.amp) === Math.sign(dy) && Math.abs(Math.abs(x.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy));
+      // Не питаємо, коли відчутий поворот нічого не каже про той, на який чекаємо:
+      //  • його відчули ДО того, як позначку поставили сюди (водій торкнувся повороту на карті, натиснув «Поворот», «Я тут»);
+      //  • це поворот, який позначка щойно лишила позаду (GPS зник на самому перехресті — фура ще повертала, а позначка вже за ним).
+      const pv = this.cps[this.cpi - 1], justBehind = fits(pv) && e - pv.d1 <= 300 + this.vmax * ago;
+      //  • фура фізично ще не могла доїхати до свого повороту (до нього кілометри, а від останньої звірки минуло мало):
+      //    вигин дороги чи заїзд на АЗС не означає, що він уже позаду.
+      const near = c1.d0 - e <= Math.max(300, 2 * this.est.sig + 150), can = near || this.reachable(c1, t);
+      const kind = fits(c2) && !fits(c1) && c2.d0 - c1.d1 <= 3000 && (near || this.reachable(c2, t)) ? 'next' : can ? 'turn' : null;
+      const fresh = !this.anchor || t - ago > this.anchor.t + 2;
+      if (fits(c1) && near && !justBehind && fresh) {
+        // Телефон відчув САМЕ ТОЙ поворот, на який чекає позначка (той самий бік і кут), і позначка біля нього. Замок його не
+        // зарахував, бо кут набігав надто повільно (затор на дузі) чи з перервою, — але це і є підтвердження датчиком.
+        // Поворот скінчився секунд шість тому (стільки курс має бути спокійним, щоб його «відчути» цілим).
+        const nx = this.cps[this.cpi + 1], to = this.ahead(c1.d1 + 8, 6, nx ? Math.max(c1.d1 + 8, nx.d0 - 15) : this.idx.total);
+        this.place(to, clamp(20 + 0.25 * (to - c1.d1), 20, 150), t);
+        this.passCp('gyro', t, c1, { jump: Math.max(0, to - e), late: true });
+        const y = this.lastYaw(); if (y) { this.off = y.c - this.prof.at(this.est.d); this.align = 'ok'; }
+        this.g = { state: 'go', cp: this.cps[this.cpi] || null, prog: 0, since: t, handled: false };
+        return { sup, seeded: 0, passed: true };
+      }
+      if (kind && !justBehind && fresh) this.suspect(t, kind, dy);
+    }
+    const cands = this.cps.filter((c, ci) => ci <= gateI && Math.sign(c.ang || c.amp) === Math.sign(dy) && Math.abs(Math.abs(c.ang) - Math.abs(dy)) < Math.max(25, 0.45 * Math.abs(dy)) && Math.abs(c.d - e) < W)
       .map(c => ({ c, p: Math.exp(-((c.d - e) ** 2) / (2 * (o.gate ? clamp(2 * this.est.sig + 150, 250, W / 2) : W / 2) ** 2)) }))
       .filter(x => !o.gate || x.p > 0.02).sort((a, b) => b.p - a.p).slice(0, 6);     // із замком — лише найближчі схожі повороти: у місті всі перехрестя «на одне лице»
     if (!cands.length) return { sup, seeded: 0 };

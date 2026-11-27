@@ -270,15 +270,17 @@ let turnKey = '', waitHintFor = null, waitVoiced = false;
 function turnBtnSync(lost) {
   const b = $('bTurn'), c = lost ? pos.cp : null;
   if (!c) { if (!b.hidden) { b.hidden = true; turnKey = ''; $('nudge').classList.remove('has-turn'); document.body.classList.remove('turn-on'); requestAnimationFrame(layoutVars); } if (!lost) { waitHintFor = null; waitVoiced = false; } return; }
-  const label = c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
-  const key = [c.sgn, c.cls, c.state, label, c.handled].join('|');
+  // (1.1.39) ask — телефон відчув поворот, але не цей (чи вишки кажуть «ви далі»): позначка сама далі не йде, кнопка блимає — «був поворот?»
+  const label = c.ask && c.state !== 'turn' ? t('turnAsk') : c.state === 'wait' ? t('turnWait') : c.state === 'turn' ? t('turnNow') : fmtDist(c.dist);
+  const key = [c.sgn, c.cls, c.state, label, c.handled, c.ask].join('|');
   if (key !== turnKey) {
     turnKey = key;
-    b.className = 'turn-btn ' + c.cls + ' st-' + c.state + (c.handled ? ' hand' : '');
+    b.className = 'turn-btn ' + c.cls + ' st-' + c.state + (c.handled ? ' hand' : '') + (c.ask && c.state !== 'turn' ? ' ask' : '');
     b.innerHTML = TURN_IC[c.sgn > 0 ? 'r' : c.sgn < 0 ? 'l' : 'o'] + `<span>${esc(label)}</span>`;
   }
   if (b.hidden) { b.hidden = false; $('nudge').classList.add('has-turn'); document.body.classList.add('turn-on'); requestAnimationFrame(layoutVars); }
   // позначка стоїть на повороті понад 25 с, а машина (за трясінням) їде — підкажемо про кнопку: раз на поворот, голосом — раз за втрату GPS
+  if (c.ask) waitHintFor = c.d;                               // (1.1.39) про цей поворот уже питаємо («був?») — другу підказку поруч не показуємо
   if (c.state === 'wait' && Date.now() - c.since > 25000 && pos.spd > 0.5 && waitHintFor !== c.d) {
     waitHintFor = c.d; toast(t('turnWaitHint', cpWhat(c)), 'yellow', 9000);
     if (!waitVoiced) { waitVoiced = true; say(t('voiceTurnWait')); }
@@ -865,7 +867,7 @@ function altCardsHtml(force = false) {
     const red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
     const ky = kyivOnRoute(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000);
     const softCard = truck && ['alt', 'only', 'chosen'].includes(r.soft);
-    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && rs.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : '', !i && r.time > best && vil.some(Boolean) ? `<i class="good">${t('altMain')}</i>` : ''].join('');
+    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && rs.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : '', !i && (r.gate && r.gate.t ? rs.length > 1 && !(r.time === best && !vil[i]) : r.time > best && vil.some(Boolean)) ? `<i class="good">${t('altMain')}</i>` : ''].join('');
     return `<button class="alt${i === plan.sel ? ' on' : ''}${softCard ? ' soft' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
   }).join('') + `</div>`;
 }
@@ -1246,6 +1248,13 @@ function pickClick(e) {
   else if (k === 'x') pickCancel();
 }
 function placeLine(p) { return p ? esc(p.label) + (p.sub ? ` <span class="muted">${esc(p.sub)}</span>` : '') : ''; }
+// (1.1.39) Той самий рейс у Google Maps (офіційна адреса «Maps URLs»: старт, фініш і точки «через» координатами) — щоб одним дотиком
+// звірити, чи тим самим шляхом веде Google. Самого маршруту Google нам не віддає (і правила Google не дозволяють малювати його
+// на чужій карті) — порівнюємо очима: дороги на картці (М-06, Н-02…), кілометри й час.
+export function gmapsDirUrl(tr) {
+  const p = x => (+x.lat).toFixed(6) + ',' + (+x.lon).toFixed(6), vias = viasOf(tr).filter(v => v && v.lat != null);
+  return 'https://www.google.com/maps/dir/?api=1&origin=' + p(tr.a) + '&destination=' + p(tr.b) + (vias.length ? '&waypoints=' + encodeURIComponent(vias.slice(0, 9).map(p).join('|')) : '') + '&travelmode=driving';
+}
 function planSumHtml() {
   const tr = plan.trip, r = tr.route, alt = r.alt;
   const warn = alt ? `<div class="card" style="margin-top:8px;border:2px solid var(--yellow)"><div style="font-weight:600">${t('detourTitle', fmtDist(r.dist), fmtDist(alt.dist))}</div>
@@ -1256,6 +1265,7 @@ function planSumHtml() {
     : softWarnHtml(r, 'card softcard') || (r.snapped ? `<div class="muted" style="margin-top:8px">${t('truckSnapped')}</div>` : '');
   return `<div class="sec">${t('routeReady')}${plan.routes.length > 1 ? ' · ' + t('altCount', plan.routes.length) : ''}</div>${altCardsHtml()}<div class="card"><div style="font-weight:600">${placeLine(tr.a)}</div><div style="font-weight:600;margin:2px 0 10px">→ ${placeLine(tr.b)}</div>${summaryHtml(tr)}${offlineHtml()}</div>${warn}
     <div class="btns"><button class="btn dark" data-act="go">${ICON.go}${t('go')}</button><button class="btn" data-act="save">${t('saveLater')}</button></div>
+    <div class="gm-cmp"><button class="btn sm" data-act="gmaps">${t('gmCompare')}</button><span class="muted">${t('gmCompareHint')}</span></div>
     ${truckHtml(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000)}`;
 }
 function showSugg(k, list, head) {
@@ -1367,6 +1377,7 @@ function tripClicks(e) {
     previewRoute(alt.coords, alt); hud(); refresh('trip'); loadRegions(tr);
   }
   else if (d.act === 'save' && plan.trip) saveCurrentTrip();
+  else if (d.act === 'gmaps' && plan.trip) P.openUrl(gmapsDirUrl(plan.trip));        // (1.1.39) той самий рейс у Google Maps — звірити шлях
   else if (d.act === 'saveTrip') saveTripTap();
   else if (d.act === 'archive') openPanel('archive');
   else if (d.act === 'favs') openPanel('favs');
@@ -1874,9 +1885,18 @@ export function initUI() {
   bus.on('cpPass', ev => {
     if (pos.mode !== 'dr') return;
     if (ev.by === 'gyro' || ev.by === 'button') chime('pass');
-    if (ev.by !== 'gyro' || (ev.jump < 60 && ev.waited < 10)) return;
+    if (ev.by !== 'gyro' || ev.late || (ev.jump < 60 && ev.waited < 10)) return;      // late — зараховано разом із дотиком до «був?»: про це вже каже сповіщення кнопки
     const now = Date.now(); if (now - cpToastT < 20000) return; cpToastT = now;
     toast(t(ev.jump >= 60 ? 'turnPassJump' : 'turnPassWait', ev.jump >= 60 ? fmtDist(ev.jump) : fmtMS(ev.waited)) + (ev.next ? ' ' + t('turnMatchNext', fmtDist(ev.next.dist)) : ''), 'green', 6000);
+  });
+  // (1.1.39) телефон відчув поворот, але не той, на який чекає позначка (або вишки кажуть, що фура вже далі): позначка НЕ перестрибує —
+  // кнопка «Поворот» блимає, а тут пояснюємо, що зробити. Раз на поворот; голосом — не частіше ніж раз на 3 хв.
+  let askFor = null, askVoiceT = 0;
+  bus.on('cpAsk', ev => {
+    if (pos.mode !== 'dr' || !ev || !ev.cp || askFor === ev.cp.d) return;
+    askFor = ev.cp.d; P.vibrate(60);
+    toast(t('turnAsk_' + (ev.why === 'net' ? 'net' : ev.why === 'next' ? 'next' : 'turn'), cpWhat(ev.cp)), 'yellow', 10000);
+    const now = Date.now(); if (now - askVoiceT > 180000) { askVoiceT = now; say(t('voiceTurnAsk')); }
   });
   // (1.1.34) без GPS: дотик до контрольного повороту на карті — позначка переходить на нього (скасувати — дотиком до сповіщення)
   bus.on('cpTap', d => {
@@ -1887,7 +1907,7 @@ export function initUI() {
   $('bTurn').onclick = () => {
     const c = passTurn(); if (!c) return;
     P.vibrate(40);
-    toast(t('turnPassBtn', cpWhat(c)), 'green', 8000, () => { if (undoTurn()) toast(t('turnUndone'), '', 4000); });
+    toast(t(c.both ? 'turnPassBoth' : c.late ? 'turnPassLate' : 'turnPassBtn', cpWhat(c)), 'green', c.both ? 10000 : 8000, () => { if (undoTurn()) toast(t('turnUndone'), '', 4000); });
   };
   initSfx();
   let tmToastT = 0, tmVoiceT = 0;

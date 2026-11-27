@@ -183,6 +183,11 @@ export function run(name, o = {}) {
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return s * Math.SQRT2; };
   const gpsUntil = o.gpsSec != null ? o.gpsSec : 90, bias = (o.bias != null ? o.bias : 0.6) / 60;   // дрейф гіроскопа, °/с
   const errs = [], log = []; let tapDone = false, tapPre = false, tapLog = null;
+  // (1.1.39) Водій на стенді. Позначка сама повороту не перестрибує: кнопка «Поворот» блимає «був?» — і водій за drv секунд
+  // (типово 8; BENCH_DRIVER=off — не відповідає взагалі) торкається її, ЯКЩО фура справді вже за цим поворотом. Просять даремно
+  // (фура ще перед поворотом) — водій не торкається. Більше водій нічого не робить: кнопку «сам» не тисне.
+  const drvEnv = process.env.BENCH_DRIVER, drv = o.driver != null ? o.driver : drvEnv === 'off' ? null : drvEnv ? +drvEnv : 8;
+  const askS = { n: 0, good: 0, bad: 0, taps: 0, both: 0 }; let askAt = null, askCp = null;
   let Rg = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   let yawOff = 0, wig = null, lastNet = -999, grab = null, grabNext = gpsUntil + 40 + 60 * Math.abs(rnd());
   // (1.1.34) підказка датчиків — ще й нахил телефона: у руці він інший (30°), а потім телефон стоїть у тримачі, як стояв (найгірший випадок: тримач повернули)
@@ -225,6 +230,11 @@ export function run(name, o = {}) {
       if (m && s.d >= at) { tapDone = true; const rd0 = Math.round(nav.pos.rd); const mid = (m.d0 + m.d1) / 2, cp = nav.routeCps().slice().sort((a, b) => Math.abs(a.d - mid) - Math.abs(b.d - mid))[0]; const r = cp && nav.jumpToCp(cp.d); tapLog = { t: s.t, truth: Math.round(s.d), before: rd0, cp: cp && [Math.round(cp.d0), Math.round(cp.d1), cp.ang, cp.sgn], r: r && { after: r.after }, nowRd: Math.round(nav.pos.rd) }; } }
     nav.benchTick();
     const P = nav.pos;
+    { const cv = P.mode === 'dr' ? P.cp : null, cpNow = cv && nav.routeCps().find(c => Math.abs(c.d - cv.d) < 1);
+      if (cv && cv.ask && cpNow) {
+        if (askCp !== cv.d) { askCp = cv.d; askAt = s.t; askS.n++; if (s.d > cpNow.d1) askS.good++; else askS.bad++; }
+        if (drv != null && s.t - askAt >= drv && s.d > cpNow.d1 + 5) { const r = nav.passTurn(); if (r) { askS.taps++; if (r.both) askS.both++; } askAt = Infinity; }
+      } else if (!cv || !cv.ask) { if (askAt === Infinity || !cv) askCp = null; } }
     if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, acc: globalThis.__accTrace ? nav.accelState() : undefined, grab: !!grab, sig: st ? st.sig : null, tr: st ? st.trust : null, g: st && st.gate ? `${st.cpi}:${st.gate.state || '-'}:${st.gate.prog}:${st.gate.ang}${st.gate.handled ? ':H' : ''}` : '' }); }
   }
   const ab = errs.map(x => Math.abs(x.e)).sort((a, b) => a - b), q = p => ab.length ? ab[Math.min(ab.length - 1, Math.floor(p * ab.length))] : NaN;
@@ -232,7 +242,7 @@ export function run(name, o = {}) {
   const cps = road.marks.filter(m => m.ang != null && Math.abs(m.ang) >= 35);
   const after = cps.map(m => { const e = errs.find(x => x.d >= m.d1 + 150); return e ? { name: m.name || (m.ang + '°'), e: Math.round(e.e) } : null; }).filter(Boolean);
   return { name, marks: road.marks.filter(m => m.ang != null).map(m => ({ d0: Math.round(m.d0), d1: Math.round(m.d1), ang: m.ang })), n: errs.length, mean: Math.round(ab.reduce((a, b) => a + b, 0) / (ab.length || 1)), p50: Math.round(q(0.5)), p95: Math.round(q(0.95)), max: Math.round(ab[ab.length - 1] || 0),
-    end: errs.length ? Math.round(errs[errs.length - 1].e) : null, after, tap: tapLog && { ...tapLog, e: [5, 20, 60, 120].map(k => { const x = errs.find(z => z.t >= tapLog.t + k); return x ? Math.round(x.e) : null; }) }, km: Math.round(idx.total / 100) / 10, min: Math.round(tr.out[tr.out.length - 1].t / 6) / 10, errs };
+    end: errs.length ? Math.round(errs[errs.length - 1].e) : null, after, tap: tapLog && { ...tapLog, e: [5, 20, 60, 120].map(k => { const x = errs.find(z => z.t >= tapLog.t + k); return x ? Math.round(x.e) : null; }) }, km: Math.round(idx.total / 100) / 10, min: Math.round(tr.out[tr.out.length - 1].t / 6) / 10, asks: askS, errs };
 }
 export const SCEN = {
   'mix': {}, 'mix:зсув+600': { road: 'mix', place: 600 }, 'mix:зсув−500': { road: 'mix', place: -500 }, 'mix:затор': { road: 'mix', jam: { d0: 9000, d1: 13000, v: 4 } }, 'mix:стоп-поїхали': { road: 'mix', jam: { d0: 9000, d1: 12000, v: 7, go: true } },

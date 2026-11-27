@@ -1,6 +1,7 @@
 // Рейси: пошук адрес, маршрут для фури (Valhalla), регіони на шляху, збереження.
 import { bus, log, S, db, hav, decodePolyline6, RouteIndex, uid, sleep, TRUCK_MAX_T } from './core.js';
 import { getJson, http } from './platform.js';
+import { withGates, warmGates } from './gates.js';
 
 const PHOTON = 'https://photon.komoot.io';
 const UA_BBOX = '22.0,44.0,40.5,52.7';
@@ -113,15 +114,40 @@ export const HGV_SOFT = { ask: 600, go: 120 };            // «ціна» в'ї�
 // польові дороги (track), житлові зони (living street) і проїзди дворами/до заправок (service) — лише коли інакше ніяк,
 // ґрунт і щебінь — лише на початку чи в кінці шляху (exclude_unpaved), коли без них не під'їхати.
 export const ROAD_PREF = { use_highways: 1, use_tracks: 0, use_living_streets: 0, service_penalty: 30, exclude_unpaved: true };
+// (1.1.39) ЧОМУ ШЛЯХ БУВ НЕ ТАКИЙ, ЯК У GOOGLE. Обмежувач швидкості фури (90) ми передавали серверу як top_speed — щоб час у дорозі
+// був для фури. Але сервер (Valhalla) цим параметром ще й ВИБИРАЄ дороги: кожній дорозі, де їздять швидше за top_speed, він
+// додає до «ціни» 5 % за кожен км/год понад нього (SpeedPenalty у sif/dynamiccost.h: (швидкість − top_speed) × 0,05).
+// Дорога 110 км/год при обмежувачі 90 ставала вдвічі «дорожчою», автомагістраль 130 — утричі. Тобто найкращі траси (М-05, М-06,
+// об'їзні з розділювачем) програма обминала старими дорогами через села — «гіршими й довшими», як і писав Діма. Google так
+// не робить: він веде найшвидшим шляхом для легковика, головними трасами.
+// Тепер top_speed серверу не передаємо взагалі: дороги він вибирає, як для звичайної машини, — так само, як Google.
+// А час у дорозі для фури з обмежувачем рахуємо самі (truckTime нижче).
 export function truckOptions(soft = 0) {
   const t = S.truck, o = { height: +t.height, width: +t.width, length: +t.length, weight: Math.min(+t.weight, TRUCK_MAX_T), axle_load: +t.axle, hazmat: !!t.hazmat };
-  if (+t.vmax > 0) o.top_speed = Math.round(+t.vmax);      // обмежувач: час у дорозі рахується для фури, а не для легковика
   if (soft > 0) o.hgv_no_access_penalty = soft;            // менше 43200 — сервер дозволяє дороги без доступу для фур, із цим штрафом
   return { ...ROAD_PREF, ...o };
 }
-// (1.1.28) «На свій розсуд»: фура їде дорогами загального користування — обмежень для фур сервер не враховує (costing auto),
-// але час у дорозі рахує для фури з обмежувачем, а не для легковика
-function autoOptions() { const v = S.vehicle === 'auto' ? 0 : +((S.truck || {}).vmax); return { auto: v > 0 ? { ...ROAD_PREF, top_speed: Math.round(v) } : { ...ROAD_PREF } }; }
+// (1.1.28) «Як Google» (було «на свій розсуд»): фура їде дорогами загального користування — обмежень для фур сервер не враховує
+// (costing auto). (1.1.39) Дороги вибираються точно як для легковика — без top_speed; час для фури рахуємо самі.
+function autoOptions() { return { auto: { ...ROAD_PREF } }; }
+// Обмежувач фури, км/год (0 — легковик або вимкнено)
+export const limiterKmh = () => { if (S.vehicle === 'auto') return 0; const v = +((S.truck || {}).vmax); return v > 0 ? v : 0; };
+/* (1.1.39) Час у дорозі для фури з обмежувачем — на маршруті, вибраному «як для легковика».
+   Сервер дає для кожного відрізка (маневру) довжину й час, тобто середню швидкість легковика v. Фура їде не швидше за обмежувач L.
+   Просто обрізати середню не можна: на відрізку «80 км трасою 110 + 20 км селами 50» середня 89 — нібито нижча за 90, а фура
+   насправді їде його на 14 % довше. Тому «м'який мінімум»: vф = (v⁻⁶ + L⁻⁶)^(−1/6). Він дає 88 замість 90 на чистій магістралі
+   (130), 80 на мішаному відрізку із середньою 89 і майже не чіпає повільні (50 → 49,8). Похибка проти точного розрахунку — кілька %. */
+export function truckTime(r, kmh = limiterKmh()) {
+  if (!r || !(kmh > 0) || r.timeSrv != null) return r;
+  const L = kmh / 3.6; let add = 0;
+  for (const m of r.mans || []) {
+    if (!(m.len > 0) || !(m.time > 0)) continue;
+    const v = m.len / m.time, vt = Math.pow(Math.pow(v, -6) + Math.pow(L, -6), -1 / 6), t2 = m.len / vt;
+    add += t2 - m.time; m.timeSrv = m.time; m.time = t2;
+  }
+  r.timeSrv = r.time; r.time = Math.round(r.time + add);
+  return r;
+}
 // pts: [{lat,lon,type}], перший і останній — зупинки, проміжні — «through» (маршрут проходить крізь точку)
 // snap — «чіпляти» точки лише за дороги не нижче цього класу ('unclassified' — без дворів, заправок, житлових вуличок;
 // 'tertiary' — лише траси й проспекти) і лише за добре з'єднані ділянки
@@ -133,6 +159,7 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     if (i === 0 && heading != null) { l.heading = Math.round(heading); l.heading_tolerance = 60; }
     // точка на вибраному маршруті: з напрямком руху, щоб на трасі з розділювачем не «прилипла» до зустрічної смуги
     else if (p.brg != null) { l.heading = Math.round(p.brg); l.heading_tolerance = 45; }
+    if (p.rad) l.radius = p.rad;                            // «ворота»: дороги в цьому радіусі — на вибір сервера (потрібну смугу визначить курс)
     return l;
   });
   const body = {
@@ -149,9 +176,9 @@ export async function requestRoute(pts, heading, costing = 'truck', alternates =
     if (paved && e.code === 442 && (costing === 'truck' || costing === 'auto')) { await sleep(1100); return requestRoute(pts, heading, costing, alternates, snap, soft, false); }
     throw e;
   }
-  const main = parseTrip(j.trip);
+  const main = truckTime(parseTrip(j.trip));
   main.alts = [];
-  for (const a of j.alternates || []) { try { if (a && a.trip) main.alts.push(parseTrip(a.trip)); } catch (_) {} }
+  for (const a of j.alternates || []) { try { if (a && a.trip) main.alts.push(truckTime(parseTrip(a.trip))); } catch (_) {} }
   return main;
 }
 // Головні дороги маршруту для картки варіанта: «М-06, Н-01» — за довжиною
@@ -182,15 +209,18 @@ export function roadShare(r) {
   const tot = len.a + len.b + len.c;
   return tot > 0 ? { a: len.a / tot, b: len.b / tot, c: len.c / tot } : null;
 }
+// (1.1.39) Порядок варіантів рахуємо за часом СЕРВЕРА (timeSrv — як для легковика): Google теж ставить першим найшвидший для
+// легковика. Час для фури з обмежувачем (time) — те, що показуємо на картці; на порядок він не впливає.
+const srvT = x => x.timeSrv != null ? x.timeSrv : x.time;
 export function realTime(r) {
   let t = 0, w = 0;
-  for (const m of (r && r.mans) || []) if (m.time > 0) { t += m.time; w += m.time * ROAD_SLOW[roadCat(m.streets)]; }
-  return t > 0 ? r.time * w / t : r.time;
+  for (const m of (r && r.mans) || []) { const mt = srvT(m); if (mt > 0) { t += mt; w += mt * ROAD_SLOW[roadCat(m.streets)]; } }
+  return t > 0 ? srvT(r) * w / t : srvT(r);
 }
 // Перший — найменший «реальний» час; але не той, що за сервером набагато (на чверть і більше) повільніший за найшвидший.
 export function rankRoutes(list) {
-  const fast = Math.min(...list.map(r => r.time)), cap = fast * 1.25 + 120;
-  return list.map((r, i) => ({ r, i, far: r.time > cap ? 1 : 0, e: realTime(r) }))
+  const fast = Math.min(...list.map(srvT)), cap = fast * 1.25 + 120;
+  return list.map((r, i) => ({ r, i, far: srvT(r) > cap ? 1 : 0, e: realTime(r) }))
     .sort((x, y) => (x.far - y.far) || (x.e - y.e) || (x.i - y.i)).map(o => o.r);
 }
 // Варіант помітно більше йде місцевими дорогами, ніж рекомендований, — «через села»
@@ -303,6 +333,7 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   const costing = trip.costing || 'truck';
   // Знак «фурам заборонено»: водій уже вибрав варіант через таку дорогу (trip.soft) або дозволив їх у налаштуваннях («Їхати»)
   const soft0 = costing !== 'truck' ? 0 : trip.soft ? HGV_SOFT.ask : S.hgvBan === 'go' ? HGV_SOFT.go : 0;
+  if (nAlt > 0 && pts.length === 2) warmGates(pts[0], pts[1]);         // «ворота»: карту читаємо, поки сервер рахує рейс
   let r;
   if (costing === 'truck') {
     try { r = await truckRoute(pts, heading, nAlt, soft0); r.costing = 'truck'; if (soft0) r.soft = trip.soft ? (trip.soft === 'only' ? 'only' : 'chosen') : 'go'; }
@@ -324,9 +355,22 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
       }
     }
   } else { r = await requestRoute(pts, heading, costing, nAlt); r.costing = costing; }
-  for (const a of r.alts) { a.costing = r.costing; a.aD = null; a.viaD = null; a.viaDs = []; a.viaBase = 0; a.detour = 1; if (r.soft) a.soft = r.soft; if (r.truckFail) a.truckFail = r.truckFail; if (r.snapped) a.snapped = r.snapped; }
+  const dress = a => { a.costing = r.costing; a.aD = null; a.viaD = null; a.viaDs = []; a.viaBase = 0; a.detour = 1; if (r.soft) a.soft = r.soft; if (r.truckFail) a.truckFail = r.truckFail; if (r.snapped) a.snapped = r.snapped; };
+  for (const a of r.alts) dress(a);
+  // (1.1.39) «Ворота»: сервер у місто заходить об'їзною й дворами, а головною вулицею — ні (здорожчує забудову й перехрестя).
+  // Коли рейс планують (А → Б, просять варіанти), додаємо варіанти «проїдь головною дорогою» біля фінішу й старту і самі
+  // вибираємо перший за класом доріг. У дорозі (перебудова від поточного місця) цього не робимо — там потрібна швидкість.
+  let gated = null;
+  if (nAlt > 0 && pts.length === 2 && !r.truckFail) {
+    const cs = r.costing, softG = r.soft ? HGV_SOFT.ask : soft0, snapG = r.snapped || null, base = [r, ...r.alts];
+    try {
+      const g = await withGates(pts[0], pts[1], base, G => requestRoute([pts[0], G, pts[1]], heading, cs, 0, snapG, softG), { pause: () => sleep(1100) });
+      if (g.list && g.list.length) { gated = g.list.slice(0, 3); for (const x of gated) { if (!base.includes(x)) dress(x); x.alts = []; } r = gated[0]; r.alts = gated.slice(1); r.gateInfo = g.info; }
+      else log('info', 'ворота: ' + g.info);
+    } catch (e) { log('warn', 'ворота: ' + (e && e.message || e)); }
+  }
   // (1.1.31) першим — варіант, що насправді швидший (місцеві дороги сервер рахує заоптимістично), а не той, що «швидший» за типовими швидкостями
-  if (r.alts.length) { const list = rankRoutes([r, ...r.alts]); r.alts = []; r = list[0]; r.alts = list.slice(1); }
+  if (!gated && r.alts.length) { const list = rankRoutes([r, ...r.alts]); r.alts = []; r = list[0]; r.alts = list.slice(1); }
   // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
   // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.
   const straight = hav(pts[0], pts[pts.length - 1]);

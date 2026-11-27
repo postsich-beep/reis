@@ -1,7 +1,8 @@
 // Пройдений шлях рейсу (1.1.25): де насправді їхали — від старту до фінішу, з GPS чи без нього.
 // Поки рейс іде, шлях пишеться сам і лишається на карті блідою лінією. На фініші (чи коли рейс зупинили) — питаємо,
 // чи зберегти; збережене лежить в «Архіві поїздок»: шлях на карті, швидкості, зупинки, скільки їхали без GPS.
-// Точка шляху: [lat, lon, t (с від початку епохи), v (км/год), m (0 — GPS, 1 — розрахунок без GPS)].
+// Точка шляху: [lat, lon, t (с від початку епохи), v (км/год), m (0 — GPS, 1 — розрахунок без GPS), j (1 — розрив: лінію від попередньої
+// точки сюди не ведемо; з 1.1.39)].
 import { bus, db, log } from './core.js';
 import { pos } from './nav.js';
 import { g } from './guide.js';
@@ -20,6 +21,8 @@ export const JR = {
   STOP_KMH: 3, STOP_S: 120,   // зупинка: стояли (повільніше 3 км/год) щонайменше дві хвилини
   MIN_SAVE_M: 300,       // коротше — це не поїздка (пробний запуск): зберігати не пропонуємо
   BUCKETS: [15, 50, 70, 90],  // межі кольорів швидкості, км/год: до 15 · 15–50 · 50–70 · 70–90 · понад 90
+  BACK_M: 30,            // (1.1.39) без GPS: позначку повернули назад більш як на стільки — шлях, «проїханий» далі, стираємо
+  JUMP_M: 150, JUMP_V: 50,   // стрибок: далі 150 м і швидше 50 м/с від попередньої точки — це не їзда (поправка, позначку переставили)
   SAVE_EVERY: 30000,     // незавершений шлях кладемо в базу раз на стільки мс — перезапуск програми його не губить
   DRAW_EVERY: 1000       // лінію на карті оновлюємо не частіше (давню частину довгого шляху карта проріджує, тож це дешево)
 };
@@ -40,6 +43,7 @@ export function simplify(pts, tol = JR.KEEP_M) {
   const keep = new Uint8Array(n); keep[0] = keep[n - 1] = 1;
   for (let i = 1; i < n - 1; i++) {
     if (pts[i][4] !== pts[i - 1][4] || pts[i][4] !== pts[i + 1][4]) keep[i] = 1;
+    if (pts[i][5] || pts[i + 1][5]) keep[i] = 1;                                          // край розриву
     if (pts[i + 1][2] - pts[i][2] >= JR.STOP_S || pts[i][2] - pts[i - 1][2] >= JR.STOP_S) keep[i] = 1;
   }
   const lat0 = pts[0][0] * D2R, kx = Math.cos(lat0) * R * D2R, ky = R * D2R, X = i => (pts[i][1] - pts[0][1]) * kx, Y = i => (pts[i][0] - pts[0][0]) * ky;
@@ -66,7 +70,8 @@ export function stats(pts) {
   if (pts.length < 2) return s;
   s.t0 = pts[0][2]; s.t1 = pts[pts.length - 1][2]; s.dur = s.t1 - s.t0;
   for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], b = pts[i], d = havP(a, b), dt = b[2] - a[2], v = segV(a, b);
+    const a = pts[i - 1], b = pts[i]; if (b[5]) continue;                                 // розрив — це не проїхані метри
+    const d = havP(a, b), dt = b[2] - a[2], v = segV(a, b);
     s.dist += d; if (a[4] || b[4]) s.est += d;
     if (v < JR.STOP_KMH && dt >= JR.STOP_S) { s.stops++; s.stopS += dt; } else if (v >= JR.STOP_KMH) s.moving += dt;
   }
@@ -81,7 +86,8 @@ export const bucket = v => { let b = 0; while (b < JR.BUCKETS.length && v >= JR.
 export function segments(pts, bySpeed = true) {
   const out = []; let cur = null;
   for (let i = 1; i < pts.length; i++) {
-    const a = pts[i - 1], p = pts[i], b = bySpeed ? bucket(segV(a, p)) : 0, e = p[4] ? 1 : 0;      // відрізок належить до режиму точки, в яку він приходить
+    const a = pts[i - 1], p = pts[i]; if (p[5]) { cur = null; continue; }                           // (1.1.39) розрив: лінію сюди не ведемо
+    const b = bySpeed ? bucket(segV(a, p)) : 0, e = p[4] ? 1 : 0;      // відрізок належить до режиму точки, в яку він приходить
     if (cur && cur.b === b && cur.e === e) cur.c.push([p[1], p[0]]);
     else { cur = { b, e, c: [[a[1], a[0]], [p[1], p[0]]] }; out.push(cur); }
   }
@@ -95,6 +101,7 @@ export function nearestOn(pts, lat, lon) {
   if (pts.length < 2) return { i: pts.length ? 0 : -1, f: 0, d: pts.length ? havP(pts[0], [lat, lon]) : Infinity };
   const kx = Math.cos(lat * D2R) * R * D2R, ky = R * D2R; let best = { i: 1, f: 0, d: Infinity };
   for (let i = 1; i < pts.length; i++) {
+    if (pts[i][5]) continue;
     const ax = (pts[i - 1][1] - lon) * kx, ay = (pts[i - 1][0] - lat) * ky, bx = (pts[i][1] - lon) * kx, by = (pts[i][0] - lat) * ky, dx = bx - ax, dy = by - ay, L2 = dx * dx + dy * dy;
     const f = L2 ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / L2)) : 0, d = Math.hypot(ax + f * dx, ay + f * dy);
     if (d < best.d) best = { i, f, d };
@@ -109,7 +116,7 @@ export function atDist(pts, cum, d) {
   return { lat: a[0] + (b[0] - a[0]) * f, lon: a[1] + (b[1] - a[1]) * f, t: Math.round(a[2] + (b[2] - a[2]) * f), v: segV(a, b), e: b[4] ? 1 : 0, i: lo, d };
 }
 /** Відстань від старту до кожної точки, м. */
-export function cumDist(pts) { const c = new Float64Array(pts.length); for (let i = 1; i < pts.length; i++) c[i] = c[i - 1] + havP(pts[i - 1], pts[i]); return c; }
+export function cumDist(pts) { const c = new Float64Array(pts.length); for (let i = 1; i < pts.length; i++) c[i] = c[i - 1] + (pts[i][5] ? 0 : havP(pts[i - 1], pts[i])); return c; }
 /** Графік швидкості: n рівних кроків за відстанню → [{ d (м), v (км/год), i (номер точки шляху), e }]. */
 export function profile(pts, n = 160) {
   if (pts.length < 2) return [];
@@ -122,7 +129,7 @@ export function profile(pts, n = 160) {
 }
 /** GPX пройденого шляху (ділянки без GPS позначено <fix>none</fix>). */
 export function toGpx(name, pts) {
-  const body = pts.map(p => `<trkpt lat="${p[0]}" lon="${p[1]}"><time>${new Date(p[2] * 1000).toISOString()}</time><speed>${(p[3] / 3.6).toFixed(1)}</speed>${p[4] ? '<fix>none</fix>' : ''}</trkpt>`).join('\n');
+  const body = pts.map((p, i) => `${p[5] && i ? '</trkseg><trkseg>\n' : ''}<trkpt lat="${p[0]}" lon="${p[1]}"><time>${new Date(p[2] * 1000).toISOString()}</time><speed>${(p[3] / 3.6).toFixed(1)}</speed>${p[4] ? '<fix>none</fix>' : ''}</trkpt>`).join('\n');
   const esc = s => String(s).replace(/[<>&"]/g, c => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;' }[c]));
   return `<?xml version="1.0" encoding="UTF-8"?>\n<gpx version="1.1" creator="Reis" xmlns="http://www.topografix.com/GPX/1/1">\n<trk><name>${esc(name)}</name><trkseg>\n${body}\n</trkseg></trk>\n</gpx>\n`;
 }
@@ -131,41 +138,81 @@ export function toGpx(name, pts) {
 // cur — шлях рейсу, що йде; pending — рейс закінчився, чекаємо на відповідь «зберегти?»; list — зведення збережених поїздок (без точок)
 export const jr = { cur: null, pending: null, list: [], ready: false };
 const K_CUR = 'jrCur', K_PEND = 'jrPend', K_IDX = 'jrIdx', K_PTS = id => 'jr:' + id;
-let dirty = false, drawT = 0, loss = null, readyP = Promise.resolve();
+let dirty = false, drawT = 0, readyP = Promise.resolve();
+// (1.1.39) Без GPS позначка їде рейсом, але не рівно: її підтягує підтверджений поворот, повертає водій (дотик до повороту, ↓100),
+// вона може забігти вперед. Раніше в шлях ішло «де стояла позначка щоразу», і кожен стрибок лишав на карті пряму сіру риску через
+// квартали, а забіг уперед — пунктир там, де фура ще не їхала (Олексій, 27.11: «розберись з артефактами — сірі пунктири»).
+// Тепер шлях без GPS — це лінія рейсу від місця, де GPS зник, до місця, де позначка зараз:
+//   • позначка пішла вперед (хоч би й стрибком) — дописуємо дорогою рейсу;
+//   • позначку повернули назад — зайве стираємо;
+//   • позначку переставили деінде (інший рейс, «Я тут» осторонь) — розрив, пряму туди не ведемо.
+// run: { idx — лінія рейсу, rds — відстань уздовж рейсу для кожної точки цього відрізка (вони — останні в шляху) }
+let run = null;
 const now = () => Math.round(Date.now() / 1000);
 const pointNow = () => [+pos.lat.toFixed(6), +pos.lon.toFixed(6), now(), Math.max(0, Math.round((pos.spd || 0) * 3.6)), pos.mode === 'gps' ? 0 : 1];
 const changed = force => { const t = Date.now(); if (force || t - drawT >= JR.DRAW_EVERY) { drawT = t; bus.emit('journey', jr); } };
 
 function begin(trip) {
   jr.cur = { id: 'j' + Date.now().toString(36), tripId: trip.id, title: tripTitle(trip), a: (trip.a && trip.a.label) || '', b: (trip.b && trip.b.label) || '', t0: now(), sim: !!pos.sim, pts: [] };
-  loss = null;
+  run = null;
   if (pos.lat != null) jr.cur.pts.push(pointNow());         // точка відбуття — звідки рушили, є GPS чи немає
   dirty = true; changed(true);
+}
+/** Чи це стрибок, а не їзда: від попередньої точки далі JUMP_M і швидше JUMP_V. */
+export const jumpy = (last, p) => { if (!last) return false; const d = havP(last, p); return d > JR.JUMP_M && d / Math.max(1, p[2] - last[2]) > JR.JUMP_V; };
+// у «пробній поїздці» (симулятор) швидкість буває будь-яка — там стрибком це не вважаємо
+const teleport = (last, p) => !pos.sim && jumpy(last, p);
+const push = (c, p) => { c.pts.push(p); if (c.pts.length > JR.MAX_PTS) c.pts.splice(0, 2000); dirty = true; };
+/** Відрізок без GPS уздовж рейсу: привести його кінець до місця позначки rd (м уздовж лінії run.idx). Чиста логіка — c.pts і run.rds. */
+export function syncRun(c, R, rd, t, kmh) {
+  const rds = R.rds, lastRd = rds[rds.length - 1], last = c.pts[c.pts.length - 1];
+  if (rd < lastRd - JR.BACK_M) {
+    // позначку повернули назад: «проїхане» далі стираємо (там фура ще не їхала)
+    while (rds.length > 1 && rds[rds.length - 1] > rd) { rds.pop(); c.pts.pop(); }
+    const a = R.idx.at(rd), q = [+a.lat.toFixed(6), +a.lon.toFixed(6), t, kmh, 1];
+    if (rds[rds.length - 1] > rd) {
+      // повернули раніше, ніж починався цей відрізок: його перша точка переїжджає сюди; від попередньої точки шляху — розрив, якщо далеко
+      const prev = c.pts[c.pts.length - 2];
+      if (prev && havP(prev, q) > JR.JUMP_M) q[5] = 1;
+      c.pts[c.pts.length - 1] = q; rds[0] = rd;
+    } else if (rd - rds[rds.length - 1] >= 1) { c.pts.push(q); rds.push(rd); }
+    return true;
+  }
+  const step = rd - lastRd;
+  if (step >= JR.STEP_M || (last && t - last[2] >= JR.SLOW_S && step >= JR.SLOW_M)) {
+    // уперед: дописуємо лінією рейсу — і коли позначка стрибнула (поворот підтверджено, водій підсунув), теж дорогою, а не прямою
+    const n = Math.max(1, Math.ceil(step / JR.STEP_M)), t0 = last ? last[2] : t;
+    for (let k = 1; k <= n; k++) { const d = lastRd + step * k / n, a = R.idx.at(d); c.pts.push([+a.lat.toFixed(6), +a.lon.toFixed(6), Math.round(t0 + (t - t0) * k / n), kmh, 1]); rds.push(d); }
+    return true;
+  }
+  return false;
 }
 function onPos() {
   const c = jr.cur; if (!c || !g.active || !g.trip || g.trip.id !== c.tripId || pos.lat == null) return;
   if (pos.sim) c.sim = true;
-  const p = pointNow(), last = c.pts[c.pts.length - 1];
-  if (!wantPoint(last, p)) return;
-  c.pts.push(p); if (c.pts.length > JR.MAX_PTS) c.pts.splice(0, 2000);
-  dirty = true; changed(false);
-}
-// GPS зник: запам'ятовуємо, де це сталось. Повернувся, а ми на маршруті й далі за ним — проміжок малюємо дорогою маршруту,
-// а не тим, як «гуляла» розрахункова точка (і не прямою через поля).
-function onLost() { if (jr.cur) loss = { i: jr.cur.pts.length, rd: pos.onRoute ? pos.rd : null, t: now() }; }
-function onBack() {
-  const c = jr.cur, L = loss; loss = null; if (!c || !L) return;
-  if (g.idx && L.rd != null && pos.onRoute && pos.rd > L.rd + 30 && L.i <= c.pts.length) {
-    const seg = g.idx.slice(L.rd, pos.rd), t1 = now(), dt = Math.max(1, t1 - L.t), v = Math.round((pos.rd - L.rd) / dt * 3.6), step = Math.max(1, Math.round(seg.length / Math.max(2, (pos.rd - L.rd) / JR.STEP_M)));
-    c.pts.splice(L.i);
-    for (let i = 0; i < seg.length; i += step) c.pts.push([+seg[i][1].toFixed(6), +seg[i][0].toFixed(6), Math.round(L.t + dt * (i / Math.max(1, seg.length - 1))), v, 1]);
-    dirty = true; changed(true);
+  const onLine = pos.onRoute && pos.rd != null && !!g.idx, kmh = Math.max(0, Math.round((pos.spd || 0) * 3.6));
+  if (pos.mode !== 'gps' && onLine) {
+    if (run && run.idx === g.idx) { if (syncRun(c, run, pos.rd, now(), kmh)) { if (c.pts.length > JR.MAX_PTS) { c.pts.splice(0, 2000); } dirty = true; changed(false); } return; }
+    // початок відрізка без GPS на цій лінії рейсу: GPS щойно зник, рейс перебудували чи позначку поставили на рейс
+    const p = pointNow(), last = c.pts[c.pts.length - 1]; if (teleport(last, p)) p[5] = 1;
+    run = { idx: g.idx, rds: [pos.rd] }; push(c, p); changed(false);
+    return;
   }
+  if (run) {
+    // GPS повернувся (чи позначка зійшла з рейсу). GPS каже, де фура насправді: якщо це на тій самій лінії — доводимо відрізок до цього
+    // місця дорогою рейсу (відстали) або стираємо зайве (забігли)
+    if (pos.mode === 'gps' && onLine && run.idx === g.idx) syncRun(c, run, pos.rd, now(), kmh);
+    run = null; dirty = true;
+  }
+  const p = pointNow(), last = c.pts[c.pts.length - 1];
+  if (teleport(last, p)) p[5] = 1;                           // позначку переставили — пряму через карту не малюємо
+  if (!p[5] && !wantPoint(last, p)) return;
+  push(c, p); changed(false);
 }
 /** Рейс закінчився (прибули чи зупинили): короткий пробний шлях відкидаємо мовчки, справжній — лишаємо чекати на відповідь водія. */
 function finish(why) {
   const c = jr.cur; if (!c) return;
-  jr.cur = null; loss = null; db.del('kv', K_CUR);
+  jr.cur = null; run = null; db.del('kv', K_CUR);
   if (pos.lat != null && c.pts.length) { const p = pointNow(), last = c.pts[c.pts.length - 1]; if (havP(last, p) >= 3 || p[2] - last[2] >= 5) c.pts.push(p); }
   const st = stats(c.pts);
   if (st.dist < JR.MIN_SAVE_M) { log('info', `пройдений шлях: ${st.dist} м — закороткий, не пропонуємо зберігати`); changed(true); return; }
@@ -233,7 +280,6 @@ export function init() {
   bus.on('trip', onTrip);
   bus.on('arrived', () => finish('arrived'));
   bus.on('pos', onPos);
-  bus.on('gpsLost', onLost); bus.on('gpsBack', onBack);
   setInterval(persist, JR.SAVE_EVERY);
   document.addEventListener('visibilitychange', () => { if (document.hidden) persist(); });
   window.addEventListener('pagehide', persist);
