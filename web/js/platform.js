@@ -109,10 +109,17 @@ export function stopSpeak() {
   if (ttsResolve) { const r = ttsResolve; ttsResolve = null; r(); }
 }
 
-/* ---------- голос: розпізнавання. Повертає текст або '' ---------- */
+/* ---------- голос: розпізнавання. Повертає текст або '' ----------
+   onInfo (оболонка №10+): { state:'level', v:0…1 } — рівень звуку; { state:'mic', kind, name, how, why } — який мікрофон
+   слухає (how: 'own' — програма сама, 'system' — розпізнавач телефона); { state:'hint', code } — підказка водієві. */
 let browserRec = null;
 export const canListen = () => !!N || !!(window.SpeechRecognition || window.webkitSpeechRecognition);
-export function listen(onPartial) {
+/** Оболонка вміє вибирати мікрофон (№10, «Рейс» 1.1.38). */
+export const micCapable = () => !!(N && typeof N.setMic === 'function');
+export function setMic(mode) { if (micCapable()) { try { N.setMic(String(mode || 'auto')); } catch (_) {} } }
+export function micInfo() { if (micCapable()) { try { return JSON.parse(N.micInfo()); } catch (_) {} } return null; }
+export function micLangDownload() { if (micCapable() && typeof N.micLangDownload === 'function') { try { return !!N.micLangDownload(langTag()); } catch (_) {} } return false; }
+export function listen(onPartial, onInfo) {
   return new Promise((res, rej) => {
     if (N) {
       let done = false;
@@ -122,7 +129,9 @@ export function listen(onPartial) {
         if (d.state === 'partial' && onPartial) onPartial(d.text || '');
         else if (d.state === 'final') finish(res, d.text || '');
         else if (d.state === 'error') (d.code === 'nomatch' || d.code === 'timeout') ? finish(res, '') : finish(rej, new Error(d.code || 'stt'));
+        else if (onInfo && (d.state === 'level' || d.state === 'mic' || d.state === 'hint')) { try { onInfo(d); } catch (_) {} }
       };
+      setMic(S.mic);
       try { N.listen(langTag()); } catch (e) { finish(rej, e); }
       return;
     }

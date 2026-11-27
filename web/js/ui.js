@@ -7,7 +7,7 @@ import { chime, initSfx } from './sfx.js';
 import { g, startTrip, stopTrip, rerouteNow, say, setVia, resumeActive, distWords, selectChoice, confirmChoice, cancelChoice } from './guide.js';
 import { poi, stopsAhead, stopLabel, restore as restorePoi, snapshot as poiSnapshot } from './poi.js';
 import { feed, strip, vote, markSeen, regionsAhead, setRouteContext, pollTelegram, pollAir, tgAvailable, activeChannels, feedLists, relLabel, zoneRegions, nearM } from './feed.js';
-import { chat, send, voiceOnce, toggleLive, clearChat, errorText } from './chat.js';
+import { chat, send, voiceOnce, toggleLive, clearChat, errorText, micLine } from './chat.js';
 import { hasKey } from './ai.js';
 import * as favs from './favs.js';
 import { geocode, rankPlaces, reverse, buildRoute, softVariant, regionsAlong, newTrip, saveTrip, deleteTrip, getTrips, tripTitle, oblastName, mainRoads, viaVillages, viasOf, viaSlot, VIA_MAX } from './route.js';
@@ -1784,10 +1784,13 @@ definePanel('feed', {
 /* =====================  ПАНЕЛЬ «ЧАТ»  ===================== */
 function chatHtml() {
   const msgs = chat.msgs.map(m => `<div class="msg ${m.role}">${esc(m.content)}</div>`).join('');
-  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}</div>` : chat.busy ? `<div class="msg sys">${RL} ${t('thinking')}</div>` : '';
+  // під «Слухаю…» (оболонка №10+): смужка рівня звуку й який мікрофон насправді слухає — видно, чи доходить голос
+  const micBar = chat.listening && P.micCapable() ? `<div class="miclvl"><i id="micLvl" style="width:${Math.round((chat.lvl || 0) * 100)}%"></i></div>${chat.mic ? `<div class="miclbl">${esc(micLine(chat.mic))}</div>` : ''}` : '';
+  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}${micBar}</div>` : chat.busy ? `<div class="msg sys">${RL} ${t('thinking')}</div>` : '';
+  const hint = chat.hint ? `<div class="msg sys">${esc(t('micHintChat_' + chat.hint))}</div>` : '';
   const err = chat.error ? `<div class="msg sys" style="color:var(--red)">${esc(errorText(chat.error))}</div>` : '';
   const intro = !chat.msgs.length && !chat.error ? `<div class="msg sys">${hasKey() ? t('chatIntro') : t('chatNoKey')}</div>` : '';
-  return `<div class="chat"><div class="msgs">${intro}${msgs}${state}${err}</div>
+  return `<div class="chat"><div class="msgs">${intro}${msgs}${state}${hint}${err}</div>
     <div class="chatbar"><div class="row"><input id="chatIn" placeholder="${t('chatPh')}" autocomplete="off" enterkeyhint="send"><button class="btn pri" data-act="send" aria-label="${t('send')}">${ICON.send}</button></div>
     <div class="row"><button class="btn grow${chat.listening && !chat.live ? ' danger' : ''}" data-act="voice">${ICON.mic}${t('voiceMsg')}</button><button class="btn grow${chat.live ? ' danger' : ' dark'}" data-act="live">${chat.live ? t('liveStop') : t('liveStart')}</button></div>
     ${!hasKey() ? `<button class="btn sm wide" data-act="key">${t('enterKey')}</button>` : chat.msgs.length ? `<button class="btn sm wide" data-act="clear">${t('clearChat')}</button>` : ''}</div></div>`;
@@ -1822,6 +1825,7 @@ export function initUI() {
   bus.on('pos', hud); bus.on('pos', autoStart); bus.on('guide', hud); bus.on('poi', () => { hud(); refresh('trip'); });
   bus.on('feed', () => { stripUpdate(); refresh('feed'); if (g.active) refresh('trip'); });
   bus.on('chat', () => refresh('chat'));
+  bus.on('micLevel', v => { const e = $('micLvl'); if (e) e.style.width = Math.round(v * 100) + '%'; });
   bus.on('vplaces', () => { refresh('places'); refresh('place'); });
   let plT = 0; bus.on('stopsdb', () => refresh('places')); bus.on('pos', () => { const n = Date.now(); if (n - plT > 10000) { plT = n; refresh('places'); } });
   bus.on('vpTap', id => { vpCur = byIdVp(id); if (vpCur) openPanel('place'); });

@@ -5589,6 +5589,73 @@ if (run('46')) try {
   ok('прохід 46 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 46 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
+/* ============ прохід 47: (1.1.38) голосове з гарнітурою Type-C — вибір мікрофона, рівень звуку, «німа» гарнітура ============ */
+if (run('47')) try {
+  const { page, ctx, errors } = await newPage(true);
+  const emitN = (type, d) => app(page, ([type, d]) => window.__reis(type, d), [type, d]);
+  const calls = () => app(page, () => window.__nativeCalls.slice());
+  const openP = name => app(page, async name => { const m = await import('./js/ui_base.js'); if (m.currentPanel() === name) m.refresh(name); else m.openPanel(name); await new Promise(r => setTimeout(r, 250)); }, name);
+  const chatSt = () => app(page, () => { const b = document.getElementById('panelBody'), lv = document.getElementById('micLvl');
+    return { text: b.textContent.replace(/\s+/g, ' '), lvl: lv ? parseFloat(lv.style.width) : null, lbl: (b.querySelector('.miclbl') || {}).textContent || '' }; });
+  await app(page, () => {
+    const N = window.ReisNative;
+    N.setMic = m => { window.__nativeCalls.push('setMic:' + m); };
+    N.micInfo = () => JSON.stringify({ sdk: 34, feed: true, onDevice: true, mode: 'auto', inputs: [{ kind: 'phone', type: 15, name: '' }, { kind: 'usb', type: 22, name: 'USB-C Headset' }, { kind: 'tel', type: 18, name: '' }] });
+    N.micLangDownload = l => { window.__nativeCalls.push('micLangDownload:' + l); return true; };
+    N.listen = l => { window.__nativeCalls.push('listen:' + l); };          // події розпізнавання шле сам тест
+    N.stopListen = () => { window.__nativeCalls.push('stopListen'); };
+    window.__app.S.apiKey = 'sk-ant-test-0000000000000000';
+  });
+  await sleep(300);
+  await openP('chat');
+  await page.click('#panelBody [data-act="voice"]'); await sleep(150);
+  let c = await calls();
+  ok('голосове: перед записом оболонці сказано, який мікрофон (типово «авто»), потім — слухати', c.indexOf('setMic:auto') >= 0 && c.indexOf('setMic:auto') < c.indexOf('listen:uk-UA'), c.slice(-4).join());
+  await emitN('stt', { state: 'ready' });
+  await emitN('stt', { state: 'mic', kind: 'usb', name: 'USB-C Headset', how: 'own', why: '' });
+  await emitN('stt', { state: 'level', v: 0.62 }); await sleep(500);
+  let st = await chatSt();
+  ok('під «Слухаю…» — смужка рівня (62 %) і який мікрофон слухає: гарнітура USB', /Слухаю/.test(st.text) && Math.abs(st.lvl - 62) < 1 && /слухаю: мікрофон гарнітури USB «USB-C Headset»/.test(st.lbl), JSON.stringify(st));
+  await shot(page, '47a-mic-headset');
+  await emitN('stt', { state: 'mic', kind: 'phone', name: '', how: 'own', why: 'silent' }); await sleep(500); st = await chatSt();
+  ok('гарнітура «німа» — видно, що програма перейшла на мікрофон телефона', /мікрофон телефона — гарнітура мовчала, перейшов на телефон/.test(st.lbl), st.lbl);
+  await emitN('stt', { state: 'error', code: 'timeout' }); await sleep(500); st = await chatSt();
+  ok('голос був чутно, а слів немає — так і сказано (раніше «Слухаю…» мовчки зникало)', /Не почув слів/.test(st.text) && st.lvl === null, st.text.slice(-160));
+  await page.click('#panelBody [data-act="voice"]'); await sleep(100);
+  await emitN('stt', { state: 'level', v: 0.02 }); await emitN('stt', { state: 'error', code: 'nomatch' }); await sleep(500); st = await chatSt();
+  ok('мікрофон нічого не чув (рівень на нулі) — порада: «Налаштування → Мікрофон» → «Телефон»', /Мікрофон нічого не чув/.test(st.text) && /«Телефон»/.test(st.text), st.text.slice(-200));
+  await page.click('#panelBody [data-act="voice"]'); await sleep(100);
+  await emitN('stt', { state: 'hint', code: 'nofeed' }); await emitN('stt', { state: 'mic', kind: 'usb', name: '', how: 'system', why: '' }); await sleep(500); st = await chatSt();
+  ok('телефон не дає передати звук — підказка в чаті і що слухає розпізнавач телефона', /не дає програмі передати звук/.test(st.text) && /розпізнавач телефона слухає: мікрофон гарнітури USB/.test(st.lbl), st.text.slice(-220) + ' | ' + st.lbl);
+  await emitN('stt', { state: 'final', text: 'Що попереду?' }); await sleep(900); st = await chatSt();
+  ok('сказане з гарнітури пішло в чат, Claude відповів', /Що попереду\?/.test(st.text) && /Попереду ДТП/.test(st.text) && !/Не почув/.test(st.text), st.text.slice(-200));
+  await page.click('#panelBody [data-act="voice"]'); await sleep(100);
+  await page.click('#panelBody [data-act="voice"]'); await sleep(500); st = await chatSt();
+  ok('водій сам зупинив запис — без повідомлення «не почув»', (await calls()).includes('stopListen') && !/Не почув|нічого не чув/.test(st.text), st.text.slice(-160));
+  // налаштування: вибір мікрофона, що підключено, мова без інтернету
+  await openP('settings'); await page.waitForSelector('#micSec');
+  const ms = () => app(page, () => ({ text: document.getElementById('micSec').textContent.replace(/\s+/g, ' '), on: (document.querySelector('#micSec .seg .on') || {}).textContent }));
+  let m = await ms();
+  ok('«Налаштування → Мікрофон»: Авто / Гарнітура / Телефон, що підключено зараз (без «мікрофона дзвінка»)', m.on === 'Авто' && /Зараз підключено: мікрофон телефона, мікрофон гарнітури USB «USB-C Headset»/.test(m.text) && !/дзвінка/.test(m.text), JSON.stringify(m));
+  await page.click('#micSec [data-seg="mic:phone"]'); await sleep(500); m = await ms();
+  ok('вибрали «Телефон» — запамʼятано й передано оболонці', m.on === 'Телефон' && await app(page, () => window.__app.S.mic === 'phone') && (await calls()).includes('setMic:phone') && /навіть коли гарнітура підключена/.test(m.text), JSON.stringify(m));
+  await shot(page, '47b-mic-settings');
+  await page.click('#micSec [data-act="micLang"]'); await sleep(150);
+  ok('«Завантажити мову для розпізнавання без інтернету» — оболонці передано мову', (await calls()).includes('micLangDownload:uk-UA'));
+  await openP('chat'); await page.click('#panelBody [data-act="voice"]'); await sleep(150);
+  ok('наступне голосове — з вибраним мікрофоном «Телефон»', (await calls()).slice(-3).includes('setMic:phone'), (await calls()).slice(-3).join());
+  await emitN('stt', { state: 'final', text: '' }); await sleep(500);
+  // стара оболонка (№9 і раніше): вибору немає — чесно сказано, смужки рівня немає
+  await app(page, () => { delete window.ReisNative.setMic; delete window.ReisNative.micInfo; });
+  await openP('settings'); m = await ms();
+  ok('стара оболонка: «вибір мікрофона — у новій версії застосунку (оболонка №10)»', /оболонка №10/.test(m.text) && !/Авто/.test(m.text), m.text);
+  await openP('chat'); await page.click('#panelBody [data-act="voice"]'); await sleep(500); st = await chatSt();
+  ok('стара оболонка: під «Слухаю…» без смужки рівня; без рівня повідомлення загальне', st.lvl === null && /Слухаю/.test(st.text));
+  await emitN('stt', { state: 'error', code: 'timeout' }); await sleep(500); st = await chatSt();
+  ok('…і «не почув слів», а не «мікрофон нічого не чув»', /Не почув слів/.test(st.text) && !/нічого не чув/.test(st.text), st.text.slice(-120));
+  ok('прохід 47 без помилок JS', errors.length === 0, errors.join(' | '));
+  await ctx.close();
+} catch (e) { ok('прохід 47 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
 if (run('2')) try {
   const { page, ctx, errors } = await newPage(false);
   await sleep(1500);
