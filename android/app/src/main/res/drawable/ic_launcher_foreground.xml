@@ -1,12 +1,18 @@
 <?xml version="1.0" encoding="utf-8"?>
+<!-- Логотип 13В · Маршрут: літера-дорога, розмітка, стрілка машини на початку. Макет 120×120 лягає на видимі 72 dp значка. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="108dp" android:height="108dp"
     android:viewportWidth="108" android:viewportHeight="108">
-    <!-- дорога з поворотом -->
-    <path android:pathData="M38,80 L38,58 Q38,46 50,46 L72,46"
-        android:strokeColor="#3A444E" android:strokeWidth="11" android:strokeLineCap="round" android:strokeLineJoin="round" />
-    <path android:pathData="M38,80 L38,58 Q38,46 50,46 L72,46"
-        android:strokeColor="#FFFFFF" android:strokeWidth="2" android:strokeLineCap="round" />
-    <!-- стрілка навігатора -->
-    <path android:pathData="M61,26 L80,58 L62,52 L50,66 Z" android:fillColor="#F5A300" />
+    <group android:translateX="18" android:translateY="18" android:scaleX="0.6" android:scaleY="0.6">
+        <!-- дорога -->
+        <path android:pathData="M38,103 V34 H57 a17,17 0 0 1 0,34 H38 M54,68 l31,35"
+            android:strokeColor="#151A21" android:strokeWidth="22" />
+        <!-- розмітка (пунктир 7/5 розгорнуто у відрізки) -->
+        <path android:pathData="M38,61 L38,54 M38,49 L38,42 M38,37 L38,34 L42,34 M47,34 L54,34 M59,34.12 A17,17 0 0 1 65.59,36.33 M69.47,39.45 A17,17 0 0 1 73.05,45.4 M73.99,50.3 A17,17 0 0 1 72.85,57.15 M70.38,61.48 A17,17 0 0 1 65.07,65.96 M60.38,67.66 A17,17 0 0 1 57,68 L59.24,70.81 M62.37,74.71 L66.74,80.18 M69.86,84.08 L74.24,89.55 M77.36,93.45 L81.73,98.92"
+            android:strokeColor="#FFFFFF" android:strokeWidth="2.6" />
+        <!-- низ літери рівно зрізано -->
+        <path android:pathData="M-30,96 H150 V150 H-30 Z" android:fillColor="#FFC61A" />
+        <!-- стрілка машини -->
+        <path android:pathData="M38,67 L46,86 L38,81.5 L30,86 Z" android:fillColor="#FFFFFF" />
+    </group>
 </vector>

@@ -24,7 +24,7 @@ import * as places from './places.js';
 import { exportGpx, track, trackKm } from './track.js';
 import { jvIsOpen, jvClose } from './ui_journey.js';
 import { vp, byId as byIdVp, listed as vpListed, whereIs as vpWhere, txt as vpTxt, onMap as vpOnMap, setLocation as vpSetLocation } from './vplaces.js';
-import { $, ICON, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass, panelDodge, panelDodgeSoon, panelParent } from './ui_base.js';
+import { $, ICON, RL, manIcon, toast, definePanel, openPanel, closePanel, refresh, currentPanel, esc, applyGlass, panelDodge, panelDodgeSoon, panelParent } from './ui_base.js';
 import { t } from './i18n.js';
 import { PT_SVG, ptTag } from './pticons.js';
 import { labOpen, closeLab } from './lab.js';
@@ -362,7 +362,7 @@ function hud() {
   if (g.arrived) { show = true; man.classList.add('info'); $('manIco').innerHTML = manIcon(4); $('manDist').textContent = t('arrived'); $('manText').textContent = g.trip ? (g.trip.b.label || '') : ''; $('manThen').hidden = true; }
   else if (g.active && g.route) {
     show = true;
-    if (g.rerouting) { man.classList.add('info'); $('manIco').innerHTML = manIcon(8); $('manDist').textContent = t('rerouting'); $('manText').textContent = ''; $('manThen').hidden = true; }
+    if (g.rerouting) { man.classList.add('info'); $('manIco').innerHTML = RL; $('manDist').textContent = t('rerouting'); $('manText').textContent = ''; $('manThen').hidden = true; }
     else if (pos.mode === 'approx' && !pos.onRoute) {          // GPS немає чи підмінено, а вишки — не на маршруті: пропонуємо стати на маршрут
       man.classList.add('info');
       $('manIco').innerHTML = manIcon(8); $('manDist').textContent = t('noGpsRoute');
@@ -812,7 +812,7 @@ function planHtml() {
     ${fieldHtml('a', t('phA'))}${fieldHtml('v', t('phV'))}${fieldHtml('b', t('phB'))}
     <div class="muted pt-hint">${ICON.pin}<span>${t('ptFormHint')}</span></div>
     ${vehHtml()}
-    <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? t('building') : t('build')}</button></div>
+    <div class="btns"><button class="btn pri wide" data-act="build" ${plan.busy ? 'disabled' : ''}>${plan.busy ? RL + t('building') : t('build')}</button></div>
     <div id="planErr" class="muted" style="color:var(--red);margin-top:8px">${esc(plan.err)}</div>
     <div class="trip-tools" id="tripTools">${tripToolsHtml()}</div>`;
 }
@@ -1105,7 +1105,7 @@ function ptsRender() {
     <div class="pt-mid"><div class="pt-sum" id="ptSum">${sum}</div>
       ${any ? `<button class="pt-ic" data-pt="reset" aria-label="${t('ptReset')}">${ICON.trash}</button>` : ''}<button class="pt-ic" data-pt="x" aria-label="${t('close')}">${ICON.x}</button></div>
     ${armLine}
-    <div class="row">${ctx}<button class="btn dark" data-pt="route" ${plan.b && !plan.busy ? '' : 'disabled'}>${ICON.route}${t(plan.busy ? 'building' : 'ptRoute')}</button></div></div>`;
+    <div class="row">${ctx}<button class="btn dark" data-pt="route" ${plan.b && !plan.busy ? '' : 'disabled'}>${plan.busy ? RL : ICON.route}${t(plan.busy ? 'building' : 'ptRoute')}</button></div></div>`;
   mapM.planPoints({ a: isMe ? null : plan.a, vs: plan.vs, b: plan.b, me });
   mapM.setTapHook(arm ? p => ptsPlace(p) : null);            // дотик до карти ставить точку лише тоді, коли вона цього чекає
   requestAnimationFrame(layoutVars);
@@ -1421,7 +1421,7 @@ definePanel('trip', {
     const sum = $('planSum'), er = $('planErr'), bb = body.querySelector('[data-act="build"]'), ns = $('newSec');
     if (!sum) { body.innerHTML = planHtml(); return; }
     sum.innerHTML = plan.trip ? planSumHtml() : ''; er.textContent = plan.err; tripToolsSync(); if (ns) ns.hidden = !plan.trip;
-    if (bb) { bb.disabled = plan.busy; bb.textContent = plan.busy ? t('building') : t('build'); }
+    if (bb) { bb.disabled = plan.busy; bb.innerHTML = plan.busy ? RL + esc(t('building')) : esc(t('build')); }
     if (plan.trip && !sum.dataset.shown) { sum.dataset.shown = '1'; body.scrollTop = 0; } else if (!plan.trip) delete sum.dataset.shown;
     $('panel').classList.toggle('half', !!plan.trip);
   },
@@ -1610,7 +1610,11 @@ function onMapPick(p) {
     if (k === 'here') {
       showPick(null);
       if (snapD != null && g.active && pos.mode !== 'gps') { placeAtD(snapD); setFollow(true); toast(t('snapPress'), 'green', 5000); return; }
-      setManual(p); setFollow(true); toast(t('hereSet'), 'green', 6000); return;
+      setManual(p); setFollow(true);
+      // (1.1.37) рейс іде, а місце — осторонь від нього: рейс одразу перебудовується звідси (якщо не вибрано «спитати й чекати»)
+      if (g.active && !pos.onRoute && S.offMode !== 'ask') { if (P.online()) toast(t('hereReroute'), 'green', 7000); }   // без інтернету про це скаже сама перебудова («прокладу, щойно з'явиться зв'язок»)
+      else toast(t('hereSet'), 'green', 6000);
+      return;
     }
     // (1.1.32) Контрольна точка в дорозі: маршрут одразу перебудовується від поточного (чи розрахованого, без GPS) місця через неї
     if (k === 'cp') { showPick(null); setFollow(true); cpAsked = true; if (setVia({ lat: p.lat, lon: p.lon, label: t('cpLabel') }) >= 0) toast(t(P.online() ? 'cpSet' : 'cpNet'), P.online() ? 'green' : 'yellow', 7000); cpLabelLater(p); return; }
@@ -1780,7 +1784,7 @@ definePanel('feed', {
 /* =====================  ПАНЕЛЬ «ЧАТ»  ===================== */
 function chatHtml() {
   const msgs = chat.msgs.map(m => `<div class="msg ${m.role}">${esc(m.content)}</div>`).join('');
-  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}</div>` : chat.busy ? `<div class="msg sys">${t('thinking')}</div>` : '';
+  const state = chat.listening ? `<div class="msg sys">${t('listening')} ${esc(chat.partial)}</div>` : chat.busy ? `<div class="msg sys">${RL} ${t('thinking')}</div>` : '';
   const err = chat.error ? `<div class="msg sys" style="color:var(--red)">${esc(errorText(chat.error))}</div>` : '';
   const intro = !chat.msgs.length && !chat.error ? `<div class="msg sys">${hasKey() ? t('chatIntro') : t('chatNoKey')}</div>` : '';
   return `<div class="chat"><div class="msgs">${intro}${msgs}${state}${err}</div>

@@ -4,7 +4,7 @@
 // вулиці, місця з сервера. Під вулицею без номера — «Вказати номер будинку». Дотик до результату — місце на карті й картка:
 // без рейсу «Їхати сюди», у рейсі «Заїхати по дорозі»; «Зберегти як Дім / Роботу». Просто подивитись, де це, — теж можна.
 import { bus, S, log, fmtDist, hav } from './core.js';
-import { $, ICON, esc, toast, closePanel, currentPanel } from './ui_base.js';
+import { $, ICON, RL, esc, toast, closePanel, currentPanel } from './ui_base.js';
 import * as favs from './favs.js';
 import { t } from './i18n.js';
 import { g, setVia } from './guide.js';
@@ -127,7 +127,7 @@ function render() {
     return;
   }
   body.innerHTML = sr.res.map((r, i) => rowHtml(r, i, ICON.pin)).join('') +
-    (sr.busy ? `<div class="sr-wait">${t('srBusy')}</div>` : '') +
+    (sr.busy ? `<div class="sr-wait">${RL} ${t('srBusy')}</div>` : '') +
     (!sr.busy && sr.err ? `<div class="sr-err">${esc(sr.err)}</div>` : '') +
     (!sr.busy && !sr.err && !sr.res.length && q.length >= 2 ? `<div class="sr-empty">${t('srNone', esc(q))}</div>` : '') +
     (!sr.busy && !sr.err && !sr.res.length && q.length < 2 ? `<div class="sr-empty">${t('srMore')}</div>` : '');

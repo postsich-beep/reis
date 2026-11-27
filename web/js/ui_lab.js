@@ -1,7 +1,7 @@
 // Панелі «Лабораторія», «Налаштування», «Telegram-канали», «GPS», «Діагностика», «Про застосунок».
 import { bus, log, getLog, S, VERSION, fmtClock, fmtMS, fmtDist, TRUCK_MAX_T } from './core.js';
 import * as P from './platform.js';
-import { pos, nudge, acceptPending, debugState, speedView, gpsJournal, gq } from './nav.js';
+import { pos, nudge, acceptPending, debugState, speedView, gpsJournal, gq, accelState } from './nav.js';
 import { g, say } from './guide.js';
 import { feed, resetLearning, clearFeed, tgAvailable, addDefaultChannels } from './feed.js';
 import { OBLASTS, oblastName } from './route.js';
@@ -13,7 +13,7 @@ import { sim, start as simStart, stop as simStop, setLost, setSpoof, setSpeed } 
 import * as rough from './rough.js';
 import { track, trackKm, exportGpx, clearTrack } from './track.js';
 import { journeysBtnHtml } from './ui_journey.js';
-import { $, ICON, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
+import { $, ICON, RL, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
 import { logoHtml } from './lab.js';
@@ -175,6 +175,9 @@ function settingsHtml() {
   ${seg('hgvBan', [['avoid', t('hgv_avoid'), S.hgvBan === 'avoid'], ['ask', t('hgv_ask'), (S.hgvBan || 'ask') === 'ask'], ['go', t('hgv_go'), S.hgvBan === 'go']])}
   <div class="muted" id="hgvHint" style="margin:-4px 2px 10px">${t('hgvHint_' + (S.hgvBan || 'ask'))}</div>
   <div class="list" style="margin-top:8px">${tog('heatExempt')}</div>
+  <div class="muted" style="margin:12px 2px 6px">${t('setOffMode')}</div>
+  ${seg('offMode', [['auto', t('offMode_auto'), S.offMode !== 'ask'], ['ask', t('offMode_ask'), S.offMode === 'ask']])}
+  <div class="muted" id="offHint" style="margin:-4px 2px 10px">${t('offHint_' + (S.offMode === 'ask' ? 'ask' : 'auto'))}</div>
 
   <div class="sec">${t('setAhead')}</div><div class="form">
     ${num('s_aheadH', t('setAheadH'), S.aheadH, '0.5')}${num('s_nearKm', t('setNearKm'), S.nearKm, '10')}${num('s_stopKm', t('setStopKm'), S.stopKm, '5')}</div>
@@ -249,6 +252,7 @@ definePanel('settings', {
         else if (k === 'glass') S.glass = v;
         else if (k === 'passed') S.passed = v;
         else if (k === 'hgvBan') S.hgvBan = v;
+        else if (k === 'offMode') S.offMode = v;
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }
@@ -323,6 +327,17 @@ definePanel('channels', {
 });
 
 /* =====================  GPS  ===================== */
+// (1.1.37) швидкість з акселерометра після зупинки: що з нею на цьому телефоні — вчиться, звірена з GPS чи не сходиться
+function accelText() {
+  const a = accelState();
+  if (S.accUse === 'off') return t('acc_off');
+  if (!a || !a.fresh) return t('acc_none');
+  const k = x => Math.round(x * 3.6);
+  let s = a.proven ? t('acc_ok', a.good, a.launches) : a.launches >= 4 ? t('acc_bad', a.good, a.launches) : t('acc_learn', a.launches);
+  if (a.err != null && a.launches) s += ' · ' + t('acc_err', k(a.err));
+  if (a.v != null && a.age != null && a.age > 0) s += ' · ' + t('acc_now', k(a.v), Math.max(1, k(a.sig)));
+  return s;
+}
 function gpsHtml() {
   const d = debugState(), rows = [];
   if (locState.known) rows.push([t('gpsPhoneLoc'), locState.enabled ? t('on') : t('off')]);
@@ -345,12 +360,15 @@ function gpsHtml() {
   }
   if (d.turns) rows.push([t('gpsTurns'), String(d.turns)]);
   const sv = speedView();
-  rows.push([t('gpsSpeedSrc'), sv.kind === 'none' ? '—' : Math.round(sv.kmh || 0) + ' ' + t('kmh') + ' · ' + t('spdKind_' + sv.kind) + (sv.kind === 'approx' && d.apSpdErr != null ? ' ±' + Math.round(d.apSpdErr * 3.6 * 2) : '')]);
+  rows.push([t('gpsSpeedSrc'), sv.kind === 'none' ? '—' : Math.round(sv.kmh || 0) + ' ' + t('kmh') + ' · ' + (sv.acc ? t('spdKind_acc') : t('spdKind_' + sv.kind)) + (sv.kind === 'approx' && d.apSpdErr != null ? ' ±' + Math.round(d.apSpdErr * 3.6 * 2) : '')]);
+  rows.push([t('gpsAcc2'), accelText()]);
   const fix = P.isNative ? `<div class="btns">${locState.enabled === false ? `<button class="btn pri wide" data-act="locset">${t('openLocSettings')}</button>` : ''}<button class="btn sm wide" data-act="appset">${t('openAppSettings')}</button></div><div class="muted" style="margin-top:6px">${t('appSettingsHint')}</div>` : '';
   return `<div class="list">${rows.map(r => `<div class="item kvr"><div class="grow muted">${esc(r[0])}</div><div class="t">${esc(r[1])}</div></div>`).join('')}</div>${fix}
     <div class="sec">${t('gpsManual')}</div><div class="muted">${t('gpsManualHint')}</div>
     <div class="muted" style="margin-top:6px">${t('hereHint')}</div>
     <div class="btns">${pos.mode === 'dr' ? `<button class="btn pri wide" data-act="back" ${pos.pending ? '' : 'disabled'}>${t('backToGps')}</button>` : `<button class="btn dark wide" data-act="manual" ${pos.lat == null ? 'disabled' : ''}>${t('gpsManualOn')}</button>`}</div>
+    <div class="sec">${t('accSec')}</div><div class="muted">${t('accHint')}</div>
+    <div class="btns"><button class="btn sm wide" data-act="accToggle">${t(S.accUse === 'off' ? 'accOn' : 'accOff')}</button></div>
     <div class="sec">${t('jSec')}</div><div class="muted">${t('jHint')}</div>
     <div class="btns"><button class="btn wide" data-act="journal">${t('jSave')}</button></div>`;
 }
@@ -369,6 +387,7 @@ definePanel('gps', {
         else if (!P.isNative) toast(t('jSaved', name), 'green', 6000);
       }
       else if (a === 'locset') P.openLocationSettings(); else if (a === 'appset') P.openAppSettings();
+      else if (a === 'accToggle') S.accUse = S.accUse === 'off' ? 'auto' : 'off';
       refresh('gps');
     };
   }
@@ -643,7 +662,7 @@ export function updBar(hideNow) {
     else text = t('ubApk', String(upd.apk.name || '').split('.').slice(0, 3).join('.'));
   } else if (upd.webReady) text = t('ubWeb', upd.webName ? ' ' + upd.webName : '');
   const show = !!text && !(hideNow === true || (!busy && updHidden()));
-  go.innerHTML = `${ICON.up}<span>${esc(text)}</span>`;
+  go.innerHTML = `${busy ? RL : ICON.up}<span>${esc(text)}</span>`;
   bar.classList.toggle('busy', busy); bar.style.setProperty('--p', Math.max(0, upd.pct) + '%');
   if (bar.hidden === show) { bar.hidden = !show; bus.emit('layout'); }
 }

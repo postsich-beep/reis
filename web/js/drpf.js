@@ -72,7 +72,7 @@ function speedProfile(prof, planFn, vmax, aLat) {
 /* ---------- сама хмара ---------- */
 export const PF_DEFAULTS = {
   N: 1400, hist: 64, windows: [3, 8, 20, 40, 60], slow: 0.1, regime: 0.001, cluster: 400, clusterMass: 0.6, alpha: 0.3, sig0: 10, sigK: 0.06, eps: 0.03, rateGain: 0.25, mWalk: 0.003, supportMin: 0.12, slowEnd: 0.003, seedShare: 0.4,
-  aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, mLo: 0.82, mHi: 1.18, mWide: 1.7, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
+  aLat: 1.8, accUp: 0.5, accDn: 1.4, tau: 9, accNoise: 0.1, accP: 4, accTol: 1.5, accTolK: 0.15, accTolMin: 0.4, accZ0: 1, accZ1: 1.5, accM: 0.15, accMed: 0.05, accMSig: 1.5, mLo: 0.82, mHi: 1.18, mWide: 1.7, inject: 0.0005, lostInject: 0.03, lostL: 0.12, holdMax: 75, holdProven: 900,
   // «замок на повороті» (1.1.12): контрольну точку або відпрацьовано гіроскопом, або водій натиснув «Поворот» — інакше позначка чекає
   gate: true, gateLik: true, gMargin: 12, gTempoHi: 2.2, gTempoLo: 0.5, gSlowEnd: 0.02, gArc: false, gThrArc: 99,
 };
@@ -418,9 +418,24 @@ export class RouteTracker {
   }
   // крок у секунду: рух за фізикою → звірка з гіроскопом → відбір
   // proven — гіроскоп уже підтверджував повороти: тоді позначка чекає перед поворотом скільки треба (затор, світлофор)
-  step(t, dt, { moving = true, manualV = null, proven = false } = {}) {
+  step(t, dt, { moving = true, manualV = null, proven = false, accV = null } = {}) {
     if (!this.on) return;
     const o = this.o, N = o.N, sp = this.sp, total = this.idx.total;
+    // (1.1.37) Швидкість з акселерометра після зупинки (accel.js): { v, sig } — що свіжіша зупинка, то менша похибка sig і то сильніше
+    // тягнемо до неї швидкість кожної гіпотези; похибка виросла — тягнемо слабше, і гіпотези самі повертаються до темпу рейсу.
+    // Це окремий канал: «замок на повороті» й перевірка «телефон у руках» працюють, як працювали (на відміну від «водій назвав швидкість»).
+    const aK = accV && manualV == null && moving !== false && accV.sig > 0 && Number.isFinite(accV.v) ? o.accP / (o.accP + accV.sig * accV.sig) : 0;
+    // Темп: розгін скінчився, швидкість рівна — акселерометр прямо каже, у якому темпі проти плану їде водій саме зараз (затор — повільно,
+    // вільна дорога — швидше за план). Навчаємо цього гіпотези: коли оцінка «видихнеться» (за хвилину-півтори від зупинки), вони
+    // поїдуть далі в цьому ж темпі, а не повернуться до планового. Звичайний темп (не затор) запам'ятовує й уся хмара (mMed).
+    const aM = aK > 0 && accV.flat && accV.sig < o.accMSig && o.accM > 0 ? o.accM * aK * Math.min(dt, 2) : 0, mTop = o.gate ? o.gTempoHi : o.mWide;
+    if (aM > 0 && this.est) {
+      const pl = sp.at(sp.plan, this.est.d);
+      if (pl > 2 && sp.at(sp.cap, this.est.d) >= 0.9 * pl) {
+        const mt = accV.v / pl, used = this.mMed != null ? this.mMed : 1;
+        if (mt >= 0.75 * Math.min(used, 1)) this.mMed = clamp(used + o.accMed * aK * Math.min(dt, 2) * (clamp(mt, o.gTempoLo, mTop) - used), o.gTempoLo, mTop);
+      }
+    }
     const B = o.gate ? this.gateStep(t, moving, dt) : null;
     // Швидкість у повороті: телефон повертає на ω °/с, дорога там вигнута на κ °/м — отже, фура їде ω/κ м/с.
     // Дуга радіусом 1 км і 0,23 °/с — це 4 м/с (затор), 1,3 °/с — 23 м/с (траса). Підказуємо це частинкам у повороті.
@@ -459,6 +474,15 @@ export class RouteTracker {
         if (this.m[i] < 0.75 && this.rnd() < (o.gate ? o.gSlowEnd : o.slowEnd)) this.m[i] = back();   // «затор» скінчився (у середньому за ~5 хв)
         else if (this.rnd() < o.regime) this.m[i] = this.rnd() < 0.5 ? 0.1 + 0.6 * this.rnd() : back();
         else this.m[i] = clamp(this.m[i] + this.gauss() * o.mWalk, 0.08, this.m[i] > o.mHi + 0.1 ? (o.gate ? o.gTempoHi : o.mWide) : o.mHi + 0.1);
+        if (aK > 0) {
+          // тягнемо лише тоді, коли гіпотеза помітно розходиться з акселерометром (затор, «стоп-поїхали», водій їде не в темпі рейсу):
+          // у межах звичайного розкиду темп рейсу точніший за акселерометр, і чіпати його — тільки шкодити. «Звичайний розкид» — частка
+          // швидкості (15 %, від 0,4 до 1,5 м/с): на трасі план рейсу вгадує добре, а коли фура повзе 7 км/год — не вгадує зовсім
+          const tol = clamp(o.accTolK * accV.v, o.accTolMin, o.accTol);
+          const z = Math.abs(accV.v - v) / Math.sqrt(accV.sig * accV.sig + tol * tol), k = aK * clamp((z - o.accZ0) / o.accZ1, 0, 1);
+          if (k > 0) v = clamp(v + k * (accV.v - v) + this.gauss() * 0.3 * accV.sig, 0, this.vmax * 1.02);
+          if (aM > 0) { const pl = sp.at(sp.plan, d); if (pl > 2 && sp.at(sp.cap, d) >= 0.9 * pl) this.m[i] += aM * (clamp(accV.v / pl, 0.08, mTop) - this.m[i]); }
+        }
       }
       const pd = this.d[i];
       let nd = clamp(pd + v * dt + this.gauss() * 0.3 * Math.sqrt(dt), 0, total);
