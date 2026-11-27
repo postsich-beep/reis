@@ -16,6 +16,7 @@ import { journeysBtnHtml } from './ui_journey.js';
 import { $, ICON, RL, toast, definePanel, openPanel, refresh, esc, toggleRow } from './ui_base.js';
 import { locState, lostReason, nextCp, cpWhat } from './ui.js';
 import { t } from './i18n.js';
+import { micName } from './chat.js';
 import { logoHtml } from './lab.js';
 import { packInfo, packDownloadAll, packStop, packDeleteAll, autoSet } from './addr.js';
 
@@ -131,6 +132,20 @@ function pointsHtml() {
       <button disabled><span class="sdot" style="background:var(--red)"></span>${t('legEvent')}</button></div>
     <div class="muted" style="margin-top:6px">${t('legHint')}</div>`;
 }
+// «Мікрофон» (1.1.38): яким мікрофоном слухати голосові повідомлення, коли підключена гарнітура
+function micHtml() {
+  const note = k => `<div class="muted" style="margin:0 2px 8px">${t(k)}</div>`;
+  if (!P.isNative) return note('micWeb');
+  if (!P.micCapable()) return note('micOld');
+  const m = ['headset', 'phone'].includes(S.mic) ? S.mic : 'auto', i = P.micInfo() || {};
+  let h = seg('mic', [['auto', t('micAuto'), m === 'auto'], ['headset', t('micHeadset'), m === 'headset'], ['phone', t('micPhone'), m === 'phone']]);
+  h += `<div class="muted" style="margin:-4px 2px 6px">${t('micHint_' + m)}</div>`;
+  const ins = [...new Set((i.inputs || []).filter(x => x.kind !== 'tel').map(x => micName(x.kind, x.name)))];
+  h += `<div class="muted" style="margin:0 2px 8px">${t('micNow', ins.length ? ins.join(', ') : '—')}</div>`;
+  if ((i.sdk || 0) < 33) h += note('micSdk');
+  else if (i.onDevice) h += `<div class="btns" style="margin-top:0"><button class="btn sm wide" data-act="micLang">${t('micLang')}</button></div>` + note('micLangHint');
+  return h;
+}
 function settingsHtml() {
   const tr = S.truck, num = (id, label, v, step = '0.1', max = '') => `<label>${label}<input id="${id}" type="number" inputmode="decimal" step="${step}"${max ? ` max="${max}"` : ''} value="${v}"></label>`;
   const tog = k => toggleRow(k, t('set_' + k), t('setd_' + k), S[k]);
@@ -163,6 +178,8 @@ function settingsHtml() {
   <div class="muted" style="margin:10px 2px 6px">${t('setRate')}</div>
   ${seg('rate', RATES.map(([k, r]) => [k, t('rate_' + k), Math.abs((S.ttsRate || 1) - r) < 0.05]))}
   <div class="btns" style="margin-top:0"><button class="btn wide" data-act="testVoice">${t('testVoice')}</button></div>
+  <div class="sec">${t('secMic')}</div>
+  <div id="micSec">${micHtml()}</div>
 
   <div class="sec">${t('secNotify')}</div>
   <div class="list">${tog('popups')}${tog('notify')}${tog('repShare')}</div>
@@ -253,6 +270,7 @@ definePanel('settings', {
         else if (k === 'passed') S.passed = v;
         else if (k === 'hgvBan') S.hgvBan = v;
         else if (k === 'offMode') S.offMode = v;
+        else if (k === 'mic') { S.mic = v; P.setMic(v); }
         else if (k === 'rate') { S.ttsRate = (RATES.find(r => r[0] === v) || RATES[1])[1]; say(t('voiceTest'), { force: true, urgent: true }); }
         else if (k === 'style') { const u = (STYLES.find(x => x[0] === v) || STYLES[0])[1]; S.styleUrl = u; if (!offlineActive()) setMapStyle(u); }
         else if (k === 'mapMode') { S.mapMode = v; applyMapSource(); }
@@ -262,6 +280,7 @@ definePanel('settings', {
       const a = b.dataset.act;
       if (a === 'journeys') { openPanel('journeys'); return; }
       if (a === 'testVoice') voiceTest();
+      else if (a === 'micLang') { const ok = P.micLangDownload(); toast(t(ok ? 'micLangStarted' : 'micLangFail'), ok ? 'green' : 'yellow', 7000); }
       else if (a === 'resetLearn') { resetLearning(); toast(t('done'), 'green', 2500); }
       else if (a === 'clearFeed') { clearFeed(); toast(t('done'), 'green', 2500); }
       else if (a === 'appset') P.openAppSettings();
