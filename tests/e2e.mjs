@@ -5780,7 +5780,7 @@ if (run('49')) try {
   const FXD = join(dirname(fileURLToPath(import.meta.url)), 'fixtures', 'gates');
   const FX = JSON.parse(readFileSync(join(FXD, 'routes.json'), 'utf8')), cors = { 'access-control-allow-origin': '*' };
   const hv = (a, b) => { const x = (b[1] - a[1]) * D2R * Math.cos((a[0] + b[0]) / 2 * D2R), y = (b[0] - a[0]) * D2R; return Math.hypot(x, y) * R; };
-  const mkTc = (c, km, secs, name) => { const n = c.length; return { legs: [{ shape: enc6(c), maneuvers: [{ type: 1, instruction: 'Рушайте.', street_names: [name], length: km, time: secs, begin_shape_index: 0, end_shape_index: n - 1 }, { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: n - 1, end_shape_index: n - 1 }], summary: { length: km, time: secs } }], summary: { length: km, time: secs }, status: 0 }; };
+  const mkTc = (c, km, secs, name) => { const n = c.length; return { legs: [{ shape: enc6(c), maneuvers: [{ type: 1, instruction: 'Рушайте.', street_names: Array.isArray(name) ? name : [name], length: km, time: secs, begin_shape_index: 0, end_shape_index: n - 1 }, { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: n - 1, end_shape_index: n - 1 }], summary: { length: km, time: secs } }], summary: { length: km, time: secs }, status: 0 }; };
   const mkT = (k, secs, name) => mkTc(OFMG.rev ? FX.routes[k].coords.slice().reverse() : FX.routes[k].coords, FX.routes[k].km, secs, name);
   // шлях Стрийською «з петлею»: повз ворота, за 500 м розворот, назад повз ворота, ще розворот — так вийде, якщо сервер причепить точку до зустрічної смуги
   const loopTrip = () => { const c = FX.routes.stry.coords; let k = 0, bd = 1e9; c.forEach((q, i) => { const d = hv(q, FX.gates[1].p); if (d < bd) { bd = d; k = i; } });
@@ -5794,7 +5794,7 @@ if (run('49')) try {
       r.fulfill({ status: 200, contentType: 'application/x-protobuf', headers: cors, body: existsSync(f) ? readFileSync(f) : Buffer.alloc(0) }); });
   };
   // усі три варіанти сервера «34 хв», як на знімку; шлях Стрийською сервер вважає не швидшим (33 хв) — першим його робить клас доріг
-  ROUTE.fn = q => { const L = q.locations; if (L.length === 3) { gateReqs.push(L[1]); const viaStry = hv([L[1].lat, L[1].lon], FX.gates[1].p) < 150; return { body: { trip: viaStry ? (OFMG.loop ? loopTrip() : mkT('stry', 1980, 'Стрийська вулиця')) : mkT('mid', 2040, 'С141224') } }; }
+  ROUTE.fn = q => { const L = q.locations; if (L.length === 3) { gateReqs.push(L[1]); const viaStry = hv([L[1].lat, L[1].lon], FX.gates[1].p) < 150; return { body: { trip: viaStry ? (OFMG.loop ? loopTrip() : mkT('stry', 1980, ['Стрийська вулиця', 'М-06'])) : mkT('mid', 2040, 'С141224') } }; }
     return { body: q.alternates ? { trip: mkT('n09', 2040, 'Н-09'), alternates: [{ trip: mkT('byp', 2040, 'М-06') }] } : { trip: mkT('n09', 2040, 'Н-09') } }; };
   const build = (page, opt = { alternates: 2 }, back = false) => app(page, async ([a, b, opt]) => { const Rt = window.__app.route, tr = Rt.newTrip({ lat: a[0], lon: a[1], label: 'Милятичі' }, null, { lat: b[0], lon: b[1], label: 'Рядова вулиця 26' }); tr.costing = 'auto'; tr.free = true;
     const t0 = Date.now(), r = await Rt.buildRoute(tr, opt), all = [r, ...(r.alts || [])];
@@ -5828,6 +5828,16 @@ if (run('49')) try {
     OFMG.rev = true; const g5 = gateReqs.length, n5 = routeReqs.length, r5 = await build(page, { alternates: 2 }, true), gB = gateReqs[g5] || {}; OFMG.rev = false;
     ok(`зворотний рейс (Рядова → Милятичі): ворота на Стрийській знайдено біля старту, курс ${gB.heading}° (із міста, на південь) — першим знову шлях Стрийською: ${r5.list.map(x => `«${x.street}» ${x.est} хв`).join(' → ')}`,
       routeReqs.length === n5 + 2 && gateReqs.length === g5 + 1 && hv([gB.lat, gB.lon], FX.gates[1].p) < 60 && Math.abs(gB.heading - 186) <= 12 && gB.radius === 40 && r5.list.length === 3 && r5.list[0].street === 'Стрийська вулиця' && r5.list[0].born === 'primary', JSON.stringify({ gB, list: r5.list, info: r5.info }));
+    // на екрані, як це робить водій: стоїмо біля Милятичів, тицяємо в Рядову → «Їхати» → шторка з варіантами
+    await app(page, d => window.__reis('loc', d), { prov: 'gps', lat: FX.a[0], lon: FX.a[1], acc: 5, spd: 0, t: Date.now() }); await sleep(500);
+    await app(page, p => window.__app.bus.emit('mapPick', { lat: p[0], lon: p[1] }), FX.b); await sleep(300);
+    await page.click('#pick [data-k="b"]');
+    await page.waitForFunction(() => !document.getElementById('routePick').hidden && document.querySelectorAll('#routePick .alt').length >= 3, null, { timeout: 20000 }); await sleep(700);
+    const ui = await app(page, async () => { const m = window.__app.map.map; return { alts: (await m.getSource('route-alts').getData()).features.length,
+      cards: [...document.querySelectorAll('#routePick .alt')].map(x => ({ txt: x.textContent.replace(/\s+/g, ' ').trim(), on: x.classList.contains('on'), flags: [...x.querySelectorAll('.fl i')].map(i => i.textContent) })) }; });
+    ok(`на екрані: три картки в порядку «хороші дороги спершу», вибрана перша — шлях Стрийською (17 км): ${ui.cards.map(c => '«' + c.txt + '» [' + c.flags.join(', ') + ']').join(' | ')}; на карті два інші — сірим`,
+      ui.cards.length === 3 && /17 км/.test(ui.cards[0].txt) && /М-06/.test(ui.cards[0].txt) && ui.cards[0].on && ui.cards[0].flags.some(f => f === 'найшвидший' || f === 'головними дорогами') && /Н-09/.test(ui.cards[1].txt) && /16 км/.test(ui.cards[2].txt) && !ui.cards[1].on && ui.alts === 2, JSON.stringify(ui));
+    await shot(page, '72-gates-lviv');
     ok('прохід 49а без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
   // б) карти немає (мережа квадратів недоступна) — рейс будується, як і раніше, без затримки
