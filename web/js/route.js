@@ -355,7 +355,7 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
   } else { r = await requestRoute(pts, heading, costing, nAlt); r.costing = costing; }
   const dress = a => { a.costing = r.costing; a.aD = null; a.viaD = null; a.viaDs = []; a.viaBase = 0; a.detour = 1; if (r.soft) a.soft = r.soft; if (r.truckFail) a.truckFail = r.truckFail; if (r.snapped) a.snapped = r.snapped; };
   for (const a of r.alts) dress(a);
-  // (1.1.40) «Ворота»: сервер у місто заходить об'їзною й дворами, а головною вулицею — ні (здорожчує забудову й перехрестя).
+  // (1.1.39) «Ворота»: сервер у місто заходить об'їзною й дворами, а головною вулицею — ні (здорожчує забудову й перехрестя).
   // Коли рейс планують (А → Б, просять варіанти), додаємо варіанти «проїдь головною дорогою» біля фінішу й старту і самі
   // вибираємо перший за класом доріг. У дорозі (перебудова від поточного місця) цього не робимо — там потрібна швидкість.
   let gated = null;

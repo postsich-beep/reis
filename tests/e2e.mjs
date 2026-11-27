@@ -181,7 +181,7 @@ async function newPage(native, opts = {}) {
   await page.route('**/styles/liberty', r => json(r, opts.style || { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': '#dde5d8' } }] }));
   await page.route('**/route?json=*', r => { const q = JSON.parse(new URL(r.request().url()).searchParams.get('json')); routeReqs.push(q); const o = ROUTE.fn && ROUTE.fn(q); if (o) return json(r, o.body, o.status); json(r, q.alternates ? { ...tripJson, alternates: [{ trip: altTrip }] } : tripJson); });
   if (!opts.realVp) await page.route('**/data/verified.json', r => json(r, VP_JSON));
-  // (1.1.40) «ворота» читають головні дороги з квадратів OpenFreeMap. За замовчуванням на стенді їх «немає» (одразу відмова) —
+  // (1.1.39) «ворота» читають головні дороги з квадратів OpenFreeMap. За замовчуванням на стенді їх «немає» (одразу відмова) —
   // рейс будується, як і раніше; проходи 28 і 49 підставляють свої квадрати (пізніше зареєстрований маршрут має перевагу).
   await page.route(/^https:\/\/tiles\.openfreemap\.org\/planet/, r => r.abort());
   // Власні пачки номерів будинків (гілка addr сховища): за замовчуванням їх «ще немає» (404) — працює шлях через OpenFreeMap.
@@ -5771,7 +5771,7 @@ if (run('48')) try {
     ok('прохід 48б без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
 } catch (e) { ok('прохід 48 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }
-/* ============ прохід 49: (1.1.40) «ворота» — рейс хорошими дорогами, як веде Google ============
+/* ============ прохід 49: (1.1.39) «ворота» — рейс хорошими дорогами, як веде Google ============
    Олексій, 27.11, два знімки (Милятичі → Рядова, 26): Google веде Стрийською до міста (23 хв), у нас такого варіанта не було зовсім.
    «Google будує, виходячи з хороших вулиць… давай при побудові враховувати спершу хороші дороги, а другорядні — як альтернативу».
    Дані тут справжні: головні дороги Львова (квадрати z11 зі справжньої карти, © OpenStreetMap) і чотири шляхи справжніми дорогами.
@@ -5814,7 +5814,7 @@ if (run('49')) try {
     ok('перебудова без варіантів (як у дорозі) — один запит, воріт не шукаємо', routeReqs.length === n1 + 1 && gateReqs.length === g1);
     // вимикач
     const n2 = routeReqs.length; await app(page, () => { window.__app.S.gates = false; }); const r3 = await build(page); await app(page, () => { window.__app.S.gates = true; });
-    ok(`ворота вимкнено (S.gates = false) — як було в 1.1.39: один запит, першим «${r3.list[0].street}»`, routeReqs.length === n2 + 1 && r3.list.length === 2 && r3.list[0].street === 'Н-09' && !r3.info, JSON.stringify(r3.list.map(x => x.street)));
+    ok(`ворота вимкнено (S.gates = false) — як без них: один запит, першим «${r3.list[0].street}»`, routeReqs.length === n2 + 1 && r3.list.length === 2 && r3.list[0].street === 'Н-09' && !r3.info, JSON.stringify(r3.list.map(x => x.street)));
     ok('прохід 49а без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
   // б) карти немає (мережа квадратів недоступна) — рейс будується, як і раніше, без затримки

@@ -39,7 +39,7 @@ async function template(force) {
   try { return await tplBusy; } catch (e) { if (tpl) return tpl; throw e; }      // каталог недоступний — пробуємо стару адресу
 }
 const fill = (u, x, y) => u.replace('{z}', Z).replace('{x}', x).replace('{y}', y);
-/** (1.1.40) Адреса квадратів OpenFreeMap із версією даних — «{z}/{x}/{y}» підставляє той, хто питає («ворота» в gates.js). */
+/** (1.1.39) Адреса квадратів OpenFreeMap із версією даних — «{z}/{x}/{y}» підставляє той, хто питає («ворота» в gates.js). */
 export const ofmTemplate = () => template(false);
 
 /* ---------- із квадрата лишаємо тільки шар номерів ---------- */
