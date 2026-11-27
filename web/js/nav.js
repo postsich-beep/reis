@@ -720,7 +720,9 @@ export function calYaw(raw) {
    якщо вона на цьому телефоні зійшлась із GPS. S.accUse: 'off' — не брати ніколи, 'on' — брати без перевірки (стенд), інакше — сама. */
 let acc = null, accOut = null, accT = 0;
 const ACC_HAND_PEAK = 1.2;                       // рад/с: фура так не крутиться й не гойдається — телефон узяли в руку
-const sensLog = [];                             // посекундний запис датчиків за останні 2 години — у журнал GPS, для розбору справжнього рейсу
+// посекундний запис датчиків за останні 2 години — у журнал GPS, для розбору справжнього рейсу. Рядок: час (с), швидкість GPS (−1 — немає),
+// вібрація, прискорення x y z, кутова швидкість x y z, тиск, швидкість з акселерометра, її похибка, «без GPS» (0/1), пік оберту, тривалість пакета
+const sensLog = [];
 function accel() {
   if (!acc) { let cal = null; try { cal = JSON.parse(localStorage.getItem('reis.acc') || 'null'); } catch (_) {} acc = new AccelSpeed({}, cal); }
   return acc;
@@ -740,7 +742,8 @@ function accStep(s, quiet) {
   if (A.changed) { try { localStorage.setItem('reis.acc', JSON.stringify(A.cal)); } catch (_) {} }
   const r = x => Math.round(x * 1000) / 1000;
   sensLog.push([Math.round(now / 1000), gpsOk ? Math.round(pos.spd * 10) / 10 : -1, s.var == null ? -1 : +(+s.var).toFixed(5), ...s.a.map(r), ...s.w.map(x => Math.round(x * 1e5) / 1e5),
-    s.press == null ? -1 : Math.round(s.press * 100) / 100, accOut ? Math.round(accOut.v * 10) / 10 : -1, accOut ? Math.round(accOut.sig * 10) / 10 : -1, pos.mode === 'dr' ? 1 : 0]);
+    s.press == null ? -1 : Math.round(s.press * 100) / 100, accOut ? Math.round(accOut.v * 10) / 10 : -1, accOut ? Math.round(accOut.sig * 10) / 10 : -1, pos.mode === 'dr' ? 1 : 0,
+    s.wp == null ? -1 : +(+s.wp).toFixed(2), +dt.toFixed(2)]);
   if (sensLog.length > 7200) sensLog.splice(0, sensLog.length - 7200);
 }
 /** Стенд: забути оцінювач (наступний крок візьме збережене калібрування заново). */

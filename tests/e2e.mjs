@@ -5570,7 +5570,7 @@ if (run('46')) try {
   ok(`телефон узяли в руку (пік ${2.4} рад/с): оцінка була (${h0 && h0.v} м/с) — і зникла до наступної зупинки (стан «${h1 && h1.st}»)`, !!h0 && h0.v != null && h0.st === 'run' && !!h1 && h1.v == null && h1.st === 'none', JSON.stringify({ h0, h1 }));
   // ж) журнал GPS: посекундний запис датчиків — для розбору справжнього рейсу
   const jr = await app(page, () => { const j = window.__app.nav.gpsJournal(); return { n: j.sens.length, row: j.sens[j.sens.length - 1], len: j.sens[0].length, cal: !!j.accCal, st: !!j.accel }; });
-  ok(`у журналі GPS — посекундний запис датчиків (${jr.n} рядків по ${jr.len} чисел: час, швидкість GPS, вібрація, прискорення, кутова швидкість, тиск, оцінка) і стан калібрування`, jr.n > 100 && jr.len === 13 && jr.cal && jr.st, JSON.stringify(jr));
+  ok(`у журналі GPS — посекундний запис датчиків (${jr.n} рядків по ${jr.len} чисел: час, швидкість GPS, вібрація, прискорення, кутова швидкість, тиск, оцінка, пік оберту) і стан калібрування`, jr.n > 100 && jr.len === 15 && jr.cal && jr.st, JSON.stringify(jr));
   ok('прохід 46 без помилок JS', errors.length === 0, errors.join(' | '));
   await ctx.close();
 } catch (e) { ok('прохід 46 дійшов до кінця', false, String(e.stack || e.message).split('\n').slice(0, 3).join(' ')); }

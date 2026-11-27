@@ -261,6 +261,7 @@ body[data-theme="night"].mapdark .maplibregl-canvas{filter:none}   /* офлай
 .man-ico .rl{width:72%;height:72%}
 #updGo .rl{width:24px;height:24px}
 .btn .rl{width:22px;height:22px}
+.btn[disabled]:has(.rl){opacity:.9}        /* кнопка зайнята, а не «недоступна»: значок-очікувач має бути видно */
 .sr-wait .rl,.msg.sys .rl{margin-right:4px}
 #routePick.busy .rp-head::after{content:"";flex:none;margin-left:auto;width:24px;height:24px;border-radius:24%;background:#ffc61a url(icons/loader-s.svg) center/cover no-repeat}
 #boot.gone{opacity:0;pointer-events:none}
