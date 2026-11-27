@@ -4151,7 +4151,14 @@ if (run('34')) for (const sc of [...SCREENS.filter(x => ['S10', 'tiny', 'land', 
     return { cur: j.cur ? { id: j.cur.id, n: j.cur.pts.length, est: j.cur.pts.filter(p => p[4]).length, sim: j.cur.sim, title: j.cur.title } : null, pend: j.pending ? { n: j.pending.pts.length, raw: j.pending.raw, dist: j.pending.st.dist, est: j.pending.st.est, why: j.pending.why } : null,
       list: j.list.map(x => ({ id: x.id, title: x.title, dist: x.dist, est: x.est, sim: x.sim, why: x.why })), jr: src('jr'), jv: src('jv'), ask: vis(document.getElementById('jrAsk')), askTxt: document.getElementById('jrAsk').textContent.replace(/\s+/g, ' ').trim(),
       toasts: document.getElementById('toasts').textContent, mode: A.nav.pos.mode, rd: Math.round(A.nav.pos.rd || 0), speed: vis(document.getElementById('speed')) }; });
-  const start = async (id, at = 2) => { await emitN('loc', { prov: 'gps', lat: coords[at][0], lon: coords[at][1], acc: 5, spd: 0, t: Date.now() }); await sleep(400); await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), mkTrip(id)); await sleep(500); };
+  // Між рейсами стенд інколи мовчить довше 5 с (два потоки перевірок) — застосунок чесно переходить у «без GPS», і одна точка GPS
+  // його звідти не виводить: позначка лишається там, де скінчився попередній рейс, а новий «проїзд 900 м» закінчується, не почавшись.
+  // Тому старт — як у житті: GPS є (кілька відліків поспіль; якщо застосунок сумнівається — водій підтверджує місце).
+  const start = async (id, at = 2) => {
+    const fixAt = () => emitN('loc', { prov: 'gps', lat: coords[at][0], lon: coords[at][1], acc: 5, spd: 0, t: Date.now() });
+    await fixAt(); await sleep(400);
+    for (let k = 0; k < 6 && await app(page, () => window.__app.nav.pos.mode !== 'gps'); k++) { await fixAt(); await sleep(250); if (k >= 3) await app(page, () => window.__app.nav.acceptPending()); }
+    await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), mkTrip(id)); await sleep(500); };
   const simGo = kmh => app(page, k => { const s = window.__app.sim; s.setSpeed(k); if (!s.sim.on) s.start(); }, kmh);
   const simStop = () => app(page, () => window.__app.sim.stop());
   const rdOver = (d, ms = 60000) => page.waitForFunction(d => window.__app.nav.pos.rd > d, d, { timeout: ms });
