@@ -39,6 +39,8 @@ async function template(force) {
   try { return await tplBusy; } catch (e) { if (tpl) return tpl; throw e; }      // каталог недоступний — пробуємо стару адресу
 }
 const fill = (u, x, y) => u.replace('{z}', Z).replace('{x}', x).replace('{y}', y);
+/** (1.1.40) Адреса квадратів OpenFreeMap із версією даних — «{z}/{x}/{y}» підставляє той, хто питає («ворота» в gates.js). */
+export const ofmTemplate = () => template(false);
 
 /* ---------- із квадрата лишаємо тільки шар номерів ---------- */
 // Квадрат MVT — це послідовність шарів (поле 3). Беремо байти шару з назвою «housenumber» як є, решту викидаємо.

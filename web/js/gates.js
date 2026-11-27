@@ -184,7 +184,8 @@ export async function withGates(a, b, base, ask, { pause = null } = {}) {
   const A = [a.lat, a.lon], B = [b.lat, b.lon], D = dist(A, B);
   if (D < GATE.MIN_TRIP_M) return { list: null, info: 'короткий рейс' };
   const rho = Math.max(GATE.RHO_MIN, Math.min(GATE.RHO_MAX, GATE.RHO_K * D));
-  let R = null; try { R = await roadsAround([B, A], rho); } catch (e) { gateStat.last = String(e && e.message || e); }
+  // карта не відповіла за кілька секунд — не чекаємо: рейс важливіший (лишається порядок сервера)
+  let R = null; try { R = await Promise.race([roadsAround([B, A], rho), new Promise(res => setTimeout(() => res(null), GATE.TILE_MS + 800))]); } catch (e) { gateStat.last = String(e && e.message || e); }
   if (!R || !R.roads.length) return { list: null, info: 'немає даних карти' + (gateStat.last ? ' (' + gateStat.last + ')' : '') };
   const ix = classIndex(R), list = base.slice();
   const gs = [...gateways(R.roads, B, A, rho).map(g => ({ ...g, end: 'b' })), ...gateways(R.roads, A, B, rho, { max: 1 }).map(g => ({ ...g, end: 'a', inward: (g.inward + 180) % 360 }))];

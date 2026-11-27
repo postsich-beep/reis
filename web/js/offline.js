@@ -179,6 +179,9 @@ export async function tileBytesAt(lat, lon, zoom) {
   try { const t = await pmFile.getZxy(z, x, y); return t && t.data ? t.data.byteLength : 0; } catch (_) { return null; }
 }
 
+// (1.1.40) Квадрат офлайн-карти як є (для «воріт»: головні дороги біля кінців рейсу). ready() — карта в телефоні й ціла.
+export async function pmTileData(z, x, y) { if (!pmFile) return null; const t = await pmFile.getZxy(z, x, y); return t && t.data ? t.data : null; }
+pmTileData.ready = () => !!pmFile && off.installed && !!off.ok && !off.bad;
 export function init() {
   if (typeof pmtiles !== 'undefined') {
     try { const proto = new pmtiles.Protocol(); pmFile = new pmtiles.PMTiles(new PmSource()); proto.add(pmFile); maplibregl.addProtocol('pmtiles', proto.tile); }

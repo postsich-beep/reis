@@ -1,6 +1,7 @@
 // Рейси: пошук адрес, маршрут для фури (Valhalla), регіони на шляху, збереження.
 import { bus, log, S, db, hav, decodePolyline6, RouteIndex, uid, sleep, TRUCK_MAX_T } from './core.js';
 import { getJson, http } from './platform.js';
+import { withGates } from './gates.js';
 
 const PHOTON = 'https://photon.komoot.io';
 const UA_BBOX = '22.0,44.0,40.5,52.7';
@@ -352,9 +353,22 @@ export async function buildRoute(trip, { from = null, heading = null, skipA = fa
       }
     }
   } else { r = await requestRoute(pts, heading, costing, nAlt); r.costing = costing; }
-  for (const a of r.alts) { a.costing = r.costing; a.aD = null; a.viaD = null; a.viaDs = []; a.viaBase = 0; a.detour = 1; if (r.soft) a.soft = r.soft; if (r.truckFail) a.truckFail = r.truckFail; if (r.snapped) a.snapped = r.snapped; }
+  const dress = a => { a.costing = r.costing; a.aD = null; a.viaD = null; a.viaDs = []; a.viaBase = 0; a.detour = 1; if (r.soft) a.soft = r.soft; if (r.truckFail) a.truckFail = r.truckFail; if (r.snapped) a.snapped = r.snapped; };
+  for (const a of r.alts) dress(a);
+  // (1.1.40) «Ворота»: сервер у місто заходить об'їзною й дворами, а головною вулицею — ні (здорожчує забудову й перехрестя).
+  // Коли рейс планують (А → Б, просять варіанти), додаємо варіанти «проїдь головною дорогою» біля фінішу й старту і самі
+  // вибираємо перший за класом доріг. У дорозі (перебудова від поточного місця) цього не робимо — там потрібна швидкість.
+  let gated = null;
+  if (nAlt > 0 && pts.length === 2 && !r.truckFail) {
+    const cs = r.costing, softG = r.soft ? HGV_SOFT.ask : soft0, snapG = r.snapped || null, base = [r, ...r.alts];
+    try {
+      const g = await withGates(pts[0], pts[1], base, G => requestRoute([pts[0], G, pts[1]], heading, cs, 0, snapG, softG), { pause: () => sleep(1100) });
+      if (g.list && g.list.length) { gated = g.list.slice(0, 3); for (const x of gated) { if (!base.includes(x)) dress(x); x.alts = []; } r = gated[0]; r.alts = gated.slice(1); r.gateInfo = g.info; }
+      else log('info', 'ворота: ' + g.info);
+    } catch (e) { log('warn', 'ворота: ' + (e && e.message || e)); }
+  }
   // (1.1.31) першим — варіант, що насправді швидший (місцеві дороги сервер рахує заоптимістично), а не той, що «швидший» за типовими швидкостями
-  if (r.alts.length) { const list = rankRoutes([r, ...r.alts]); r.alts = []; r = list[0]; r.alts = list.slice(1); }
+  if (!gated && r.alts.length) { const list = rankRoutes([r, ...r.alts]); r.alts = []; r = list[0]; r.alts = list.slice(1); }
   // Маршрут для фури набагато довший за пряму: швидше за все, мости чи дороги з обмеженням маси.
   // Рахуємо й варіант без обмежень для фур, щоб водій вирішив сам.
   const straight = hav(pts[0], pts[pts.length - 1]);

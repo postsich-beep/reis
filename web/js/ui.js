@@ -867,7 +867,7 @@ function altCardsHtml(force = false) {
     const red = truck ? hazardsAlong(r).filter(h => h.level === 'red').length : 0;
     const ky = kyivOnRoute(r, 0, d => Date.now() + d / Math.max(1, r.dist) * r.time * 1000);
     const softCard = truck && ['alt', 'only', 'chosen'].includes(r.soft);
-    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && rs.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : '', !i && r.time > best && vil.some(Boolean) ? `<i class="good">${t('altMain')}</i>` : ''].join('');
+    const flags = [softCard ? `<i class="warn">${t('altSoft')}</i>` : '', red ? `<i class="bad">${t('altLimits', red)}</i>` : '', ky && !ky.inside ? `<i>${t('altKyiv')}</i>` : '', vil[i] ? `<i class="warn">${t('altVillage')}</i>` : '', r.time === best && rs.length > 1 && !vil[i] ? `<i class="good">${t('altFastest')}</i>` : '', !i && (r.gate && r.gate.t ? rs.length > 1 && !(r.time === best && !vil[i]) : r.time > best && vil.some(Boolean)) ? `<i class="good">${t('altMain')}</i>` : ''].join('');
     return `<button class="alt${i === plan.sel ? ' on' : ''}${softCard ? ' soft' : ''}" data-alt="${i}"><b>≈ ${fmtDur(r.time)}</b><span>${fmtDist(r.dist)}</span><small>${esc(mainRoads(r).join(', ') || t('altLocal'))}</small>${flags ? `<span class="fl">${flags}</span>` : ''}</button>`;
   }).join('') + `</div>`;
 }

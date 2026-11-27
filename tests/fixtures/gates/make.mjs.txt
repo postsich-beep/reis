@@ -1,0 +1,53 @@
+// Тестові дані для «воріт» зі справжньої карти Львова (© OpenStreetMap, квадрат z10 нашої офлайн-карти):
+//  • квадрати z11 у схемі OpenMapTiles (шар transportation, class) — лише головні дороги;
+//  • чотири шляхи Милятичі → Рядова справжніми дорогами (для підставного сервера маршрутів).
+import { readTile } from './mvt.mjs';
+import { nearest, path, cls } from './graph.mjs';
+import { G, S, T, s, t, costG, costV, len, names } from './exp2.mjs';
+import { gateways, dist, kx, KY } from './gates.mjs';
+import { writeFileSync } from 'node:fs';
+const tile = readTile('z/10_580_348.mvt'); const roads = [];
+for (const ft of tile.roads) if (ft.type === 2 && /major_road|highway/.test(ft.props.kind)) for (const l of ft.lines) roads.push({ cls: ft.props.kind_detail, c: l });
+// спрощення Дугласа — Пекера (метри)
+const segD = (p, a, b) => { const X = k => [(k[1] - a[1]) * kx(a[0]), (k[0] - a[0]) * KY], [bx, by] = X(b), [px, py] = X(p), L2 = bx * bx + by * by; const tt = L2 ? Math.max(0, Math.min(1, (px * bx + py * by) / L2)) : 0; return Math.hypot(px - tt * bx, py - tt * by); };
+const dp = (c, tol) => { if (c.length < 3) return c.slice(); const keep = new Uint8Array(c.length); keep[0] = keep[c.length - 1] = 1; const st = [[0, c.length - 1]]; while (st.length) { const [a, b] = st.pop(); let m = -1, md = tol; for (let i = a + 1; i < b; i++) { const d = segD(c[i], c[a], c[b]); if (d > md) { md = d; m = i; } } if (m > 0) { keep[m] = 1; st.push([a, m], [m, b]); } } return c.filter((_, i) => keep[i]); };
+// --- кодувальник MVT ---
+const vint = (out, v) => { v = Math.round(v); while (v > 0x7f) { out.push((v & 0x7f) | 0x80); v = Math.floor(v / 128); } out.push(v); };
+const zz = n => (n < 0 ? -2 * n - 1 : 2 * n);
+const bytes = (out, field, arr) => { vint(out, (field << 3) | 2); vint(out, arr.length); for (const b of arr) out.push(b); };
+const str = s => [...new TextEncoder().encode(s)];
+const Z = 11, N = 2 ** Z, EXT = 4096;
+const tx = lon => (lon + 180) / 360 * N, ty = lat => { const r = lat * Math.PI / 180; return (1 - Math.log(Math.tan(r) + 1 / Math.cos(r)) / Math.PI) / 2 * N; };
+const CL = ['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor'];
+function encodeTile(X, Y, lines) {
+  const layer = []; bytes(layer, 1, str('transportation'));
+  const feats = [];
+  for (const { cls: c, c: pts, ramp } of lines) { const geom = []; let cx = 0, cy = 0; const P = pts.map(p => [Math.round((tx(p[1]) - X) * EXT), Math.round((ty(p[0]) - Y) * EXT)]);
+    const Q = P.filter((p, i) => !i || p[0] !== P[i - 1][0] || p[1] !== P[i - 1][1]); if (Q.length < 2) continue;
+    vint(geom, 9); vint(geom, zz(Q[0][0] - cx)); vint(geom, zz(Q[0][1] - cy)); cx = Q[0][0]; cy = Q[0][1];
+    vint(geom, 2 | ((Q.length - 1) << 3)); for (let i = 1; i < Q.length; i++) { vint(geom, zz(Q[i][0] - cx)); vint(geom, zz(Q[i][1] - cy)); cx = Q[i][0]; cy = Q[i][1]; }
+    const tags = []; vint(tags, 0); vint(tags, CL.indexOf(c)); if (ramp) { vint(tags, 1); vint(tags, CL.length); }
+    const f = []; bytes(f, 2, tags); vint(f, (3 << 3) | 0); vint(f, 2); bytes(f, 4, geom); feats.push(f); }
+  for (const f of feats) bytes(layer, 2, f);
+  bytes(layer, 3, str('class')); bytes(layer, 3, str('ramp'));
+  for (const c of CL) { const v = []; bytes(v, 1, str(c)); bytes(layer, 4, v); }
+  { const v = []; vint(v, (5 << 3) | 0); vint(v, 1); bytes(layer, 4, v); }                 // значення 1 (ramp)
+  vint(layer, (5 << 3) | 0); vint(layer, EXT); vint(layer, (15 << 3) | 0); vint(layer, 2);
+  const out = []; bytes(out, 3, layer); return Uint8Array.from(out);
+}
+const all = roads.map(r => ({ cls: r.cls.replace('_link', ''), ramp: /_link/.test(r.cls), c: dp(r.c, 4) }));
+let total = 0; const made = [];
+for (let X = Math.floor(tx(23.955)); X <= Math.floor(tx(24.135)); X++) for (let Y = Math.floor(ty(49.84)); Y <= Math.floor(ty(49.68)); Y++) {
+  // у квадрат — шматки ліній, що лежать у ньому (із запасом 3 % по краях)
+  const inT = p => { const x = tx(p[1]) - X, y = ty(p[0]) - Y; return x >= -0.03 && x <= 1.03 && y >= -0.03 && y <= 1.03; }, lines = [];
+  for (const r of all) { let cur = null; for (let i = 0; i < r.c.length; i++) { const on = inT(r.c[i]) || (i > 0 && inT(r.c[i - 1])) || (i + 1 < r.c.length && inT(r.c[i + 1])); if (on) { if (!cur) { cur = []; lines.push({ cls: r.cls, ramp: r.ramp, c: cur }); } cur.push(r.c[i]); } else cur = null; } }
+  const buf = encodeTile(X, Y, lines.filter(l => l.c.length > 1)); writeFileSync(`fx/${Z}_${X}_${Y}.pbf`, buf); total += buf.length; made.push(`${Z}/${X}/${Y}: ${buf.length} Б, ліній ${lines.length}`); }
+console.log(made.join('\n'), '\nразом', total, 'Б');
+// --- шляхи ---
+const route = (pts, c = costV) => { const ids = [s, ...pts.map(p => nearest(G, p, (n, i) => G.nodes[i].e.some(e => /primary|trunk/.test(cls(e.r))))), t]; let nodes = [], edges = []; for (let i = 0; i + 1 < ids.length; i++) { const p = path(G, ids[i], ids[i + 1], c); nodes = nodes.concat(i ? p.nodes.slice(1) : p.nodes); edges = edges.concat(p.edges); } return { nodes, edges }; };
+const gs = gateways(roads.map(r => ({ cls: r.cls, c: r.c })), T, S, Math.max(1500, Math.min(6000, 0.3 * dist(S, T))));
+const R = { n09: route([[49.7518, 24.1340], [49.78337, 24.07961]]), byp: route([[49.76724, 24.04345]]), stry: route([gs[1].p]), mid: route([gs[0].p]) };
+const out = { a: S, b: T, gates: gs.map(g => ({ p: g.p.map(v => +v.toFixed(6)), cls: g.cls, inward: Math.round(g.inward) })), routes: {} };
+for (const k in R) { const c = dp(R[k].nodes.map(i => G.nodes[i].p), 3).map(p => [+p[0].toFixed(6), +p[1].toFixed(6)]); out.routes[k] = { coords: c, km: +(len(R[k]) / 1000).toFixed(2), roads: names(R[k]) }; }
+writeFileSync('fx/routes.json', JSON.stringify(out));
+console.log(Object.entries(out.routes).map(([k, v]) => `${k}: ${v.km} км, точок ${v.coords.length}`).join(' · '), '\nворота:', JSON.stringify(out.gates));
