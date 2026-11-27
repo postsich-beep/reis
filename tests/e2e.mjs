@@ -5781,12 +5781,12 @@ if (run('49')) try {
   const FX = JSON.parse(readFileSync(join(FXD, 'routes.json'), 'utf8')), cors = { 'access-control-allow-origin': '*' };
   const hv = (a, b) => { const x = (b[1] - a[1]) * D2R * Math.cos((a[0] + b[0]) / 2 * D2R), y = (b[0] - a[0]) * D2R; return Math.hypot(x, y) * R; };
   const mkTc = (c, km, secs, name) => { const n = c.length; return { legs: [{ shape: enc6(c), maneuvers: [{ type: 1, instruction: 'Рушайте.', street_names: [name], length: km, time: secs, begin_shape_index: 0, end_shape_index: n - 1 }, { type: 4, instruction: 'Ви прибули.', street_names: [], length: 0, time: 0, begin_shape_index: n - 1, end_shape_index: n - 1 }], summary: { length: km, time: secs } }], summary: { length: km, time: secs }, status: 0 }; };
-  const mkT = (k, secs, name) => mkTc(FX.routes[k].coords, FX.routes[k].km, secs, name);
+  const mkT = (k, secs, name) => mkTc(OFMG.rev ? FX.routes[k].coords.slice().reverse() : FX.routes[k].coords, FX.routes[k].km, secs, name);
   // шлях Стрийською «з петлею»: повз ворота, за 500 м розворот, назад повз ворота, ще розворот — так вийде, якщо сервер причепить точку до зустрічної смуги
   const loopTrip = () => { const c = FX.routes.stry.coords; let k = 0, bd = 1e9; c.forEach((q, i) => { const d = hv(q, FX.gates[1].p); if (d < bd) { bd = d; k = i; } });
     let j = k, i0 = k, sj = 0, si = 0; while (j < c.length - 1 && sj < 500) { sj += hv(c[j], c[j + 1]); j++; } while (i0 > 0 && si < 400) { si += hv(c[i0], c[i0 - 1]); i0--; }
     return mkTc([...c.slice(0, j + 1), ...c.slice(i0, j).reverse(), ...c.slice(i0 + 1)], FX.routes.stry.km + 2 * (sj + si) / 1000, 2100, 'Стрийська вулиця'); };
-  const OFMG = { tj: 0, tiles: [], down: false, loop: false }, gateReqs = [];
+  const OFMG = { tj: 0, tiles: [], down: false, loop: false, rev: false }, gateReqs = [];
   const setup = async (page) => {
     await page.route('https://tiles.openfreemap.org/planet', r => { if (OFMG.down) return r.abort(); OFMG.tj++; r.fulfill({ status: 200, contentType: 'application/json', headers: cors, body: JSON.stringify({ tiles: ['https://tiles.openfreemap.org/planet/G1/{z}/{x}/{y}.pbf'] }) }); });
     await page.route('https://tiles.openfreemap.org/planet/**', r => { if (OFMG.down) return r.abort(); const m = /planet\/([^/]+)\/(\d+)\/(\d+)\/(\d+)\.pbf/.exec(r.request().url()); if (!m) return r.abort();
@@ -5796,9 +5796,9 @@ if (run('49')) try {
   // усі три варіанти сервера «34 хв», як на знімку; шлях Стрийською сервер вважає не швидшим (33 хв) — першим його робить клас доріг
   ROUTE.fn = q => { const L = q.locations; if (L.length === 3) { gateReqs.push(L[1]); const viaStry = hv([L[1].lat, L[1].lon], FX.gates[1].p) < 150; return { body: { trip: viaStry ? (OFMG.loop ? loopTrip() : mkT('stry', 1980, 'Стрийська вулиця')) : mkT('mid', 2040, 'С141224') } }; }
     return { body: q.alternates ? { trip: mkT('n09', 2040, 'Н-09'), alternates: [{ trip: mkT('byp', 2040, 'М-06') }] } : { trip: mkT('n09', 2040, 'Н-09') } }; };
-  const build = (page, opt = { alternates: 2 }) => app(page, async ([a, b, opt]) => { const Rt = window.__app.route, tr = Rt.newTrip({ lat: a[0], lon: a[1], label: 'Милятичі' }, null, { lat: b[0], lon: b[1], label: 'Рядова вулиця 26' }); tr.costing = 'auto'; tr.free = true;
+  const build = (page, opt = { alternates: 2 }, back = false) => app(page, async ([a, b, opt]) => { const Rt = window.__app.route, tr = Rt.newTrip({ lat: a[0], lon: a[1], label: 'Милятичі' }, null, { lat: b[0], lon: b[1], label: 'Рядова вулиця 26' }); tr.costing = 'auto'; tr.free = true;
     const t0 = Date.now(), r = await Rt.buildRoute(tr, opt), all = [r, ...(r.alts || [])];
-    return { ms: Date.now() - t0, info: r.gateInfo || '', list: all.map(x => ({ km: +(x.dist / 1000).toFixed(1), srv: Math.round((x.timeSrv != null ? x.timeSrv : x.time) / 60), est: x.gate && x.gate.t ? +(x.gate.t / 60).toFixed(1) : null, major: x.gate ? x.gate.major : null, cov: x.gate ? x.gate.cov : null, born: x.gate && x.gate.cls ? x.gate.cls : '', street: (x.mans[0] || {}).street, costing: x.costing })) }; }, [FX.a, FX.b, opt]);
+    return { ms: Date.now() - t0, info: r.gateInfo || '', list: all.map(x => ({ km: +(x.dist / 1000).toFixed(1), srv: Math.round((x.timeSrv != null ? x.timeSrv : x.time) / 60), est: x.gate && x.gate.t ? +(x.gate.t / 60).toFixed(1) : null, major: x.gate ? x.gate.major : null, cov: x.gate ? x.gate.cov : null, born: x.gate && x.gate.cls ? x.gate.cls : '', street: (x.mans[0] || {}).street, costing: x.costing })) }; }, back ? [FX.b, FX.a, opt] : [FX.a, FX.b, opt]);
   // а) звичайний випадок: карта є (OpenFreeMap), рейс планують із варіантами
   { const { page, ctx, errors } = await newPage(true, { googleDefault: true }); await setup(page);
     const n0 = routeReqs.length, r = await build(page), reqs = routeReqs.slice(n0), g = gateReqs[0] || {};
@@ -5824,6 +5824,10 @@ if (run('49')) try {
     OFMG.loop = true; const n3 = routeReqs.length, r4 = await build(page); OFMG.loop = false;
     ok(`шлях крізь ворота з петлею (двічі розворот біля воріт) відкинуто: лишились варіанти сервера «${r4.list.map(x => x.street).join('», «')}» — «${(/[^;:]*петля/.exec(r4.info) || [''])[0].trim()}»`,
       routeReqs.length === n3 + 2 && r4.list.length === 2 && r4.list[0].street === 'Н-09' && r4.list.every(x => !x.born) && /петля/.test(r4.info), JSON.stringify({ info: r4.info, list: r4.list }));
+    // той самий рейс у зворотний бік (Рядова → Милятичі): ворота тепер біля СТАРТУ, курс — від міста
+    OFMG.rev = true; const g5 = gateReqs.length, n5 = routeReqs.length, r5 = await build(page, { alternates: 2 }, true), gB = gateReqs[g5] || {}; OFMG.rev = false;
+    ok(`зворотний рейс (Рядова → Милятичі): ворота на Стрийській знайдено біля старту, курс ${gB.heading}° (із міста, на південь) — першим знову шлях Стрийською: ${r5.list.map(x => `«${x.street}» ${x.est} хв`).join(' → ')}`,
+      routeReqs.length === n5 + 2 && gateReqs.length === g5 + 1 && hv([gB.lat, gB.lon], FX.gates[1].p) < 60 && Math.abs(gB.heading - 186) <= 12 && gB.radius === 40 && r5.list.length === 3 && r5.list[0].street === 'Стрийська вулиця' && r5.list[0].born === 'primary', JSON.stringify({ gB, list: r5.list, info: r5.info }));
     ok('прохід 49а без помилок JS', errors.length === 0, errors.join(' | '));
     await ctx.close(); }
   // б) карти немає (мережа квадратів недоступна) — рейс будується, як і раніше, без затримки
@@ -5843,6 +5847,23 @@ if (run('49')) try {
       return { omt: omt.map(r => r.cls + ':' + r.c.length), pm: pm.map(r => r.cls + ':' + r.c.length), other: other.length, p0: omt[0] && omt[0].c[0].map(v => +v.toFixed(4)), p2: omt[0] && omt[0].c[2].map(v => +v.toFixed(4)) }; });
     ok(`читач квадратів: OpenFreeMap (transportation/class) → ${rd.omt.join(', ')} — місцеві дороги й з'їзди (ramp) відкинуто; офлайн-карта (roads/kind_detail) → ${rd.pm.join(', ')} — «…_link» і місцеві відкинуто; інші шари не чіпаємо; кути квадрата — на своїх місцях (${rd.p0} … ${rd.p2})`,
       rd.omt.join() === 'primary:3,trunk:3' && rd.pm.join() === 'secondary:3,motorway:3' && rd.other === 0 && Math.abs(rd.p0[1] - 23.9063) < 0.001 && Math.abs(rd.p2[1] - 24.082) < 0.001 && rd.p0[0] > rd.p2[0], JSON.stringify(rd));
+    // в2) які перетини стають воротами: спершу дорога просто «звідти», а не найвищий клас; об'їзна, що лише зачіпає коло, і траса
+    //     поперек рейсу — не ворота. Перевірено на карті дванадцяти рейсів (Київ, Вінниця, Одеса, Тернопіль, Луцьк, Стрий…):
+    //     за правилом «спершу клас» у Луцьку з Рівного воротами ставали два перетини об'їзної, а Рівненська (Н-22) — ні.
+    const gw = await app(page, async () => { const G = await import('/js/gates.js');
+      const C = [49.8, 24.0], kx = Math.cos(49.8 * Math.PI / 180) * 111320, m = (e, n) => [C[0] + n / 110540, C[1] + e / kx], O1 = m(21500, 0), O2 = m(200000, 0);   // метри на схід / північ від фінішу
+      const ray = (deg, r0, r1) => [m(Math.sin(deg * Math.PI / 180) * r0, Math.cos(deg * Math.PI / 180) * r0), m(Math.sin(deg * Math.PI / 180) * r1, Math.cos(deg * Math.PI / 180) * r1)];
+      const roads = [
+        { cls: 'primary', c: ray(90, 5000, 1000) },                                // головна вулиця зі сходу — просто «звідти»
+        { cls: 'trunk', c: [m(3200, -4000), m(2800, 4000)] },                      // об'їзна (траса) з півдня на північ: лише зачіпає коло 3 км
+        { cls: 'trunk', c: ray(130, 5000, 1000) },                                 // траса з південного сходу, веде до центру
+        { cls: 'trunk', c: ray(163, 5000, 1000) },                                 // траса з півдня, поперек рейсу
+        { cls: 'motorway', c: ray(200, 5000, 1000) },                              // магістраль із протилежного боку
+      ];
+      const f = l => l.map(x => `${x.cls} ${Math.round(x.off)}°`);
+      return { near: f(G.gateways(roads, C, O1, 3000, { max: 5 })), far: f(G.gateways(roads, C, O2, 3000, { max: 5 })), two: f(G.gateways(roads, C, O1, 3000)), bypass: f(G.gateways([roads[1]], C, O1, 3000)) }; });
+    ok(`ворота вибираємо за напрямком, а не за класом: рейс 21 км → ${gw.near.join(', ')} (головна вулиця «звідти» — перша, хоч поруч траси); об'їзна сама — ${gw.bypass.length} воріт; траса поперек рейсу (73° убік) у близькому рейсі — не ворота, у далекому (200 км) — так: ${gw.far.join(', ')}; із протилежного боку — ніколи`,
+      gw.near.join() === 'primary 0°,trunk 40°' && gw.two.join() === gw.near.join() && gw.bypass.length === 0 && gw.far.join() === 'primary 0°,trunk 40°,trunk 73°', JSON.stringify(gw));
     // г) короткий рейс (до 4 км) — воріт не шукаємо
     const t1 = OFMG.tiles.length, n3 = routeReqs.length;
     await app(page, async ([a]) => { const Rt = window.__app.route, tr = Rt.newTrip({ lat: a[0], lon: a[1], label: 'А' }, null, { lat: a[0] + 0.02, lon: a[1], label: 'Б' }); tr.costing = 'auto'; try { await Rt.buildRoute(tr, { alternates: 2 }); } catch (_) {} }, [FX.a]);

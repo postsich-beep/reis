@@ -24,7 +24,7 @@ const adiff = (a, b) => Math.abs(((a - b + 540) % 360) - 180);
 export const RANK = { motorway: 5, trunk: 4, primary: 3, secondary: 2, tertiary: 1 };
 /** Швидкість для оцінки, км/год: чим вищий клас дороги, тим швидше (це й є «спершу хороші дороги»). */
 export const CLASS_KMH = { motorway: 100, trunk: 80, primary: 56, secondary: 46, tertiary: 36, minor: 22 };
-export const GATE = { MIN_TRIP_M: 4000, RHO_K: 0.3, RHO_MIN: 1500, RHO_MAX: 6000, SIDE: 110, SEP: 25, MAX_END: 2, MAX_REQ: 2, TOL_M: 20, NEAR_M: 90, SNAP_M: 40, LOOP_M: 45, LOOP_GAP_M: 250, TILE_MS: 4500, MAX_TILES: 8, TIE: 0.05 };
+export const GATE = { MIN_TRIP_M: 4000, RHO_K: 0.3, RHO_MIN: 1500, RHO_MAX: 6000, SIDE: 90, TAN: 60, TURN: 75, LOCAL_M: 60000, SEP: 25, MAX_END: 2, MAX_REQ: 2, LONG_M: 150000, TOL_M: 20, NEAR_M: 90, SNAP_M: 40, LOOP_M: 45, LOOP_GAP_M: 250, TILE_MS: 4500, MAX_TILES: 8, TIE: 0.05, TIE_S: 120 };
 
 /* ---------- векторний квадрат → головні дороги ---------- */
 // Мінімальний читач MVT: лише шар доріг і лише потрібні властивості. Дві схеми: OpenMapTiles (OpenFreeMap) — шар transportation,
@@ -119,15 +119,24 @@ export async function roadsAround(pts, rho, { ms = GATE.TILE_MS } = {}) {
 
 /* ---------- ворота ---------- */
 /** Місця, де головні дороги перетинають коло радіуса rho довкола C з боку O. → [{ p, cls, bg, off, inward }], найважливіші перші. */
-export function gateways(roads, C, O, rho, { classes = ['motorway', 'trunk', 'primary'], side = GATE.SIDE, sep = GATE.SEP, max = GATE.MAX_END } = {}) {
+export function gateways(roads, C, O, rho, { classes = ['motorway', 'trunk', 'primary'], side = GATE.SIDE, tan = GATE.TAN, turn = null, sep = GATE.SEP, max = GATE.MAX_END } = {}) {
   const toO = brg(C, O), found = [];
+  if (turn == null) turn = dist(C, O) <= GATE.LOCAL_M ? GATE.TURN : 999;
   for (const r of roads) { if (!classes.includes(r.cls)) continue;
     for (let i = 1; i < r.c.length; i++) { const a = r.c[i - 1], b = r.c[i], da = dist(C, a), db = dist(C, b);
       if ((da < rho) === (db < rho)) continue;                                   // відрізок кола не перетинає
       const f = (rho - da) / (db - da), p = [a[0] + (b[0] - a[0]) * f, a[1] + (b[1] - a[1]) * f], bg = brg(C, p);
       if (adiff(bg, toO) > side) continue;                                        // з протилежного боку — це не дорога «звідти»
-      found.push({ p, cls: r.cls, bg, off: adiff(bg, toO), inward: da > db ? brg(a, b) : brg(b, a) }); } }
-  found.sort((x, y) => (RANK[y.cls] - RANK[x.cls]) || (x.off - y.off));
+      // 1) дорога має вести ДО центру кола, а не повз нього: об'їзна лише «зачіпає» коло (кут до радіуса понад 60°) — це не в'їзд;
+      // 2) у близькому рейсі (до 60 км) — ще й «кут ходу»: дорога у воротах не має вести вбік від прямої з іншого кінця рейсу
+      //    більше ніж на 75° (траса, що йде крізь містечко поперек рейсу: Стрий → Дрогобич, М-06 — 78°; Стрийська у Львові — 46°).
+      //    У далекому рейсі цей кут нічого не каже: траса підходить до міста зі свого боку (Одеса з Умані — із заходу).
+      const inward = da > db ? brg(a, b) : brg(b, a), tn = adiff(inward, brg(p, C)), prog = adiff(inward, brg(O, p));
+      if (tn > tan || prog > turn) continue;
+      found.push({ p, cls: r.cls, bg, off: adiff(bg, toO), inward, tan: tn, prog }); } }
+  // спершу — дорога просто «звідти» (найменший кут до напрямку на інший кінець рейсу), клас — лише серед рівних: інакше об'їзна
+  // (траса, перетинає коло збоку) випереджала б головну вулицю, що веде в місто навпростець (Луцьк із Рівного, Київ зі Львова)
+  found.sort((x, y) => (Math.round(x.off / 5) - Math.round(y.off / 5)) || (RANK[y.cls] - RANK[x.cls]) || (x.off - y.off));
   const out = [];
   for (const g of found) { if (out.some(o => adiff(o.bg, g.bg) < sep)) continue; out.push(g); if (out.length >= max) break; }   // дві смуги однієї дороги — одні ворота
   return out;
@@ -179,7 +188,7 @@ export function rankByClass(list, ix) {
   const E = list.map((r, i) => { const e = classTime(r, ix), srv = r.timeSrv != null ? r.timeSrv : r.time; r.gate = { ...(r.gate || {}), t: Math.round(e.t), major: +e.major.toFixed(3), cov: +e.cov.toFixed(2) }; return { r, i, e, s: Math.sqrt(e.t * srv) }; });
   // оцінка — середнє геометричне нашого часу й часу сервера: сервер знає обмеження швидкості й покриття, ми — клас дороги
   E.sort((x, y) => x.s - y.s || x.i - y.i);
-  const best = E[0], tie = E.filter(x => x.s <= best.s * (1 + GATE.TIE)).sort((x, y) => (y.e.major - x.e.major) || (x.s - y.s));
+  const best = E[0], tie = E.filter(x => x.s <= best.s * (1 + GATE.TIE) && x.s - best.s <= GATE.TIE_S).sort((x, y) => (y.e.major - x.e.major) || (x.s - y.s));
   const rest = E.filter(x => !tie.includes(x));
   return [...tie, ...rest].map(x => x.r);
 }
@@ -196,10 +205,11 @@ export async function withGates(a, b, base, ask, { pause = null } = {}) {
   let R = null; try { R = await Promise.race([roadsAround([B, A], rho), new Promise(res => setTimeout(() => res(null), GATE.TILE_MS + 800))]); } catch (e) { gateStat.last = String(e && e.message || e); }
   if (!R || !R.roads.length) return { list: null, info: 'немає даних карти' + (gateStat.last ? ' (' + gateStat.last + ')' : '') };
   const ix = classIndex(R), list = base.slice();
-  const gs = [...gateways(R.roads, B, A, rho).map(g => ({ ...g, end: 'b' })), ...gateways(R.roads, A, B, rho, { max: 1 }).map(g => ({ ...g, end: 'a', inward: (g.inward + 180) % 360 }))];
-  const tried = []; let asked = 0;
+  const gs = [...gateways(R.roads, B, A, rho).map(g => ({ ...g, end: 'b' })), ...gateways(R.roads, A, B, rho).map(g => ({ ...g, end: 'a', inward: (g.inward + 180) % 360 }))];
+  // далекий рейс — один додатковий запит, не два: кожен такий запит — це весь рейс наново
+  const tried = [], maxReq = D > GATE.LONG_M ? 1 : GATE.MAX_REQ; let asked = 0;
   for (const g of gs) {
-    if (asked >= GATE.MAX_REQ) break;
+    if (asked >= maxReq) break;
     if (list.some(r => passesNear(r, g.p))) { tried.push(g.cls + ' — уже є'); continue; }       // цією дорогою вже веде якийсь варіант
     asked++;
     try {
