@@ -89,6 +89,8 @@ const M = {
 };
 const MAP = { 9: 'slight', 23: 'slight', 18: 'slight', 20: 'slight', 37: 'slight', 10: 'right', 11: 'sharp', 12: 'uturn', 25: 'merge', 26: 'round', 27: 'round', 4: 'flag', 5: 'flag', 6: 'flag' };
 const LEFT = { 16: 'slight', 24: 'slight', 19: 'slight', 21: 'slight', 38: 'slight', 15: 'right', 14: 'sharp', 13: 'uturn' };
+/** (1.1.37) «Очікувач»: логотип, у якому стрілка стоїть, а розмітка біжить до неї — усюди, де програма щось робить. */
+export const RL = '<i class="rl" aria-hidden="true"></i>';
 export function manIcon(type) {
   const left = LEFT[type], shape = M[left || MAP[type] || 'straight'];
   return `<svg viewBox="0 0 48 48" fill="none" stroke="#fff" stroke-width="5" stroke-linecap="round" stroke-linejoin="round">${left ? `<g transform="translate(48 0) scale(-1 1)">${shape}</g>` : shape}</svg>`;

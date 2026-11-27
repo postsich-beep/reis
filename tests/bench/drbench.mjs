@@ -2,6 +2,10 @@
 // з web/js/nav.js. Кожну секунду: гіроскоп (накопичений поворот за годинниковою), вібрація (їдемо/стоїмо), за бажанням — вишки.
 // Похибка = де вважає телефон без GPS − де фура насправді (уздовж рейсу), метри.
 //   node tests/bench/drbench.mjs [сценарій,…] [--csv теки]
+// (1.1.37) Акселерометр і гіроскоп по осях (оболонка №9) — BENCH_ACC=1: телефон щосекунди дає середнє прискорення й кутову швидкість
+// (фізика — accSim нижче), перед поїздкою 16 хв «їздить містом із GPS» (вісь руху, зсув нуля, самоперевірка). Чесне порівняння
+// «з оцінкою й без неї» — на ТИХ САМИХ поїздках: BENCH_ACC=1 BENCH_ACCUSE=off (оцінку в розрахунок не беремо) проти BENCH_ACC=1.
+// Без BENCH_ACC стенд працює, як до 1.1.37 (випадковий потік поїздок інший — порівнювати з BENCH_ACC=1 напряму не можна).
 globalThis.window = globalThis; globalThis.addEventListener = () => {};
 const mem = new Map(); globalThis.localStorage = { getItem: k => mem.has(k) ? mem.get(k) : null, setItem: (k, v) => mem.set(k, String(v)), removeItem: k => mem.delete(k) };
 globalThis.indexedDB = { open() { throw new Error('no idb'); } };
@@ -11,6 +15,7 @@ let NOW = Date.UTC(2026, 10, 23, 8, 0, 0); const realNow = Date.now; Date.now = 
 globalThis.performance = { now: () => NOW };
 const core = await import('../../web/js/core.js');
 const nav = await import('../../web/js/nav.js');
+const { AccelSpeed, rotVec } = await import('../../web/js/accel.js');
 const { RouteIndex, bus, S } = core;
 S.truck = { ...S.truck, vmax: 90 };
 S.drAlgo = process.env.DR_ALGO || 'pf';                     // 'kf' — як було до 1.1.8 (для порівняння)
@@ -90,6 +95,44 @@ function truth(road, seed, opts = {}) {
   }
   return { idx, out, head };
 }
+/* ---------- (1.1.37) акселерометр і три осі гіроскопа, як їх віддає служба навігації ----------
+   Середнє за секунду в осях телефона: a — прискорення з тяжінням (м/с²), w — кутова швидкість (рад/с). Усередині секунди рахуємо 10 разів:
+   розгін уздовж дороги, доцентрове в повороті, ухил дороги (горби: сума трьох хвиль), кабіна «присідає» на розгоні й нахиляється в повороті
+   (із запізненням 0,7 с), телефон стоїть у тримачі під випадковим кутом. Датчики: сталий зсув нуля, шум (на ходу більший),
+   гіроскоп «пливе» (випадкове блукання — за хвилину після зупинки рівень сповзає на ~0,4°). */
+function accSim(tr, seed, o = {}) {
+  let rs = (seed * 7919 + 13) % 2147483648; const R = () => ((rs = (rs * 1103515245 + 12345) % 2147483648) / 2147483648);
+  const gauss = () => { let x = 0; for (let i = 0; i < 6; i++) x += R() - 0.5; return x * Math.SQRT2; };
+  const G = 9.80665, mm = (A, B) => A.map(r => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j])), mv = (A, v) => A.map(r => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]), T = A => [0, 1, 2].map(i => [0, 1, 2].map(j => A[j][i]));
+  const Rx = a => [[1, 0, 0], [0, Math.cos(a), -Math.sin(a)], [0, Math.sin(a), Math.cos(a)]], Ry = a => [[Math.cos(a), 0, Math.sin(a)], [0, 1, 0], [-Math.sin(a), 0, Math.cos(a)]], Rz = a => [[Math.cos(a), -Math.sin(a), 0], [Math.sin(a), Math.cos(a), 0], [0, 0, 1]];
+  const M = mm(mm(Rz(R() * 2 * Math.PI), Rx((20 + 55 * R()) * Math.PI / 180)), Ry((R() - 0.5) * 0.3));       // тримач: як завгодно навколо вертикалі, нахил 20–75°
+  const kp = 0.006 + 0.014 * R(), kr = 0.01, ba = [0, 1, 2].map(() => gauss() * (o.accBias != null ? o.accBias : 0.12)), bw = [0, 1, 2].map(() => gauss() * 5e-4), drift = o.gyroWalk != null ? o.gyroWalk : 2e-5;
+  // далі — дорога (горби) і шум: свої для кожної поїздки (o.leg), телефон той самий
+  rs = (seed * 104729 + 7 + (o.leg || 0) * 9973) % 2147483648;
+  const sg = o.grade != null ? o.grade : 0.015, ph = [R() * 6.28, R() * 6.28, R() * 6.28];
+  const grade = d => sg * (0.9 * Math.sin(2 * Math.PI * d / 2300 + ph[0]) + 0.6 * Math.sin(2 * Math.PI * d / 870 + ph[1]) + 0.4 * Math.sin(2 * Math.PI * d / 310 + ph[2]));
+  const C = (yawCw, th, ph) => mm(mm(Rz(-yawCw * Math.PI / 180), Ry(-th)), Rx(ph));                           // кузов → земля: курс, ніс угору, крен
+  const out = []; let sq = 0, roll = 0, prevC = null;
+  for (let k = 0; k < tr.out.length; k++) {
+    const s1 = tr.out[k], s0 = k ? tr.out[k - 1] : { ...s1, v: s1.v, d: s1.d, yaw: s1.yaw }, al = s1.v - s0.v, wz = (s1.yaw - s0.yaw) * Math.PI / 180;   // за секунду
+    const A = [0, 0, 0], W = [0, 0, 0];
+    for (let j = 1; j <= 10; j++) {
+      const f = j / 10, v = s0.v + al * f, d = s0.d + (s1.d - s0.d) * f, ay = -v * wz;                          // доцентрове: праворуч — мінус (вісь y — ліворуч)
+      sq += (kp * al - sq) * (0.1 / 0.7); roll += (kr * ay - roll) * (0.1 / 0.7);
+      const Cj = C(s0.yaw + (s1.yaw - s0.yaw) * f, Math.atan(grade(d)) + sq, roll), up = mv(T(Cj), [0, 0, 1]);
+      const fb = [al + G * up[0], ay + G * up[1], G * up[2]];
+      let wb = [0, 0, 0];
+      if (prevC) { const D = mm(T(prevC), Cj); wb = [(D[2][1] - D[1][2]) / 0.2, (D[0][2] - D[2][0]) / 0.2, (D[1][0] - D[0][1]) / 0.2]; }
+      prevC = Cj;
+      const ap = mv(M, fb), wp = mv(M, wb);
+      for (let q = 0; q < 3; q++) { A[q] += ap[q] / 10; W[q] += wp[q] / 10; }
+      if (j === 10) out.upTrue = mv(M, up), out.fTrue = mv(M, [1, 0, 0]);
+    }
+    for (let q = 0; q < 3; q++) { bw[q] += gauss() * drift; A[q] += ba[q] + gauss() * (0.012 + 0.0012 * s1.v); W[q] += bw[q] + gauss() * 4e-5; }
+    out.push({ a: A, w: W, up: out.upTrue, f: out.fTrue, ba: ba.slice(), bw: bw.slice() });
+  }
+  return out;
+}
 /* ---------- рейс для навігатора: маневри з плановим часом (як Valhalla для фури) ---------- */
 // як Valhalla для фури: маневр на кожному повороті, час ділянки — за типом дороги (місто 40, з'їзд 35, траса 80 км/год)
 function tripFor(idx, tr, road, planK = 1) {
@@ -107,6 +150,7 @@ function tripFor(idx, tr, road, planK = 1) {
   return { coords: idx.c, mans };
 }
 /* ---------- один прогін ---------- */
+export { accSim, truth, ROADS };
 export function run(name, o = {}) {
   const road = ROADS[o.road || name.split(':')[0]]();
   // кожна поїздка — свій водій: темп (−8…+6% від зони), як проходить повороти, як розганяється; свій дрейф гіроскопа
@@ -114,20 +158,40 @@ export function run(name, o = {}) {
   o = { zoneK: 0.92 + 0.14 * fr(sd * 0.618), aLat: 1.2 + 0.5 * fr(sd * 0.414), acc: 0.35 + 0.15 * fr(sd * 0.732), bias: (fr(sd * 0.27) - 0.5) * 2.4, ...o };
   const tr = truth(road, sd, o);
   const idx = tr.idx, trip = tripFor(idx, tr, road, o.planK || 1);
+  // (1.1.37) акселерометр: BENCH_ACC=1 — для всіх сценаріїв; оцінку беремо без самоперевірки ('on'), крім сценаріїв, що перевіряють саме її
+  const useAcc = (o.imu != null ? !!o.imu : !!process.env.BENCH_ACC) && !o.noGyro, AS = useAcc ? accSim(tr, sd, o) : null;   // телефон без гіроскопа кутової швидкості не дає — оцінки немає        // (o.acc — це розгін водія, не плутати)
+  S.accUse = useAcc ? (o.accUse || process.env.BENCH_ACCUSE || 'auto') : 'off';
+  // До того, як GPS зник, водій уже їздив із ним (o.warm хвилин містом, типово 16): оцінювач за цей час вивчив вісь руху й зсув нуля
+  // акселерометра і перевірив себе. Те саме калібрування лежить у телефоні й далі (як і насправді — воно зберігається між поїздками).
+  nav.accelReset(); globalThis.__accWarm = null;
+  if (useAcc) {
+    const E = new AccelSpeed(), fr2 = x => x - Math.floor(x), warm = o.warm != null ? o.warm : 16;
+    let wr = sd * 31 + 5; const wg = () => { let x = 0; for (let i = 0; i < 6; i++) x += ((wr = (wr * 1103515245 + 12345) % 2147483648) / 2147483648) - 0.5; return x * Math.SQRT2; };
+    for (let leg = 1; leg <= Math.ceil(warm / 8); leg++) {
+      const s2 = sd + leg, od = { zoneK: 0.92 + 0.14 * fr2(s2 * 0.618), aLat: 1.2 + 0.5 * fr2(s2 * 0.414), acc: 0.35 + 0.15 * fr2(s2 * 0.732) }, t2 = truth(ROADS.city(), s2, od), A2 = accSim(t2, sd, { ...o, leg });
+      for (let q = 0; q < 6; q++) E.step({ a: A2[0].a, w: A2[0].w, quiet: true }, { v: 0 });
+      t2.out.forEach((x, k) => E.step({ a: A2[k].a, w: A2[k].w, quiet: x.v <= 0.3 }, { v: Math.max(0, x.v + wg() * 0.15) }));
+    }
+    E.endRun();
+    globalThis.__accWarm = JSON.stringify(E.cal);
+  }
   // скидаємо стан навігатора
-  nav.setManualSpeed(null); mem.clear(); nav.setRoute(null);
+  nav.setManualSpeed(null); mem.clear(); if (globalThis.__accWarm) mem.set('reis.acc', globalThis.__accWarm); nav.setRoute(null);
   NOW += 3600e3;
   nav.setRoute(new RouteIndex(trip.coords), trip.mans);
   let seed = o.seed || 7; const rnd = () => ((seed = (seed * 1103515245 + 12345) % 2147483648) / 2147483648) - 0.5;
   const gauss = () => { let s = 0; for (let i = 0; i < 6; i++) s += rnd(); return s * Math.SQRT2; };
   const gpsUntil = o.gpsSec != null ? o.gpsSec : 90, bias = (o.bias != null ? o.bias : 0.6) / 60;   // дрейф гіроскопа, °/с
   const errs = [], log = []; let tapDone = false, tapPre = false, tapLog = null;
+  let Rg = [[1, 0, 0], [0, 1, 0], [0, 0, 1]];
   let yawOff = 0, wig = null, lastNet = -999, grab = null, grabNext = gpsUntil + 40 + 60 * Math.abs(rnd());
   // (1.1.34) підказка датчиків — ще й нахил телефона: у руці він інший (30°), а потім телефон стоїть у тримачі, як стояв (найгірший випадок: тримач повернули)
   globalThis.__motionHint = o.grab === 'hint' ? () => ({ handled: !!grab, tilt: grab ? 30 : 1, peak: 20, up: grab ? [0, 4.9, 8.5] : [0, 0, 9.8] }) : () => null;
-  const t0 = NOW;
+  // перед виїздом фура кілька секунд стоїть (як і насправді) — перша точка відліку для акселерометра
+  if (AS) for (let q = 6; q >= 1; q--) { NOW += 1000; bus.emit('sens', { var: 0.0004, yaw: o.noGyro ? undefined : tr.out[0].yaw, a: AS[0].a.map((x, i) => x + gauss() * 0.01), w: AS[0].w }); }
+  const t0 = NOW; let sk = -1;
   for (const s of tr.out) {
-    NOW = t0 + s.t * 1000;
+    NOW = t0 + s.t * 1000; sk++;
     const p = idx.at(s.d);
     // (1.1.34) останні секунди перед втратою GPS точка лежить збоку від рейсу (АЗС, стоянка, глушіння вже кидає точки на 150–400 м)
     const side = o.lastOff && s.t > gpsUntil - (o.lastSec || 15) ? core.destPoint(p, (p.brg + 90) % 360, o.lastOff) : null;
@@ -141,9 +205,19 @@ export function run(name, o = {}) {
     let w = 0; if (wig) { const k = (s.t - wig.t) / 6; if (k >= 1) wig = null; else w = wig.a * Math.sin(Math.PI * k); }
     // телефон узяли в руки: 'fast' — ривок 100–150° за 2 с; 'hint'/'slow' — повільно, 20°/с три секунди (видно лише за нахилом телефона)
     if (o.grab && !grab && s.t >= grabNext) grab = { t: s.t, dur: o.grab === 'fast' ? 2 : 3, rate: (rnd() > 0 ? 1 : -1) * (o.grab === 'fast' ? 50 + 25 * Math.abs(rnd()) * 2 : 20) };
-    if (grab) { if (s.t - grab.t >= grab.dur) { grabNext = s.t + 90 + 240 * Math.abs(rnd()); grab = null; } else yawOff += grab.rate; }
+    let gW = null;
+    if (grab) { if (s.t - grab.t >= grab.dur) { grabNext = s.t + 90 + 240 * Math.abs(rnd()); grab = null; } else { yawOff += grab.rate; gW = -grab.rate * Math.PI / 180; } }
+    // (1.1.37) те саме бачать акселерометр і гіроскоп: телефон повернувся в тримачі навколо вертикалі (yaw — за годинниковою, тож оберт −rate),
+    // усе, що «прив'язане до фури», в осях телефона тепер стоїть інакше; зсуви нуля датчиків лишаються в осях телефона
+    let imu = null;
+    if (AS) {
+      const x = AS[sk], mvv = (A, v) => A.map(r => r[0] * v[0] + r[1] * v[1] + r[2] * v[2]), mmm = (A, B) => A.map(r => [0, 1, 2].map(j => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+      let wX = [0, 0, 0];
+      if (gW != null && !process.env.BENCH_NOGRAB) { const u = mvv(Rg, x.up); wX = u.map(c => c * gW); Rg = mmm(rotVec(wX.map(c => -c)), Rg); }
+      imu = { a: mvv(Rg, x.a.map((c, i) => c - x.ba[i])).map((c, i) => c + x.ba[i]), w: mvv(Rg, x.w.map((c, i) => c - x.bw[i])).map((c, i) => c + x.bw[i] + wX[i]) };
+    }
     const yaw = o.noGyro ? undefined : s.yaw + bias * s.t + gauss() * 0.7 + w + yawOff;
-    bus.emit('sens', { var: s.v > 0.3 ? 0.08 + Math.abs(gauss()) * 0.02 : 0.0004 + Math.abs(gauss()) * 0.0001, yaw });
+    bus.emit('sens', { var: s.v > 0.3 ? 0.08 + Math.abs(gauss()) * 0.02 : 0.0004 + Math.abs(gauss()) * 0.0001, yaw, ...imu });
     if (o.place != null && s.t === gpsUntil + 10) nav.placeAtD(Math.max(0, s.d + o.place));     // стартова помилка (напр. з вишок)
     // (1.1.34) водій торкається на карті контрольного повороту, біля якого фура зараз: перед ним (за 20 м) чи щойно за ним (+30 м)
     if (o.tapCp != null && !tapDone) { const m = road.marks.filter(x => x.ang != null && Math.abs(x.ang) >= 35)[o.tapCp], at = o.tapAfter ? m.d1 + 30 : m.d0 - 20;
@@ -151,7 +225,7 @@ export function run(name, o = {}) {
       if (m && s.d >= at) { tapDone = true; const rd0 = Math.round(nav.pos.rd); const mid = (m.d0 + m.d1) / 2, cp = nav.routeCps().slice().sort((a, b) => Math.abs(a.d - mid) - Math.abs(b.d - mid))[0]; const r = cp && nav.jumpToCp(cp.d); tapLog = { t: s.t, truth: Math.round(s.d), before: rd0, cp: cp && [Math.round(cp.d0), Math.round(cp.d1), cp.ang, cp.sgn], r: r && { after: r.after }, nowRd: Math.round(nav.pos.rd) }; } }
     nav.benchTick();
     const P = nav.pos;
-    if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, sig: st ? st.sig : null, tr: st ? st.trust : null, g: st && st.gate ? `${st.cpi}:${st.gate.state || '-'}:${st.gate.prog}:${st.gate.ang}${st.gate.handled ? ':H' : ''}` : '' }); }
+    if (s.t > gpsUntil + 6 && P.mode === 'dr') { const e = (P.rd || 0) - s.d, st = nav.debugState().pf; errs.push({ t: s.t, d: s.d, e, v: s.v, est: nav.speedView().kmh, acc: globalThis.__accTrace ? nav.accelState() : undefined, grab: !!grab, sig: st ? st.sig : null, tr: st ? st.trust : null, g: st && st.gate ? `${st.cpi}:${st.gate.state || '-'}:${st.gate.prog}:${st.gate.ang}${st.gate.handled ? ':H' : ''}` : '' }); }
   }
   const ab = errs.map(x => Math.abs(x.e)).sort((a, b) => a - b), q = p => ab.length ? ab[Math.min(ab.length - 1, Math.floor(p * ab.length))] : NaN;
   // похибка одразу після кожної контрольної точки (через 20 с після виходу з повороту)

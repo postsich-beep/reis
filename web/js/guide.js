@@ -1,6 +1,6 @@
 // Ведення за маршрутом: наступний маневр, голос, прибуття, перерахунок при з'їзді.
 import { bus, log, S, RouteIndex, hav, clamp, db } from './core.js';
-import { pos, setRoute } from './nav.js';
+import { pos, setRoute, holdRejoin } from './nav.js';
 import { speak, stopSpeak, online } from './platform.js';
 import { buildRoute, viasOf, setVias, viaSlot, VIA_MAX } from './route.js';
 import { t } from './i18n.js';
@@ -17,6 +17,14 @@ let said = {}, offSince = 0, lastReroute = 0, lastManI = -1;
 // і чекаємо OFFER_SECS секунд. Підтвердили — перебудовуємо; ні (або час вийшов) — ведемо далі запланованим рейсом.
 export const OFFER_SECS = 10, CHOICE_SECS = 30;          // на вибір нового маршруту — 30 с; кожен дотик до картки дає ще 30
 let offerT = 0, offerSeq = 0, offAsked = false, onSince = 0, lastOfferEnd = 0, choiceT = 0;
+// (1.1.37) «Зійшов з рейсу — перебудувати самому» (S.offMode, типово 'auto'). У дорозі на запитання ніхто не відповідає (Діма: «все одно
+// тягне своїми дорогами, перебудовується в половині випадків»), тож картка тепер лише попереджає: за AUTO_SECS секунд програма сама
+// прокладе шлях ЗВІДСИ — вперед тією дорогою, якою водій поїхав. Повертає на вибраний рейс лише тоді, коли це майже нічого не коштує
+// (заїхали на АЗС, стоянку); з'їхали вдруге поспіль — водій їде по-своєму: перебудовуємо одразу, без картки й без повернення.
+// S.offMode = 'ask' — як було в 1.1.28: спитати й чекати, без відповіді нічого не міняти.
+export const AUTO_SECS = 6, AUTO_STREAK_MS = 180000, AUTO_BACK_S = 120;
+let autoAt = 0, autoBusy = false, wasOff = 0;
+const offAuto = () => S.offMode !== 'ask';
 
 /* ---------- голосова черга ---------- */
 const queue = []; let speaking = false;
@@ -131,7 +139,7 @@ async function buildLead(heading) {
   return buildRoute(g.trip, { from: pos, heading });
 }
 export async function startTrip(trip, opts = {}) {
-  g.trip = trip; g.active = true; g.arrived = false; g.reroutePending = null; lastOfferEnd = 0;
+  g.trip = trip; g.active = true; g.arrived = false; g.reroutePending = null; lastOfferEnd = 0; autoAt = 0; wasOff = 0; holdRejoin(0);
   let route = trip.route;
   if (!trip.chosen) trip.chosen = chosenOf(route);
   // Стартуємо не з точки А — ведемо до неї від поточного місця (крім випадку, коли водій уже їде цим маршрутом).
@@ -158,7 +166,8 @@ export function propose(o) {
   if (!g.active || !g.trip) return false;
   if (g.offer) closeOffer('replaced');
   const secs = o.secs || OFFER_SECS, now = Date.now();
-  g.offer = { id: ++offerSeq, kind: o.kind || 'info', title: o.title || '', text: o.text || '', secs, at: now, until: now + secs * 1000, actions: o.actions || [] };
+  // def — що станеться саме, коли час вийде ({ id, label, run }); без неї нічого не міняється («Лишити як є»)
+  g.offer = { id: ++offerSeq, kind: o.kind || 'info', title: o.title || '', text: o.text || '', secs, at: now, until: now + secs * 1000, actions: o.actions || [], def: o.def || null };
   log('info', 'пропозиція щодо маршруту: ' + g.offer.kind + ' — ' + g.offer.title);
   bus.emit('offer', g.offer);
   if (o.voice) say(o.voice, { urgent: true });
@@ -173,9 +182,10 @@ function closeOffer(why) {
 }
 // Відповідь водія: act — id дії з картки ('new', 'back'); порожньо — «Лишити» або час вийшов (why = 'timeout').
 export function answerOffer(act, why) {
-  const cur = g.offer, a = cur && act ? cur.actions.find(x => x.id === act) : null;
+  const cur = g.offer, def = cur && cur.def;
+  const a = cur && act ? cur.actions.find(x => x.id === act) || (def && def.id === act ? def : null) : (why === 'timeout' && def ? def : null);
   const o = closeOffer(why || (a ? a.id : 'no')); if (!o) return;
-  log('info', 'пропозиція ' + o.kind + ': ' + (a ? 'вибрано «' + a.label + '»' : why === 'timeout' ? 'не підтверджено — лишаюсь на запланованому рейсі' : 'відхилено — лишаюсь на запланованому рейсі'));
+  log('info', 'пропозиція ' + o.kind + ': ' + (a ? (why === 'timeout' ? 'час вийшов — ' : 'вибрано ') + '«' + a.label + '»' : why === 'timeout' ? 'не підтверджено — лишаюсь на запланованому рейсі' : 'відхилено — лишаюсь на запланованому рейсі'));
   if (a) { if (a.run) a.run(); }
   else if (why === 'timeout') say(t('rrStayVoice'));
 }
@@ -185,6 +195,15 @@ export function offerOffRoute(manual = false) {
   if (!g.active || !g.trip || g.rerouting || g.choice || pos.lat == null) return false;
   if (!online() && pos.mode === 'gps') { if (manual) bus.emit('offerNoNet'); return false; }
   offAsked = true;
+  if (offAuto() && !manual) {
+    // щойно самі перебудували, а водій знову з'їхав — він їде по-своєму: одразу новий шлях звідси, без запитань
+    if (Date.now() - autoAt < AUTO_STREAK_MS) { log('info', 'знову з\'їхали одразу після перебудови — прокладаю звідси без запитань'); autoReroute(true); return true; }
+    return propose({
+      kind: 'off', title: t('rrOffTitle'), text: (pos.off > 150 ? t('rrOffDist', distShort(pos.off)) + ' ' : '') + t('rrAutoText'), voice: t('rrAutoVoice'), secs: AUTO_SECS,
+      actions: [{ id: 'back', label: t('rrBack'), run: () => { lastReroute = 0; reroute(); } }],
+      def: { id: 'auto', label: t('rrAutoGo'), run: () => { autoReroute(false); } }
+    });
+  }
   return propose({
     kind: 'off', title: t('rrOffTitle'), text: (pos.off > 150 ? t('rrOffDist', distShort(pos.off)) + ' ' : '') + t('rrOffText'),
     voice: manual ? '' : t('rrOffVoice'),
@@ -266,6 +285,63 @@ export function cancelChoice(why = 'no') {
   if (why === 'timeout') say(t('rrStayVoice'));
 }
 
+/* (1.1.37) Сама перебудова після з'їзду. Рахуємо шлях звідси вперед (за курсом). Якщо водій ще не «з'їжджав удруге» й має вибраний рейс —
+   рахуємо ще й повернення на нього та порівнюємо: повернення беремо, лише коли воно довше не більш як на 2 хв (чи 3 %) — так АЗС
+   і стоянка не «з'їдають» варіант, який водій вибрав перед рейсом, а справжня інша дорога дає новий шлях уперед.
+   force — без GPS (місце щойно поставив водій або GPS зник секунди тому): перебудовуємо від нього; без інтернету — щойно з'явиться зв'язок. */
+async function autoReroute(freshOnly = false, force = false, hdg = null) {
+  if (!g.trip || !g.active || pos.lat == null) return false;
+  if (g.rerouting || autoBusy) { if (force) g.reroutePending = { lead: false, fresh: true, force: true, auto: true }; return false; }
+  if (pos.mode !== 'gps' && !force) return false;
+  if (!online()) {
+    if (force) { g.reroutePending = { lead: false, fresh: true, force: true, auto: true }; log('info', 'перебудова звідси: інтернету немає — виконаю, щойно з\'явиться'); bus.emit('autoFail', { net: true }); bus.emit('guide', g); }
+    else { offAsked = false; lastOfferEnd = Date.now(); }
+    return false;
+  }
+  g.reroutePending = null;
+  if (g.offer) closeOffer('reroute');
+  if (g.choice) closeChoice('reroute');
+  const tr = g.trip, alive = () => g.active && g.trip === tr;
+  autoBusy = true; g.rerouting = true; lastReroute = Date.now(); bus.emit('guide', g);
+  let ok = false;
+  try {
+    const heading = hdg != null ? hdg : pos.mode === 'gps' && pos.spd > 2 ? pos.hdg : null, from = { lat: pos.lat, lon: pos.lon };
+    const through = freshOnly || force || S.keepChosen === false ? null : throughChosen();
+    const F = await buildRoute(tr, { from, heading, skipA: g.passedA, skipVia: g.passedN });
+    let pick = F, kind = 'fresh';
+    if (through && alive()) {
+      await new Promise(r => setTimeout(r, 1100));                     // публічний сервер — не частіше запиту на секунду
+      try {
+        const C = await buildRoute(tr, { from, heading, through }), extra = C.time - F.time;
+        if (extra <= Math.max(AUTO_BACK_S, 0.03 * F.time)) { pick = C; kind = 'chosen'; }
+        log('info', `з'їзд: шлях звідси ${Math.round(F.dist / 1000)} км / ${Math.round(F.time / 60)} хв, повернення на вибраний рейс ${extra >= 0 ? '+' : '−'}${Math.round(Math.abs(extra) / 60)} хв — ${kind === 'chosen' ? 'повертаю на вибраний' : 'веду новим шляхом'}`);
+      } catch (e) { log('warn', 'повернення на вибраний маршрут: ' + e.message); }
+    }
+    if (alive()) {
+      if (kind === 'fresh') tr.chosen = chosenOf(pick);
+      holdRejoin(0);
+      applyRoute(pick); autoAt = Date.now(); ok = true;
+      say(t(kind === 'chosen' ? 'voiceRejoin' : 'voiceAuto'), { urgent: true });
+      if (pick.truckFail) bus.emit('truckFail', pick);
+      bus.emit('autoRoute', { kind, force, km: Math.round(pick.dist / 1000) });
+    }
+  } catch (e) {
+    log('warn', 'перебудова після з\'їзду: ' + e.message);
+    if (force && alive()) { g.reroutePending = { lead: false, fresh: true, force: true, auto: true }; bus.emit('autoFail', { net: !online(), msg: e.message }); }
+  }
+  autoBusy = false; g.rerouting = false;
+  if (!ok) { offAsked = false; lastOfferEnd = Date.now() + 20000; }     // не вийшло (сервер, зв'язок) — спробуємо ще раз за пів хвилини
+  bus.emit('guide', g);
+  return ok;
+}
+/** (1.1.37) Без GPS водій поставив «Я тут» осторонь рейсу: він їде іншою дорогою — прокладаємо рейс від цього місця (не в режимі «питати»). */
+export function rerouteFromHere() {
+  if (!g.active || !g.trip || pos.lat == null || !offAuto()) return false;
+  holdRejoin(15 * 60000);                                                // поки нового рейсу немає — на старий позначку не повертаємо
+  autoReroute(true, true);
+  return true;
+}
+
 async function reroute(lead = false, fresh = false, force = false) {
   if (!g.trip) return;
   if (g.rerouting) { if (force) g.reroutePending = { lead, fresh: true, force: true }; return; }      // контрольну точку поставили під час перерахунку — ще раз, уже з нею
@@ -334,7 +410,13 @@ function announce() {
 function update() {
   if (!g.active || !g.idx || pos.lat == null) return;
   const mans = g.route.mans, idx = g.idx, now = Date.now();
-  if (g.reroutePending && (pos.mode === 'gps' || g.reroutePending.force) && !g.rerouting && online()) { const p = g.reroutePending; log('info', p.force && pos.mode !== 'gps' ? 'є зв\'язок — прокладаю через контрольну точку' : 'GPS є — виконую відкладену перебудову'); reroute(p.lead, p.fresh, !!p.force); return; }
+  if (g.reroutePending && g.reroutePending.auto) {
+    // (1.1.37) відкладена перебудова «звідси» (не було зв'язку чи сервер не відповів): не частіше ніж раз на 15 с; ведення тим часом працює далі
+    if (!g.rerouting && online() && now - lastReroute > 15000) { g.reroutePending = null; log('info', 'є зв\'язок — прокладаю рейс звідси'); autoReroute(true, pos.mode !== 'gps'); return; }
+  } else if (g.reroutePending && (pos.mode === 'gps' || g.reroutePending.force) && !g.rerouting && online()) {
+    const p = g.reroutePending;
+    log('info', p.force && pos.mode !== 'gps' ? 'є зв\'язок — прокладаю через контрольну точку' : 'GPS є — виконую відкладену перебудову'); reroute(p.lead, p.fresh, !!p.force); return;
+  }
   if (g.leadPending && pos.mode === 'gps') {
     g.leadPending = false;
     if (hav(pos, g.trip.a) > 400 && online()) { reroute(true); return; }
@@ -347,7 +429,11 @@ function update() {
       if (!offSince) offSince = now;
       // (1.1.28) сам маршрут НЕ перебудовуємо: один раз на з'їзд пропонуємо — і чекаємо відповіді. Не підтвердили — ведемо запланованим;
       // удруге про той самий з'їзд не питаємо (водій знає, куди їде). Перебудувати можна будь-коли: дотик до плашки «Ви зійшли з рейсу».
-      if (now - offSince > (far ? 3000 : 8000) && !offAsked && !g.offer && !g.choice && !g.rerouting && now - lastReroute > 20000 && now - lastOfferEnd > 30000 && online()) offerOffRoute();
+      // (1.1.37) у режимі «перебудувати самому» — швидше (5 с) і частіше: якщо новий шлях не підійшов і водій їде далі по-своєму, наступний — за 12 с
+      const auto = offAuto();
+      if (now - offSince > (far ? 3000 : auto ? 5000 : 8000) && !offAsked && !g.offer && !g.choice && !g.rerouting && now - lastReroute > (auto ? 10000 : 20000) && now - lastOfferEnd > (auto ? 12000 : 30000) && online()) offerOffRoute();
+      // їдемо іншою дорогою, а GPS може зникнути будь-якої миті: тоді позначку НЕ повертаємо на старий рейс (див. gpsLost нижче)
+      if (auto && pos.spd >= 5 && now - offSince > 3000) { holdRejoin(20000); wasOff = now; }
     } else offSince = 0;
   } else {
     offSince = 0; g.offRoute = false;
@@ -394,4 +480,15 @@ function arrive() {
   bus.emit('arrived', g);
 }
 
-export function init() { bus.on('pos', update); }
+export function init() {
+  bus.on('pos', update);
+  // (1.1.37) GPS зник саме тоді, коли водій уже їхав іншою дорогою, а новий шлях ще не проклали: остання точка — справжня,
+  // прокладаємо від неї (інакше позначка стала б на старий рейс і поїхала ним — «іде в поле»)
+  bus.on('gpsLost', d => {
+    if (!g.active || !g.trip || !offAuto() || !d || d.reason === 'manual' || pos.onRoute || !wasOff) return;
+    if (Date.now() - wasOff > 20000) return;
+    log('info', 'GPS зник після з\'їзду з рейсу — прокладаю від останньої справжньої точки');
+    holdRejoin(15 * 60000); autoReroute(true, true, pos.spd > 2 ? pos.hdg : null);
+  });
+  bus.on('manualOff', () => { rerouteFromHere(); });
+}

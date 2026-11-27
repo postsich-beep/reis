@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120">
+<style>.d{animation:r 0.6s linear infinite}@keyframes r{to{stroke-dashoffset:16}}@media (prefers-reduced-motion:reduce){.d{animation:none}}</style>
+<rect width="120" height="120" fill="#FFC61A"/>
+<path d="M38 103V34H57a17 17 0 0 1 0 34H38M54 68l31 35" fill="none" stroke="#151A21" stroke-width="22"/>
+<path class="d" stroke-width="5" stroke-dasharray="9 7" d="M38 61V34H57a17 17 0 0 1 0 34L85 103" fill="none" stroke="#FFFFFF"/>
+<rect y="96" width="120" height="24" fill="#FFC61A"/>
+<path d="M38 67L46 86L38 81.5L30 86Z" fill="#FFFFFF"/>
+</svg>

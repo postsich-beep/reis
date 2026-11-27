@@ -27,6 +27,7 @@ import android.os.IBinder
 import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
+import org.json.JSONArray
 import org.json.JSONObject
 import kotlin.math.sqrt
 
@@ -63,6 +64,13 @@ class NavService : Service(), SensorEventListener {
     private var accSum = 0.0
     private var accSq = 0.0
     private var accN = 0
+    // (оболонка №9) для швидкості з акселерометра після зупинки: раз на секунду — середнє прискорення й кутова швидкість в осях телефона
+    private val aSum = DoubleArray(3)       // сума прискорення по осях за секунду, м/с² (із тяжінням)
+    private val aSq = DoubleArray(3)        // і сума квадратів — розкид по осях (вібрація)
+    private val wInt = DoubleArray(3)       // ∫ω·dt за секунду, рад
+    private var wDt = 0.0                   // скільки секунд гіроскопа в цій сумі
+    private val wLp = DoubleArray(3)        // кутова швидкість, згладжена на ≈0,15 с (тряска тримача гаситься, рука — ні)
+    private var wPeak = 0.0                 // найбільша згладжена кутова швидкість за секунду, рад/с — «телефон узяли в руку»
     private var heading: Float? = null
     private var pressure: Float? = null
     private val rot = FloatArray(9)
@@ -73,6 +81,7 @@ class NavService : Service(), SensorEventListener {
     private var locError = ""
 
     private fun emit(type: String, o: JSONObject) { MainActivity.instance?.emit(type, o.toString()) }
+    private fun r(x: Double, k: Double): Double = Math.round(x * k) / k
 
     private fun locJson(l: Location, prov: String): JSONObject {
         val o = JSONObject()
@@ -176,8 +185,25 @@ class NavService : Service(), SensorEventListener {
                 val v = accSq / accN - mean * mean
                 if (v.isFinite()) o.put("var", if (v < 0) 0.0 else v)
             }
+            if (accN >= 10) {
+                val a = JSONArray(); val sd = JSONArray(); var ok = true
+                for (i in 0..2) {
+                    val m = aSum[i] / accN; val v = aSq[i] / accN - m * m
+                    if (!m.isFinite() || !v.isFinite()) { ok = false; break }
+                    a.put(r(m, 1e4)); sd.put(r(sqrt(if (v < 0) 0.0 else v), 1e4))
+                }
+                if (ok) { o.put("a", a); o.put("s", sd); o.put("n", accN) }
+            }
             accSum = 0.0; accSq = 0.0; accN = 0
+            for (i in 0..2) { aSum[i] = 0.0; aSq[i] = 0.0 }
             if (hasGyro) o.put("yaw", yawCw)
+            if (hasGyro && wDt > 0.2) {
+                val w = JSONArray(); var ok = true
+                for (i in 0..2) { val m = wInt[i] / wDt; if (!m.isFinite()) { ok = false; break }; w.put(r(m, 1e6)) }
+                if (ok && wPeak.isFinite()) { o.put("w", w); o.put("dt", r(wDt, 1e3)); o.put("wp", r(wPeak, 1e3)) }
+            }
+            for (i in 0..2) wInt[i] = 0.0
+            wDt = 0.0; wPeak = 0.0
             if (++tick % 5 == 0) emitState()
             heading?.let { if (it.isFinite()) o.put("hdg", it.toDouble()) }
             pressure?.let { if (it.isFinite()) o.put("press", it.toDouble()) }
@@ -283,15 +309,25 @@ class NavService : Service(), SensorEventListener {
                 else { grav[0] = 0.92f * grav[0] + 0.08f * x; grav[1] = 0.92f * grav[1] + 0.08f * y; grav[2] = 0.92f * grav[2] + 0.08f * z }
                 val m = sqrt((x * x + y * y + z * z).toDouble())
                 accSum += m; accSq += m * m; accN++
+                aSum[0] += x; aSum[1] += y; aSum[2] += z
+                aSq[0] += x.toDouble() * x; aSq[1] += y.toDouble() * y; aSq[2] += z.toDouble() * z
             }
             Sensor.TYPE_GYROSCOPE -> {
                 // Поворот машини = обертання навколо вертикалі, як би телефон не стояв у тримачі.
-                if (hasGrav && lastGyroNs != 0L) {
-                    val dt = (e.timestamp - lastGyroNs) / 1e9
-                    val g = sqrt((grav[0] * grav[0] + grav[1] * grav[1] + grav[2] * grav[2]).toDouble())
-                    if (dt > 0 && dt < 0.5 && g > 1.0) {
-                        val aroundUp = (e.values[0] * grav[0] + e.values[1] * grav[1] + e.values[2] * grav[2]) / g   // рад/с, проти год. стрілки
-                        yawCw -= Math.toDegrees(aroundUp * dt)
+                val dt = if (lastGyroNs != 0L) (e.timestamp - lastGyroNs) / 1e9 else 0.0
+                if (dt > 0 && dt < 0.5) {
+                    // сирий поворот по трьох осях — для швидкості з акселерометра (як повернувся телефон відносно землі від зупинки)
+                    val k = if (dt < 0.15) dt / 0.15 else 1.0
+                    for (i in 0..2) { wInt[i] += e.values[i] * dt; wLp[i] += k * (e.values[i] - wLp[i]) }
+                    wDt += dt
+                    val p = sqrt(wLp[0] * wLp[0] + wLp[1] * wLp[1] + wLp[2] * wLp[2])
+                    if (p > wPeak) wPeak = p
+                    if (hasGrav) {
+                        val g = sqrt((grav[0] * grav[0] + grav[1] * grav[1] + grav[2] * grav[2]).toDouble())
+                        if (g > 1.0) {
+                            val aroundUp = (e.values[0] * grav[0] + e.values[1] * grav[1] + e.values[2] * grav[2]) / g   // рад/с, проти год. стрілки
+                            yawCw -= Math.toDegrees(aroundUp * dt)
+                        }
                     }
                 }
                 lastGyroNs = e.timestamp

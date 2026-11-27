@@ -3,6 +3,7 @@ import { bus, log, S, hav, bearing, destPoint, inUkraine, clamp } from './core.j
 import { RouteTracker } from './drpf.js';
 import { motionHint, startMotion } from './sensors.js';
 import { gyroK, calBusy } from './calib.js';
+import { AccelSpeed } from './accel.js';
 
 export const pos = {
   mode: 'none',            // 'none' — ще немає позиції, 'approx' — приблизно (вишки, Wi-Fi), 'gps' — довіряємо GPS, 'dr' — рахуємо самі
@@ -56,6 +57,7 @@ export function routeCps() { const t = tracker(); return t ? t.cps : []; }
    не стоїть, якщо машина їде. Акселерометр каже «стоїмо» — v = 0. Водій назвав швидкість — вона головна.
    Так поводиться BlindDriver: метка не зупиняється, похибку виправляють ±100 і вишки. */
 const kf = { on: false, d: 0, v: 0, Pdd: 0, Pdv: 0, Pvv: 0, src: '', out: [] };
+let kfAcc = false;                              // (1.1.37) швидкість розрахунку зараз тримається акселерометра (щойно рушили з місця)
 // Якість супутникового сигналу (AGC, C/N0) і еталон цього телефона, знятий, поки GPS справжній
 export const gq = { agc: null, cn0: null, n: 0, t: 0, agcBase: null, cnBase: null, verdict: '' };
 
@@ -110,7 +112,7 @@ export function planSpeed(d) {
 }
 export function setRoute(idx, mans = null) {
   const keepDr = pos.mode === 'dr' && route && idx && pos.onRoute;     // перебудова під час розрахунку — лишаємось на маршруті
-  plan = makePlan(idx, mans); heldTurn = null;
+  plan = makePlan(idx, mans); heldTurn = null; rejoinHold = 0;
   if (!idx || !keepDr) kf.on = false;
   route = idx; pos.rd = null; pos.onRoute = false; pos.off = 0;
   routeInUA = true;
@@ -170,9 +172,13 @@ function placeOnRoute(d, accBase, reason) {
 // Далі від рейсу, ніж REJOIN_MAX, — це справді інша дорога: лишаємо вільний розрахунок, але щоп'ять секунд пробуємо знову,
 // і щойно розрахована точка в межах своєї похибки дійде до рейсу — повертаємо на рейс.
 const REJOIN_MAX = 1500;
-let rejoinT = 0;
+let rejoinT = 0, rejoinHold = 0;
+/** (1.1.37) Водій з'їхав на іншу дорогу, і рейс зараз перебудовується звідси (guide.js): стільки мілісекунд позначку на СТАРИЙ рейс
+ *  не повертаємо — інакше вона поїде дорогою, якою фура вже не їде. Новий рейс (setRoute) притримку знімає. 0 — зняти. */
+export function holdRejoin(ms) { rejoinHold = ms > 0 ? Date.now() + ms : 0; }
 function rejoinRoute(lim = REJOIN_MAX) {
   if (!route || pos.onRoute || pos.lat == null || pos.mode !== 'dr' || simOn) return false;
+  if (Date.now() < rejoinHold) return false;
   const l = route.locate(pos, pos.rd); if (!l || l.off > lim) return false;
   log('info', `GPS немає, позначка була за ${Math.round(l.off)} м від рейсу — ставимо на рейс і ведемо по ньому`);
   placeOnRoute(l.d, clamp(l.off + 120, 120, REJOIN_MAX), pos.reason || 'timeout');
@@ -425,7 +431,7 @@ export function speedView() {
   if (pos.mode === 'gps') return { kmh: pos.spd * 3.6, kind: 'gps' };
   if (manualSpd != null) return { kmh: manualSpd * 3.6, kind: manualSpd === 0 ? 'still' : 'manual' };
   if (!moving) return { kmh: 0, kind: 'still' };
-  if (pos.mode === 'dr' && kf.on) return { kmh: cap(kf.v), kind: kf.src === 'plan' ? 'plan' : 'est' };
+  if (pos.mode === 'dr' && kf.on) return { kmh: cap(kf.v), kind: kf.src === 'plan' && !kfAcc ? 'plan' : 'est', acc: kfAcc };
   if (pos.mode === 'dr' && vCruise > 0.5) return { kmh: cap(pos.spd), kind: 'est' };
   if (fresh && apSpd > 0.5 && apSpd <= VMAX() * 1.15) return { kmh: cap(apSpd), kind: 'approx' };
   // GPS підмінено, а машина їде: тримаємо останню чесну швидкість (навіть із до перезапуску), поки не мине 15 хв
@@ -550,6 +556,8 @@ export function setManual(p) {
   matchRoute(pos, 0);
   saveGood();
   bus.emit('pos', pos);
+  // (1.1.37) рейс іде, а водій поставив себе осторонь від нього — він їде іншою дорогою: рейс перебудується від цього місця (guide.js)
+  if (route && !pos.onRoute) bus.emit('manualOff', { off: Math.round(pos.off || 0) });
 }
 
 export function acceptPending() {
@@ -584,7 +592,9 @@ function tick() {
   if (kf.on && route && pos.onRoute && pos.rd != null && drTracker()) {
     const T = dt + carry; carry = 0;
     const before = trk.est.d;
-    trk.step(now / 1000, Math.max(T, 0.2), { moving, manualV: manualSpd, proven: now - gyroSeen < 40 * 60000 });
+    const av = accUse();
+    trk.step(now / 1000, Math.max(T, 0.2), { moving, manualV: manualSpd, proven: now - gyroSeen < 40 * 60000, accV: av });
+    kfAcc = !!(av && av.sig < 2);
     const e = trk.est;
     kf.d = e.d; kf.v = manualSpd != null ? manualSpd : (moving ? e.v : 0);
     if (trk.o.gate) gateEvents(now); else calibrationCheck(now, before, e);
@@ -704,6 +714,45 @@ export function calYaw(raw) {
   else if (k !== calK) { calBase += (raw - calRaw0) * calK; calRaw0 = raw; calK = k; }
   return calBase + (raw - calRaw0) * calK;
 }
+/* ---------- (1.1.37) швидкість з акселерометра після зупинки (accel.js) ----------
+   Служба навігації (оболонка №9) щосекунди дає середнє прискорення a й кутову швидкість w в осях телефона. Поки GPS справжній —
+   оцінка рахується «в тіні» й звіряється з GPS (самоперевірка), вісь руху вчиться з розгонів. Без GPS оцінку бере розрахунок —
+   якщо вона на цьому телефоні зійшлась із GPS. S.accUse: 'off' — не брати ніколи, 'on' — брати без перевірки (стенд), інакше — сама. */
+let acc = null, accOut = null, accT = 0;
+const ACC_HAND_PEAK = 1.2;                       // рад/с: фура так не крутиться й не гойдається — телефон узяли в руку
+const sensLog = [];                             // посекундний запис датчиків за останні 2 години — у журнал GPS, для розбору справжнього рейсу
+function accel() {
+  if (!acc) { let cal = null; try { cal = JSON.parse(localStorage.getItem('reis.acc') || 'null'); } catch (_) {} acc = new AccelSpeed({}, cal); }
+  return acc;
+}
+function accStep(s, quiet) {
+  const now = Date.now();
+  if (!Array.isArray(s.a) || !Array.isArray(s.w)) {
+    // секунда без датчиків (служба не встигла, датчик віддав пачкою) — не біда; довше — відлік від зупинки втрачено
+    if (acc && now - accT > 3500) { acc.step(null); accOut = null; }
+    return;
+  }
+  const A = accel(), gpsOk = pos.mode === 'gps' && now - lastFixT < 2500 && now - pos.spoofAt > 120000 && !simOn;
+  const hint = motionHint(), dt = s.dt > 0.3 && s.dt < 3.5 ? +s.dt : 1;      // скільки секунд гіроскопа в цьому пакеті (оболонка рахує за мітками датчика)
+  // «у руках»: датчик нахилу (sensors.js), калібрування гіроскопа або різкий оберт телефона (згладжений пік кутової швидкості від оболонки)
+  accOut = A.step({ a: s.a, w: s.w, quiet }, gpsOk ? { v: pos.spd } : null, !!(hint && hint.handled) || calBusy() || s.wp > ACC_HAND_PEAK, dt);
+  accT = now;
+  if (A.changed) { try { localStorage.setItem('reis.acc', JSON.stringify(A.cal)); } catch (_) {} }
+  const r = x => Math.round(x * 1000) / 1000;
+  sensLog.push([Math.round(now / 1000), gpsOk ? Math.round(pos.spd * 10) / 10 : -1, s.var == null ? -1 : +(+s.var).toFixed(5), ...s.a.map(r), ...s.w.map(x => Math.round(x * 1e5) / 1e5),
+    s.press == null ? -1 : Math.round(s.press * 100) / 100, accOut ? Math.round(accOut.v * 10) / 10 : -1, accOut ? Math.round(accOut.sig * 10) / 10 : -1, pos.mode === 'dr' ? 1 : 0]);
+  if (sensLog.length > 7200) sensLog.splice(0, sensLog.length - 7200);
+}
+/** Стенд: забути оцінювач (наступний крок візьме збережене калібрування заново). */
+export function accelReset() { acc = null; accOut = null; sensLog.length = 0; }
+/** Оцінка для розрахунку без GPS: { v, sig } або null (немає даних, вимкнено, чи на цьому телефоні вона ще не зійшлась із GPS). */
+function accUse() {
+  const mode = S.accUse || 'auto';
+  if (mode === 'off' || !acc || !accOut || Date.now() - accT > 2500) return null;
+  return mode === 'on' || acc.proven() ? accOut : null;
+}
+/** Стан для екрана «GPS» і журналу: скільки рушань звірено з GPS, чи сходиться, чи береться в розрахунок. */
+export const accelState = () => acc ? { ...acc.stats(), use: !!accUse(), mode: S.accUse || 'auto', v: accOut ? +accOut.v.toFixed(1) : null, sig: accOut ? +accOut.sig.toFixed(1) : null, age: accOut ? Math.round(accOut.age) : null, fresh: Date.now() - accT < 2500 } : null;
 function onSens(s) {
   if (s.hdg != null) compass = s.hdg;
   if (s.yaw != null) {
@@ -711,7 +760,7 @@ function onSens(s) {
     if (calBusy()) yawHist.length = 0;                   // іде калібрування: телефон крутять у руках — це не повороти фури
     else onYaw(y);
   }
-  if (s.var == null) return;
+  if (s.var == null) { accStep(s, false); return; }
   lastVar = s.var;
   // Самокалібрування: запам'ятовуємо рівень вібрації на стоянці й у русі, поки GPS живий.
   if (pos.mode === 'gps' && Date.now() - lastFixT < 2500) {
@@ -720,6 +769,7 @@ function onSens(s) {
   // поріг «їдемо» — ближче до рівня стоянки (чутливіше удвічі, ніж середнє геометричне); «стоїмо» — лише після 6 с спокою
   const thr = (varStop != null && varMove != null && varMove > 2.5 * varStop) ? varStop * Math.pow(varMove / varStop, 0.3) : 0.002;
   if (s.var > thr) { moving = true; stillT = 0; } else if (++stillT >= 6) moving = false;
+  accStep(s, s.var <= thr);
   // (до 1.1.12 сильну тряску вважали «телефон у руках» і на хвилину глушили гіроскоп — але фуру на бруківці трясе так само.
   //  Тепер «у руках» визначаємо за нахилом телефона — див. sensors.js.)
 }
@@ -768,9 +818,11 @@ export const routeTurns = () => turns.slice();
 // Стенд перевірки ведення без GPS (tests/bench): ті самі обробники, але час і такт задає стенд
 export function benchStart() { bus.on('gps', onGps); bus.on('sens', onSens); lastTick = Date.now(); }
 export const benchTick = () => tick();
-export const debugState = () => ({ yawHist: yawHist.slice(-12), lastVar, lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
+export const debugState = () => ({ accel: accelState(), yawHist: yawHist.slice(-12), lastVar, lastTurnEv, vCruise, vCruiseT, moving, varStop, varMove, net, compass, yawNow, cand: cand.length, badRun, apSpd, apSpdErr, apSpdT, manualSpd, turns: turns.length, holdSince, gq: { ...gq }, kf: { ...kf, out: kf.out.length }, gyroSeen,
   pf: trk && trk.on ? { d: Math.round(trk.est.d), v: +trk.est.v.toFixed(1), sig: Math.round(trk.est.sig), bias: +trk.bias.toFixed(3), trust: trk.trust, cps: trk.cps.length, cpi: trk.cpi, gate: trk.o.gate ? { ...cpView(), align: trk.align, off: trk.off == null ? null : Math.round(trk.off) } : null, mMed: trk.mMed == null ? null : +trk.mMed.toFixed(2), tw: (trk.tw || []).length } : null });
 /** Журнал GPS для розбору: усе, що віддав телефон за останні 40 хв, і що з цим зробив застосунок. */
 export function gpsJournal() {
-  return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), entries: journal.slice() };
+  return { app: 'Reis', made: new Date().toISOString(), spoofCheck: !!S.spoof, pos: { ...pos, raw: undefined, pending: undefined }, state: debugState(), accel: accelState(), accCal: acc ? acc.cal : null, entries: journal.slice(),
+    // посекундно: [час, швидкість GPS (−1 — немає), вібрація, прискорення x y z, кутова швидкість x y z, тиск, швидкість з акселерометра, її похибка, без GPS]
+    sens: sensLog.slice() };
 }
