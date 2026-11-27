@@ -5441,6 +5441,21 @@ if (run('45')) try {
     j1.mode === 'dr' && j1.auto.some(x => /^fresh/.test(x)) && near(j1.lat0, LAT0 + 0.0030) && j1.on && near(q6.locations[0].lat, j1.plat, 0.004) && j1.plat - (await at(D)).lat > 0.0018, JSON.stringify({ j0: { off: j0.off, vis: j0.vis }, mode: j1.mode, auto: j1.auto, lat0: j1.lat0, on: j1.on, plat: j1.plat, l0: q6.locations[0], seen: srv.seen }));
   await app(page, () => window.__app.guide.stopTrip()); await sleep(300);
 
+  // з) підміна GPS (нею глушать): точка за мить «відскочила» на 3 км від рейсу. Від такого місця рейс сам НЕ перебудовується:
+  //    або точку відкинуто як підроблену, або з'являється картка «спитати й чекати» — без відповіді нічого не міняється
+  await app(page, () => { window.__offers.length = 0; window.__auto.length = 0; });
+  D = 7000; cur = 0; lastFix = 0;
+  await drive(2, 0);
+  await app(page, tr => window.__app.guide.startTrip(tr, { onRoute: true }), mkTrip('t-auto4')); await drive(4, 0);
+  srv.cs = shift(0.0270); srv.seen.length = 0; await clear();
+  const n7 = routeReqs.length;
+  let defSeen = false, askSeen = false;
+  for (let i = 0; i < 20; i++) { await fix(0.0270); await sleep(1000); const o = await app(page, () => { const o = window.__app.guide.g.offer; return o ? { def: !!o.def, secs: o.secs } : null; }); if (o && o.def) defSeen = true; if (o && !o.def) askSeen = true; }
+  const z = await st();
+  ok(`місце «відскочило» на 3 км від рейсу за секунду — це не з’їзд: рейс не перебудовано (запитів ${routeReqs.length - n7}), картки з автоперебудовою не було${askSeen ? '; була картка «спитати й чекати»' : '; точку відкинуто'}`,
+    routeReqs.length === n7 && !defSeen && z.auto.length === 0 && near(z.lat0, LAT0), JSON.stringify({ reqs: routeReqs.length - n7, defSeen, askSeen, auto: z.auto, mode: z.mode, offers: z.offers }));
+  await app(page, () => window.__app.guide.stopTrip()); await sleep(300);
+
   // ж) «Налаштування»: можна повернути «Спитати й чекати»
   ROUTE.fn = null;
   const set0 = await app(page, async () => {

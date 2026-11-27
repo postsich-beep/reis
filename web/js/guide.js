@@ -23,8 +23,11 @@ let offerT = 0, offerSeq = 0, offAsked = false, onSince = 0, lastOfferEnd = 0, c
 // (заїхали на АЗС, стоянку); з'їхали вдруге поспіль — водій їде по-своєму: перебудовуємо одразу, без картки й без повернення.
 // S.offMode = 'ask' — як було в 1.1.28: спитати й чекати, без відповіді нічого не міняти.
 export const AUTO_SECS = 6, AUTO_STREAK_MS = 180000, AUTO_BACK_S = 120;
-let autoAt = 0, autoBusy = false, wasOff = 0;
+let autoAt = 0, autoBusy = false, wasOff = 0, lastOnT = 0;
 const offAuto = () => S.offMode !== 'ask';
+// Чи схожий з'їзд на справжній. Підміна GPS (нею глушать) кидає точку на кілометри за мить — від такого місця рейс не перебудовуємо:
+// підміну бачили останні 10 хв, або від рейсу «від'їхали» швидше, ніж їздять (понад 45 м/с від останньої миті на рейсі).
+const offPlausible = () => Date.now() - (pos.spoofAt || 0) > 600000 && (!lastOnT || pos.off <= 250 + 45 * (Date.now() - lastOnT) / 1000);
 
 /* ---------- голосова черга ---------- */
 const queue = []; let speaking = false;
@@ -139,7 +142,7 @@ async function buildLead(heading) {
   return buildRoute(g.trip, { from: pos, heading });
 }
 export async function startTrip(trip, opts = {}) {
-  g.trip = trip; g.active = true; g.arrived = false; g.reroutePending = null; lastOfferEnd = 0; autoAt = 0; wasOff = 0; holdRejoin(0);
+  g.trip = trip; g.active = true; g.arrived = false; g.reroutePending = null; lastOfferEnd = 0; autoAt = 0; wasOff = 0; lastOnT = 0; holdRejoin(0);
   let route = trip.route;
   if (!trip.chosen) trip.chosen = chosenOf(route);
   // Стартуємо не з точки А — ведемо до неї від поточного місця (крім випадку, коли водій уже їде цим маршрутом).
@@ -195,7 +198,7 @@ export function offerOffRoute(manual = false) {
   if (!g.active || !g.trip || g.rerouting || g.choice || pos.lat == null) return false;
   if (!online() && pos.mode === 'gps') { if (manual) bus.emit('offerNoNet'); return false; }
   offAsked = true;
-  if (offAuto() && !manual) {
+  if (offAuto() && !manual && offPlausible()) {
     // щойно самі перебудували, а водій знову з'їхав — він їде по-своєму: одразу новий шлях звідси, без запитань
     if (Date.now() - autoAt < AUTO_STREAK_MS) { log('info', 'знову з\'їхали одразу після перебудови — прокладаю звідси без запитань'); autoReroute(true); return true; }
     return propose({
@@ -425,7 +428,9 @@ function update() {
     g.offRoute = pos.mode === 'gps' && pos.off > 80;      // «поза маршрутом» — лише за справжнім GPS, не за вишками
     const far = pos.off > 1500;              // далеко від маршруту — питаємо, навіть якщо машина стоїть
     onSince = 0;
-    if (pos.mode === 'gps' && pos.off > 80 && (pos.spd >= 1.5 || far)) {
+    // (1.1.37) у режимі «перебудувати самому» з'їздом вважаємо рух від 14 км/год: маневри на стоянці чи АЗС (повільно, за 100–200 м
+    // від дороги) рейс не чіпають — інакше він перебудовувався б за кожним розворотом; далі 1,5 км від рейсу — питаємо й на місці
+    if (pos.mode === 'gps' && pos.off > 80 && (pos.spd >= (offAuto() ? 4 : 1.5) || far)) {
       if (!offSince) offSince = now;
       // (1.1.28) сам маршрут НЕ перебудовуємо: один раз на з'їзд пропонуємо — і чекаємо відповіді. Не підтвердили — ведемо запланованим;
       // удруге про той самий з'їзд не питаємо (водій знає, куди їде). Перебудувати можна будь-коли: дотик до плашки «Ви зійшли з рейсу».
@@ -433,10 +438,10 @@ function update() {
       const auto = offAuto();
       if (now - offSince > (far ? 3000 : auto ? 5000 : 8000) && !offAsked && !g.offer && !g.choice && !g.rerouting && now - lastReroute > (auto ? 10000 : 20000) && now - lastOfferEnd > (auto ? 12000 : 30000) && online()) offerOffRoute();
       // їдемо іншою дорогою, а GPS може зникнути будь-якої миті: тоді позначку НЕ повертаємо на старий рейс (див. gpsLost нижче)
-      if (auto && pos.spd >= 5 && now - offSince > 3000) { holdRejoin(20000); wasOff = now; }
+      if (auto && pos.spd >= 5 && now - offSince > 3000 && offPlausible()) { holdRejoin(20000); wasOff = now; }
     } else offSince = 0;
   } else {
-    offSince = 0; g.offRoute = false;
+    offSince = 0; g.offRoute = false; if (pos.mode === 'gps') lastOnT = now;
     if (g.offer && g.offer.kind === 'off') closeOffer('back');           // самі повернулись на рейс — питати вже нема про що
     // повернулись на рейс надовго (15 с) — наступний з'їзд буде новим, про нього спитаємо знову; коротке «зачепило лінію» не рахується
     if (offAsked) { if (!onSince) onSince = now; else if (now - onSince > 15000) { offAsked = false; onSince = 0; } }
