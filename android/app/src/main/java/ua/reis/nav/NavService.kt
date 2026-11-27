@@ -309,8 +309,9 @@ class NavService : Service(), SensorEventListener {
                 else { grav[0] = 0.92f * grav[0] + 0.08f * x; grav[1] = 0.92f * grav[1] + 0.08f * y; grav[2] = 0.92f * grav[2] + 0.08f * z }
                 val m = sqrt((x * x + y * y + z * z).toDouble())
                 accSum += m; accSq += m * m; accN++
-                aSum[0] += x; aSum[1] += y; aSum[2] += z
-                aSq[0] += x.toDouble() * x; aSq[1] += y.toDouble() * y; aSq[2] += z.toDouble() * z
+                val xd = x.toDouble(); val yd = y.toDouble(); val zd = z.toDouble()
+                aSum[0] += xd; aSum[1] += yd; aSum[2] += zd
+                aSq[0] += xd * xd; aSq[1] += yd * yd; aSq[2] += zd * zd
             }
             Sensor.TYPE_GYROSCOPE -> {
                 // Поворот машини = обертання навколо вертикалі, як би телефон не стояв у тримачі.
@@ -318,7 +319,7 @@ class NavService : Service(), SensorEventListener {
                 if (dt > 0 && dt < 0.5) {
                     // сирий поворот по трьох осях — для швидкості з акселерометра (як повернувся телефон відносно землі від зупинки)
                     val k = if (dt < 0.15) dt / 0.15 else 1.0
-                    for (i in 0..2) { wInt[i] += e.values[i] * dt; wLp[i] += k * (e.values[i] - wLp[i]) }
+                    for (i in 0..2) { val wi = e.values[i].toDouble(); wInt[i] += wi * dt; wLp[i] += k * (wi - wLp[i]) }
                     wDt += dt
                     val p = sqrt(wLp[0] * wLp[0] + wLp[1] * wLp[1] + wLp[2] * wLp[2])
                     if (p > wPeak) wPeak = p
